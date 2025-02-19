@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 import math
 from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
+import streamlit as st
 
 class DatosLitografia:
     """Clase para almacenar los datos necesarios para los cálculos de litografía"""
@@ -36,36 +37,32 @@ class CalculadoraLitografia:
         self.ancho_maximo = 335.0  # mm
         self.calculadora_desperdicios = CalculadoraDesperdicio(
             ancho_maquina=self.ancho_maximo,
-            gap_mm=2.6  # Usamos el gap fijo de 2.6mm para cálculos de avance
+            gap_mm=2.6  # Este gap solo se usa para etiquetas
         )
 
-    def calcular_ancho_total(self, datos: DatosLitografia, num_tintas: int = 0) -> float:
+    def calcular_ancho_total(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> float:
         """
-        Calcula el ancho total basado en la fórmula:
-        =REDONDEAR.MAS(SI(B2=0;((E3*D3-C3)+10);((E3*D3-C3)+20));-1)
-        
-        donde:
-        - B2 es el número de tintas
-        - D3 es ancho + gap
-        - C3 es el GAP (3mm fijo)
-        - E3 es el número de pistas
+        Calcula el ancho total basado en el tipo de impresión
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
             num_tintas: Número de tintas a utilizar
+            es_manga: True si es manga, False si es etiqueta
             
         Returns:
-            float: Ancho total redondeado hacia arriba a la decena más cercana
+            float: Ancho total redondeado
         """
-        ancho_con_gap = datos.ancho + datos.gap
-        base = (datos.pistas * ancho_con_gap - datos.gap)
-        
-        # Agregar margen según número de tintas
-        margen = 20 if num_tintas > 0 else 10
-        ancho_total = base + margen
-        
-        # Redondear hacia arriba a la decena más cercana
-        ancho_redondeado = math.ceil(ancho_total / 10) * 10
+        if es_manga:
+            # Para mangas: (ancho * 2 + 20) redondeado al múltiplo de 5 superior
+            ancho_manga = (datos.ancho * 2) + 20
+            ancho_redondeado = math.ceil(ancho_manga / 5) * 5
+        else:
+            # Para etiquetas: mantener la lógica actual
+            ancho_con_gap = datos.ancho + datos.gap
+            base = (datos.pistas * ancho_con_gap - datos.gap)
+            margen = 20 if num_tintas > 0 else 10
+            ancho_total = base + margen
+            ancho_redondeado = math.ceil(ancho_total / 10) * 10
         
         if ancho_redondeado > self.ancho_maximo:
             raise ValueError(f"El ancho calculado ({ancho_redondeado}mm) excede el máximo permitido ({self.ancho_maximo}mm)")
@@ -84,17 +81,33 @@ class CalculadoraLitografia:
         """
         return self.calculadora_desperdicios.generar_reporte(datos.avance)
 
-    def obtener_mejor_opcion_desperdicio(self, datos: DatosLitografia) -> Optional[OpcionDesperdicio]:
+    def obtener_mejor_opcion_desperdicio(self, datos: DatosLitografia, es_manga: bool = False) -> Optional[OpcionDesperdicio]:
         """
-        Obtiene la mejor opción de desperdicio para el avance dado
+        Obtiene la mejor opción de desperdicio según el tipo de impresión
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
+            es_manga: True si es manga, False si es etiqueta
             
         Returns:
             Optional[OpcionDesperdicio]: La mejor opción de desperdicio si existe
         """
-        return self.calculadora_desperdicios.obtener_mejor_opcion(datos.avance)
+        opciones = self.calculadora_desperdicios.calcular_todas_opciones(datos.avance)
+        if not opciones:
+            raise ValueError("No se encontraron opciones válidas para el avance especificado")
+        
+        if es_manga:
+            # Para mangas: buscar el desperdicio más cercano a 0
+            # En caso de empate, seleccionar el de menor dientes
+            mejor_opcion = min(
+                opciones,
+                key=lambda x: (abs(x.desperdicio), x.dientes)  # Primero por desperdicio absoluto, luego por dientes
+            )
+        else:
+            # Para etiquetas: mantener la lógica actual (primera opción)
+            mejor_opcion = opciones[0]
+        
+        return mejor_opcion
 
     def validar_medidas(self, datos: DatosLitografia) -> bool:
         """
@@ -118,14 +131,13 @@ class CalculadoraLitografia:
         
         return True
 
-    def calcular_unidad_montaje_sugerida(self, datos: DatosLitografia) -> float:
+    def calcular_unidad_montaje_sugerida(self, datos: DatosLitografia, es_manga: bool = False) -> float:
         """
-        Calcula la unidad de montaje sugerida basada en el mínimo desperdicio.
-        La unidad de montaje es el número de dientes que corresponde a la opción
-        con menor desperdicio.
+        Calcula la unidad de montaje sugerida basada en el criterio según tipo
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
+            es_manga: True si es manga, False si es etiqueta
             
         Returns:
             float: Número de dientes sugerido para el montaje
@@ -133,42 +145,38 @@ class CalculadoraLitografia:
         Raises:
             ValueError: Si no se encuentra una opción válida
         """
-        opciones = self.calculadora_desperdicios.calcular_todas_opciones(datos.avance)
-        if not opciones:
-            raise ValueError("No se encontraron opciones válidas para el avance especificado")
-            
-        # La primera opción es la de menor desperdicio ya que vienen ordenadas
-        mejor_opcion = opciones[0]
+        mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
         return mejor_opcion.dientes
 
-    def calcular_precio_plancha(self, datos: DatosLitografia, num_tintas: int = 0) -> Dict:
+    def calcular_precio_plancha(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """
         Calcula el precio de la plancha según la fórmula:
         precio = valor_mm * (ancho_total + gap_fijo) * (mm_unidad_montaje + avance_fijo)
         
         Donde:
-        - valor_mm = 1.5 (valor por mm)
-        - gap_fijo = 40 mm
+        - valor_mm = 120 para mangas, 100 para etiquetas
+        - gap_fijo = 50 mm para mangas, 40 mm para etiquetas
         - avance_fijo = 30 mm
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
             num_tintas: Número de tintas a utilizar
+            es_manga: True si es manga, False si es etiqueta
             
         Returns:
             Dict: Diccionario con el precio y los valores usados en el cálculo
         """
         # Constantes
-        VALOR_MM = 1.5  # U3: Valor por mm
-        GAP_FIJO = 40  # R3: GAP fijo en mm
+        VALOR_MM = 120 if es_manga else 100  # Valor por mm según tipo
+        GAP_FIJO = 50 if es_manga else 40  # GAP fijo en mm según tipo
         AVANCE_FIJO = 30  # R4: Avance fijo en mm
         
         try:
             # Calcular ancho total (F3)
-            ancho_total = self.calcular_ancho_total(datos, num_tintas)
+            ancho_total = self.calcular_ancho_total(datos, num_tintas, es_manga)
             
             # Obtener mm de la unidad de montaje (Q4)
-            mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos)
+            mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
             if not mejor_opcion:
                 raise ValueError("No se pudo determinar la unidad de montaje")
             mm_unidad_montaje = mejor_opcion.medida_mm
@@ -179,8 +187,8 @@ class CalculadoraLitografia:
             # Calcular S4 = Q4 + R4 (mm_unidad_montaje + avance_fijo)
             s4 = mm_unidad_montaje + AVANCE_FIJO
             
-            # Calcular precio final
-            precio = VALOR_MM * s3 * s4
+            # Calcular precio final, multiplicando directamente por número de tintas
+            precio = VALOR_MM * s3 * s4 * num_tintas
             
             return {
                 'precio': precio,
@@ -191,7 +199,9 @@ class CalculadoraLitografia:
                     'ancho_total': ancho_total,
                     'mm_unidad_montaje': mm_unidad_montaje,
                     's3': s3,
-                    's4': s4
+                    's4': s4,
+                    'num_tintas': num_tintas,
+                    'es_manga': es_manga
                 }
             }
         except Exception as e:
@@ -381,13 +391,18 @@ class CalculadoraLitografia:
                 'detalles': None
             }
             
-    def generar_reporte_completo(self, datos: DatosLitografia, num_tintas: int = 0) -> Dict:
+    def generar_reporte_completo(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """Genera un reporte completo con todos los cálculos relevantes"""
         try:
-            ancho_total = self.calcular_ancho_total(datos, num_tintas)
+            # Ajustar gaps si es manga
+            if es_manga:
+                datos.gap = 0
+                datos.gap_avance = 0
+
+            ancho_total = self.calcular_ancho_total(datos, num_tintas, es_manga)
             reporte_desperdicio = self.calcular_desperdicio(datos)
-            unidad_montaje = self.calcular_unidad_montaje_sugerida(datos)
-            calculo_plancha = self.calcular_precio_plancha(datos, num_tintas)
+            unidad_montaje = self.calcular_unidad_montaje_sugerida(datos, es_manga)
+            calculo_plancha = self.calcular_precio_plancha(datos, num_tintas, es_manga)
             
             # Calcular área de etiqueta y valor de tinta
             area_etiqueta = None
@@ -445,7 +460,8 @@ class CalculadoraLitografia:
                     'pistas': datos.pistas,
                     'incluye_planchas': datos.incluye_planchas,
                     'incluye_troquel': datos.incluye_troquel,
-                    'num_tintas': num_tintas
+                    'num_tintas': num_tintas,
+                    'es_manga': es_manga
                 }
             }
         except Exception as e:
@@ -468,6 +484,7 @@ class CalculadoraLitografia:
                     'pistas': datos.pistas,
                     'incluye_planchas': datos.incluye_planchas,
                     'incluye_troquel': datos.incluye_troquel,
-                    'num_tintas': num_tintas
+                    'num_tintas': num_tintas,
+                    'es_manga': es_manga
                 }
             }
