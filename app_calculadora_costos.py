@@ -183,24 +183,16 @@ def crear_referencia(db: DBManager, cliente_id: int, tipos_impresion: List[TipoI
             finally:
                 st.write("=== FIN PROCESO CREAR REFERENCIA ===")
 
-def calcular_valor_plancha_separado(valor_plancha: float) -> float:
+def calcular_valor_plancha_separado(valor_plancha_dict):
     """
-    Calcula el valor de la plancha por separado según la fórmula de Excel:
-    =REDONDEAR.MAS(M3/0.75, -3)
-    
-    Args:
-        valor_plancha: Valor original de la plancha
-    
-    Returns:
-        float: Valor de la plancha redondeado
+    Calcula el valor de la plancha cuando se cobra por separado.
+    Extrae el precio_sin_constante del diccionario de detalles.
     """
-    # Dividir por 0.75
-    valor_ajustado = valor_plancha / 0.75
-    
-    # Redondear hacia arriba al múltiplo de 1000 más cercano
-    valor_redondeado = math.ceil(valor_ajustado / 1000) * 1000
-    
-    return valor_redondeado
+    if isinstance(valor_plancha_dict, dict) and 'detalles' in valor_plancha_dict:
+        detalles = valor_plancha_dict['detalles']
+        if 'precio_sin_constante' in detalles:
+            return detalles['precio_sin_constante']
+    return 0
 
 def generar_informe_tecnico(
     datos_entrada, 
@@ -265,20 +257,30 @@ def generar_informe_tecnico(
 
 def generar_tabla_resultados(resultados: List[Dict]) -> pd.DataFrame:
     """
-    Genera una tabla formateada con los resultados
+    Genera una tabla formateada con los resultados de la cotización
+    
+    Args:
+        resultados: Lista de diccionarios con los resultados por escala
+        
+    Returns:
+        DataFrame: Tabla formateada para mostrar en la interfaz
     """
+    # Asegurar que desperdicio_total sea la suma correcta
+    for r in resultados:
+        r['desperdicio_total'] = r['desperdicio_tintas'] + r['desperdicio_porcentaje']
+    
     df = pd.DataFrame([
         {
             'Escala': f"{r['escala']:,}",
-            'Valor Unidad': f"${r['valor_unidad']:.2f}",
-            'Valor MM': f"${r['valor_mm']:.3f}",
+            'Valor Unidad': f"${float(r['valor_unidad']):.2f}",
+            'Valor MM': f"${float(r['valor_mm']):.3f}",
             'Metros': f"{r['metros']:.2f}",
             'Tiempo (h)': f"{r['tiempo_horas']:.2f}",
             'Montaje': f"${r['montaje']:,.2f}",
             'MO y Maq': f"${r['mo_y_maq']:,.2f}",
             'Tintas': f"${r['tintas']:,.2f}",
             'Papel/lam': f"${r['papel_lam']:,.2f}",
-            'Desperdicio': f"${r['desperdicio']:,.2f}"
+            'Desperdicio': f"${r['desperdicio_tintas']:,.2f} + ${r['desperdicio_porcentaje']:,.2f} = ${r['desperdicio_total']:,.2f}"
         }
         for r in resultados
     ])
@@ -331,6 +333,37 @@ def generar_identificador(
     identificador = f"{tipo} {material} {medidas} {tintas} {acabado} {rollos_str} {cliente} {ref} {consecutivo}"
     
     return identificador
+
+# Obtener valores de material y acabado de forma más segura
+def extraer_valor_precio(texto: str) -> float:
+    """Extrae el valor numérico de un string con formato 'nombre ($valor)'"""
+    try:
+        # Encuentra el valor entre paréntesis
+        inicio = texto.find('($') + 2
+        fin = texto.find(')')
+        if inicio > 1 and fin > inicio:
+            return float(texto[inicio:fin].strip())
+        return 0.0
+    except:
+        return 0.0
+
+def calcular_ancho_total(num_tintas: int, pistas: int, ancho: float, gap_constante: float = 3.0) -> float:
+    """
+    Calcula el ancho total según la fórmula de Excel:
+    =REDONDEAR.MAS(SI(tintas=0;((pistas*(ancho+gap)-gap)+10);((pistas*(ancho+gap)-gap)+20));-1)
+    """
+    # Primero calculamos ancho + gap
+    ancho_con_gap = ancho + gap_constante
+    
+    if num_tintas == 0:
+        # ((pistas * (ancho + gap) - gap) + 10)
+        ancho_total = ((pistas * ancho_con_gap - gap_constante) + 10)
+    else:
+        # ((pistas * (ancho + gap) - gap) + 20)
+        ancho_total = ((pistas * ancho_con_gap - gap_constante) + 20)
+    
+    # Redondear hacia arriba a la decena más cercana
+    return math.ceil(ancho_total / 10) * 10
 
 def main():
     st.title("Cotizador Flexoimpresos")
@@ -471,6 +504,9 @@ def main():
     # Botón para calcular
     if st.button("Calcular", type="primary"):
         try:
+            # Inicializar resultados
+            resultados = None
+            
             # Determinar si es manga
             es_manga = "MANGA" in tipo_impresion_seleccionado[1].upper()
             
@@ -480,8 +516,8 @@ def main():
                 avance=avance,
                 pistas=pistas,
                 incluye_planchas=incluye_planchas == "Sí",
-                incluye_troquel=True,
-                troquel_existe=troquel_existe == "Sí",
+                incluye_troquel=True,  # Siempre incluir el cálculo del troquel
+                troquel_existe=troquel_existe == "Sí",  # Indicar si el troquel ya existe
                 gap=0 if es_manga else 3.0,  # Gap 0 para mangas
                 gap_avance=0 if es_manga else 2.6  # Gap avance 0 para mangas
             )
@@ -514,57 +550,157 @@ def main():
             
             # Obtener valores
             valor_etiqueta = reporte_lito.get('valor_tinta', 0)
-            valor_plancha = reporte_lito.get('precio_plancha', 0)
+            
+            # Obtener valor de plancha del reporte
+            valor_plancha_dict = reporte_lito.get('precio_plancha', {'precio': 0})
+            valor_plancha = valor_plancha_dict['precio'] if isinstance(valor_plancha_dict, dict) else valor_plancha_dict
+            
+            # Obtener valor del troquel del reporte
+            valor_troquel_dict = reporte_lito.get('valor_troquel', {'valor': 0})
+            valor_troquel_base = valor_troquel_dict['valor'] if isinstance(valor_troquel_dict, dict) else valor_troquel_dict
+            valor_troquel = valor_troquel_base
 
             # Obtener valores de material y acabado
-            valor_material = float(material_seleccionado[1].split('$')[1].split()[0].replace(')', ''))
-            valor_acabado = 0 if es_manga else float(acabado_seleccionado[1].split('$')[1].split()[0].replace(')', ''))
+            valor_material = extraer_valor_precio(material_seleccionado[1])
+            valor_acabado = 0 if es_manga else extraer_valor_precio(acabado_seleccionado[1])
 
-            # Calcular costos usando el método correcto
+            # Si se selecciona "Planchas por separado", calculamos el valor adicional
+            valor_plancha_separado = None
+            if incluye_planchas == "Sí":
+                # Calcular el valor de la plancha por separado
+                valor_plancha_separado = calcular_valor_plancha_separado(valor_plancha_dict)
+                # Pasar 0 como valor de plancha al cálculo (ya que se cobrará por separado)
+                valor_plancha_para_calculo = 0
+            else:
+                # Incluir el valor de la plancha en el cálculo
+                valor_plancha_para_calculo = valor_plancha
+
+            # Calcular costos
             calculadora = CalculadoraCostosEscala()
             resultados = calculadora.calcular_costos_por_escala(
                 datos=datos,
                 num_tintas=num_tintas,
                 valor_etiqueta=valor_etiqueta,
-                valor_plancha=0 if incluye_planchas == "Sí" else valor_plancha,
-                valor_troquel=reporte_lito.get('valor_troquel', 0),
+                valor_plancha=valor_plancha_para_calculo,
+                valor_troquel=valor_troquel,
                 valor_material=valor_material,
                 valor_acabado=valor_acabado,
                 es_manga=es_manga
             )
             
-            # Si se selecciona "Planchas por separado", calculamos el valor adicional
-            valor_plancha_separado = None
-            if incluye_planchas == "Sí" and valor_plancha > 0:
-                valor_plancha_separado = calcular_valor_plancha_separado(valor_plancha)
-            
-            # Mostrar tabla de resultados
-            st.subheader("Tabla de Resultados")
-            df = generar_tabla_resultados(resultados)
-            st.dataframe(
-                df,
-                column_config={
-                    "Escala": st.column_config.TextColumn("Escala", help="Cantidad de unidades"),
-                    "Valor Unidad": st.column_config.TextColumn("$/Unidad", help="Precio por unidad"),
-                    "Valor MM": st.column_config.TextColumn("$MM", help="Valor en millones"),
-                    "Metros": st.column_config.TextColumn("Metros", help="Metros lineales"),
-                    "Tiempo (h)": st.column_config.TextColumn("Tiempo", help="Tiempo en horas"),
-                    "Montaje": st.column_config.TextColumn("Montaje", help="Costo de montaje"),
-                    "MO y Maq": st.column_config.TextColumn("MO y Maq", help="Mano de obra y maquinaria"),
-                    "Tintas": st.column_config.TextColumn("Tintas", help="Costo de tintas"),
-                    "Papel/lam": st.column_config.TextColumn("Papel/lam", help="Costo de papel y laminado"),
-                    "Desperdicio": st.column_config.TextColumn("Desperdicio", help="Costo de desperdicio")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+            # Solo mostrar resultados si se calcularon correctamente
+            if resultados:
+                # Mostrar tabla de resultados
+                st.subheader("Tabla de Resultados")
+                df = generar_tabla_resultados(resultados)
+                st.dataframe(df, hide_index=True, use_container_width=True)
+
+                # Análisis detallado de desperdicio
+                r = resultados[0]
+                
+                st.subheader("Análisis Detallado de Desperdicio")
+                
+                # Campos para ingresar valores de referencia y métricas
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    desperdicio_tintas_esperado = st.number_input(
+                        "Desperdicio Tintas Esperado ($)", 
+                        value=0.0, 
+                        format="%.2f"
+                    )
+                    st.metric("Desperdicio Tintas Calculado", f"${r['desperdicio_tintas']:.2f}")
+                
+                with col2:
+                    desperdicio_porcentaje_esperado = st.number_input(
+                        "Desperdicio Porcentaje Esperado ($)", 
+                        value=0.0, 
+                        format="%.2f"
+                    )
+                    st.metric("Desperdicio Porcentaje Calculado", f"${r['desperdicio_porcentaje']:.2f}")
+                
+                with col3:
+                    desperdicio_total_esperado = st.number_input(
+                        "Desperdicio Total Esperado ($)", 
+                        value=0.0, 
+                        format="%.2f"
+                    )
+                    st.metric("Desperdicio Total Calculado", f"${r['desperdicio']:.2f}")
+
+                # 2. Luego mostrar la fórmula y el desglose
+                st.subheader("Fórmula de Desperdicio de Tintas")
+                
+                # Calcular valores
+                mm_totales = 30000 * r['num_tintas']
+                ancho_total = calcular_ancho_total(r['num_tintas'], datos.pistas, r['ancho'])
+                
+                # Mostrar el cálculo paso a paso
+                st.markdown("### Cálculo Paso a Paso")
+                ancho_con_gap = r['ancho'] + 3  # gap constante de 3
+
+                if r['num_tintas'] == 0:
+                    formula = f"((pistas * (ancho + gap) - gap) + 10)"
+                    calculo = f"(({datos.pistas} * ({r['ancho']} + 3) - 3) + 10)"
+                else:
+                    formula = f"((pistas * (ancho + gap) - gap) + 20)"
+                    calculo = f"(({datos.pistas} * ({r['ancho']} + 3) - 3) + 20)"
+                
+                st.markdown(f"""
+                1. MM Totales = 30,000 × {r['num_tintas']} = {mm_totales}
+                2. Ancho Total = {ancho_total} mm (redondeado hacia arriba)
+                3. Desperdicio = (MM Totales × Valor Material × (Ancho Total + 40)) ÷ 1,000,000
+                   = ({mm_totales} × {valor_material:.6f} × ({ancho_total} + 40)) ÷ 1,000,000
+                   = ${r['desperdicio_tintas']:.2f}
+                """)
+
+                # Actualizar la tabla de desglose
+                calculo_data = {
+                    "Componente": [
+                        "MM por Color", 
+                        "Número de Tintas", 
+                        "MM Totales",
+                        "Ancho Total",
+                        "Gap Planchas",
+                        "Ancho Total + Gap",
+                        "Valor Material", 
+                        "Fórmula",
+                        "Desperdicio Tintas"
+                    ],
+                    "Valor": [
+                        f"{30000}", 
+                        f"{r['num_tintas']}", 
+                        f"{mm_totales}",
+                        f"{ancho_total} mm",
+                        f"{40} mm",
+                        f"{ancho_total + 40} mm",
+                        f"${valor_material:.6f}/mm²", 
+                        f"({mm_totales} × {valor_material:.6f} × ({ancho_total} + 40)) ÷ 1,000,000",
+                        f"${r['desperdicio_tintas']:.2f}"
+                    ]
+                }
+                
+                st.dataframe(pd.DataFrame(calculo_data), hide_index=True, use_container_width=True)
+                
+                # Explicación de la fórmula
+                st.markdown("""
+                **Fórmula de Ancho Total:**
+                ```
+                Si tintas = 0:
+                    Ancho Total = ((pistas * (ancho + gap - gap)) + 10)
+                Si no:
+                    Ancho Total = ((pistas * ancho + gap - gap) + 20)
+                ```
+                donde:
+                - gap constante = 3 mm
+                - El resultado se redondea hacia arriba
+                """)
 
             # Separador visual
             st.divider()
 
             # Informe técnico
             st.subheader("Informe Técnico")
-            # Generar un solo identificador
+            # Generar identificador
             identificador = generar_identificador(
                 tipo_impresion=tipo_impresion_seleccionado[1],
                 material_code=db.get_material_code(material_seleccionado[0]),
@@ -617,12 +753,10 @@ def main():
                         mime="application/pdf"
                     )
             
-        except ValueError as e:
-            st.error(f"Error: {str(e)}")
-            st.info("Por favor revise los valores ingresados e intente nuevamente.")
         except Exception as e:
-            st.error(f"Error inesperado: {str(e)}")
-            st.info("Por favor contacte al soporte técnico.")
+            st.error(f"Error en el cálculo: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
 
 if __name__ == "__main__":
     main()

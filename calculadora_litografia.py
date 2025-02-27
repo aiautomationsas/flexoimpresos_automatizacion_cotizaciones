@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 import math
 from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
-import streamlit as st
+from calculadora_costos_escala import CalculadoraCostosEscala
 
 class DatosLitografia:
     """Clase para almacenar los datos necesarios para los cálculos de litografía"""
@@ -40,34 +40,34 @@ class CalculadoraLitografia:
             gap_mm=2.6  # Este gap solo se usa para etiquetas
         )
 
-    def calcular_ancho_total(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> float:
+    def calcular_ancho_total(self, num_tintas: int, pistas: int, ancho_usuario: float) -> float:
         """
-        Calcula el ancho total basado en el tipo de impresión
+        Calcula el ancho total según la fórmula:
+        F3 = REDONDEAR.MAS(SI(B2=0;((E3*D3-C3)+10);((E3*D3-C3)+20));-1)
         
-        Args:
-            datos: Objeto DatosLitografia con los datos necesarios
-            num_tintas: Número de tintas a utilizar
-            es_manga: True si es manga, False si es etiqueta
-            
-        Returns:
-            float: Ancho total redondeado
+        Donde:
+        - B2 = número de tintas
+        - E3 = número de pistas
+        - D3 = B3 + C3 (ancho_usuario + 3)
+        - C3 = 3 (constante para gap)
         """
-        if es_manga:
-            # Para mangas: (ancho * 2 + 20) redondeado al múltiplo de 5 superior
-            ancho_manga = (datos.ancho * 2) + 20
-            ancho_redondeado = math.ceil(ancho_manga / 5) * 5
-        else:
-            # Para etiquetas: mantener la lógica actual
-            ancho_con_gap = datos.ancho + datos.gap
-            base = (datos.pistas * ancho_con_gap - datos.gap)
-            margen = 20 if num_tintas > 0 else 10
-            ancho_total = base + margen
-            ancho_redondeado = math.ceil(ancho_total / 10) * 10
+        # Constantes
+        C3 = 3  # Gap constante
         
-        if ancho_redondeado > self.ancho_maximo:
-            raise ValueError(f"El ancho calculado ({ancho_redondeado}mm) excede el máximo permitido ({self.ancho_maximo}mm)")
-            
-        return ancho_redondeado
+        # 1. Calcular D3 = ancho_usuario + C3
+        D3 = ancho_usuario + C3
+        
+        # 2. Calcular base = E3 * D3 - C3
+        base = (pistas * D3) - C3
+        
+        # 3. Agregar incremento según tintas
+        incremento = 10 if num_tintas == 0 else 20
+        ancho_total = base + incremento
+        
+        # 4. Redondear hacia arriba al siguiente múltiplo de 10
+        ancho_total = math.ceil(ancho_total / 10) * 10
+        
+        return ancho_total
 
     def calcular_desperdicio(self, datos: DatosLitografia) -> Dict:
         """
@@ -151,29 +151,22 @@ class CalculadoraLitografia:
     def calcular_precio_plancha(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """
         Calcula el precio de la plancha según la fórmula:
-        precio = valor_mm * (ancho_total + gap_fijo) * (mm_unidad_montaje + avance_fijo)
+        precio = (valor_mm * (ancho_total + gap_fijo) * (mm_unidad_montaje + avance_fijo) * num_tintas) / constante
         
         Donde:
-        - valor_mm = 120 para mangas, 100 para etiquetas
+        - valor_mm = $1.5/mm
         - gap_fijo = 50 mm para mangas, 40 mm para etiquetas
         - avance_fijo = 30 mm
-        
-        Args:
-            datos: Objeto DatosLitografia con los datos necesarios
-            num_tintas: Número de tintas a utilizar
-            es_manga: True si es manga, False si es etiqueta
-            
-        Returns:
-            Dict: Diccionario con el precio y los valores usados en el cálculo
+        - constante = número muy grande si planchas por separado (resultando en precio = 0), 1 si no
         """
         # Constantes
-        VALOR_MM = 120 if es_manga else 100  # Valor por mm según tipo
+        VALOR_MM = 1.5  # Nuevo valor: $1.5/mm
         GAP_FIJO = 50 if es_manga else 40  # GAP fijo en mm según tipo
         AVANCE_FIJO = 30  # R4: Avance fijo en mm
         
         try:
             # Calcular ancho total (F3)
-            ancho_total = self.calcular_ancho_total(datos, num_tintas, es_manga)
+            ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
             
             # Obtener mm de la unidad de montaje (Q4)
             mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
@@ -187,8 +180,31 @@ class CalculadoraLitografia:
             # Calcular S4 = Q4 + R4 (mm_unidad_montaje + avance_fijo)
             s4 = mm_unidad_montaje + AVANCE_FIJO
             
-            # Calcular precio final, multiplicando directamente por número de tintas
-            precio = VALOR_MM * s3 * s4 * num_tintas
+            # Calcular precio sin constante (precio real)
+            precio_sin_constante = VALOR_MM * s3 * s4 * num_tintas
+            
+            # Determinar constante según si las planchas son por separado
+            # IMPORTANTE: La lógica está invertida - si incluye_planchas es True, significa "Sí" a "¿Planchas por separado?"
+            # En ese caso, el precio debe ser casi 0 (dividido por una constante grande)
+            constante = 1000000 if datos.incluye_planchas else 1
+            
+            # Calcular precio final
+            precio = precio_sin_constante / constante
+            
+            # Imprimir información detallada en la consola
+            print("\n=== CÁLCULO DE PLANCHA ===")
+            print(f"VALOR_MM: ${VALOR_MM}/mm")
+            print(f"Ancho total: {ancho_total} mm")
+            print(f"Gap fijo: {GAP_FIJO} mm")
+            print(f"Unidad montaje: {mm_unidad_montaje} mm")
+            print(f"Avance fijo: {AVANCE_FIJO} mm")
+            print(f"S3 (Gap + Ancho): {s3} mm")
+            print(f"S4 (Unidad + Avance): {s4} mm")
+            print(f"Número de tintas: {num_tintas}")
+            print(f"Planchas por separado: {datos.incluye_planchas}")
+            print(f"Constante: {constante}")
+            print(f"Precio sin constante: ${precio_sin_constante:.2f}")
+            print(f"Precio final: ${precio:.2f}")
             
             return {
                 'precio': precio,
@@ -201,10 +217,14 @@ class CalculadoraLitografia:
                     's3': s3,
                     's4': s4,
                     'num_tintas': num_tintas,
-                    'es_manga': es_manga
+                    'es_manga': es_manga,
+                    'incluye_planchas': datos.incluye_planchas,
+                    'constante': constante,
+                    'precio_sin_constante': precio_sin_constante
                 }
             }
         except Exception as e:
+            print(f"Error en cálculo de plancha: {str(e)}")
             return {
                 'error': str(e),
                 'precio': None,
@@ -212,13 +232,14 @@ class CalculadoraLitografia:
             }
 
     def calcular_valor_troquel(self, datos: DatosLitografia, repeticiones: int, 
-                             valor_mm: float = 100, troquel_existe: bool = False) -> Dict:
+                            valor_mm: float = 100, troquel_existe: bool = False) -> Dict:
         """
         Calcula el valor del troquel según la fórmula:
         ((25*5000) + max(700000, ((ancho+avance)*2*pistas*repeticiones)*valor_mm)) / factor
         
         donde:
-        - factor = 2 si el troquel existe, 1 si hay que hacer uno nuevo
+        - factor = 2 si el troquel YA EXISTE
+        - factor = 1 si hay que FABRICAR el troquel
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
@@ -227,12 +248,12 @@ class CalculadoraLitografia:
             troquel_existe: True si ya tienen el troquel, False si hay que hacer uno nuevo
             
         Returns:
-            Dict: Diccionario con el valor del troquel y los valores usados en el cálculo
+            Dict con el valor calculado y los valores intermedios
         """
         try:
             # Constantes
-            FACTOR_EXISTENTE = 2  # Si ya tienen el troquel
-            FACTOR_NUEVO = 1      # Si hay que hacer un troquel nuevo
+            FACTOR_EXISTENTE = 2  # Si ya tienen el troquel (divide por 2)
+            FACTOR_NUEVO = 1      # Si hay que hacer un troquel nuevo (divide por 1, osea no divide)
             VALOR_MINIMO = 700000
             FACTOR_BASE = 25 * 5000  # 25 * 5000 = 125000
             
@@ -308,7 +329,7 @@ class CalculadoraLitografia:
             q3 = (d3 * e3) + c3
             
             # Cálculos para S3
-            f3 = self.calcular_ancho_total(datos, num_tintas)
+            f3 = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
             r3 = GAP_R3  # Ahora es 40mm
             s3 = r3 + f3
             
@@ -391,100 +412,351 @@ class CalculadoraLitografia:
                 'detalles': None
             }
             
-    def generar_reporte_completo(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
-        """Genera un reporte completo con todos los cálculos relevantes"""
+    def generar_reporte_completo(self, datos: DatosLitografia, num_tintas: int, es_manga: bool = False) -> Dict:
+        """Genera un reporte completo con todos los cálculos"""
         try:
-            # Ajustar gaps si es manga
-            if es_manga:
-                datos.gap = 0
-                datos.gap_avance = 0
-
-            ancho_total = self.calcular_ancho_total(datos, num_tintas, es_manga)
-            reporte_desperdicio = self.calcular_desperdicio(datos)
-            unidad_montaje = self.calcular_unidad_montaje_sugerida(datos, es_manga)
-            calculo_plancha = self.calcular_precio_plancha(datos, num_tintas, es_manga)
+            # Calcular ancho total primero (una sola vez)
+            ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
             
-            # Calcular área de etiqueta y valor de tinta
-            area_etiqueta = None
-            valor_tinta = None
-            detalles_area = None
-            detalles_tinta = None
+            # Inicializar el resultado
+            resultado = {
+                'ancho_total': ancho_total,
+                'desperdicio': self.calcular_desperdicio(datos)
+            }
             
-            if reporte_desperdicio['mejor_opcion']:
-                mejor_opcion = reporte_desperdicio['mejor_opcion']
-                calculo_area = self.calcular_area_etiqueta(
-                    datos=datos,
-                    num_tintas=num_tintas,
-                    medida_montaje=mejor_opcion['medida_mm'],
-                    repeticiones=mejor_opcion['repeticiones']
-                )
-                area_etiqueta = calculo_area['area']
-                detalles_area = calculo_area['detalles']
-                
-                if area_etiqueta is not None:
-                    calculo_tinta = self.calcular_valor_tinta_etiqueta(
-                        area_etiqueta=area_etiqueta,
-                        num_tintas=num_tintas
-                    )
-                    valor_tinta = calculo_tinta['valor']
-                    detalles_tinta = calculo_tinta['detalles']
+            # Obtener mejor opción primero ya que la necesitamos para varios cálculos
+            mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos)
             
-            # Calcular valor del troquel si es necesario
-            valor_troquel = None
-            detalles_troquel = None
-            if datos.incluye_troquel and reporte_desperdicio['mejor_opcion']:
-                mejor_opcion = reporte_desperdicio['mejor_opcion']
+            # Calcular precio de plancha siempre (independientemente de si se incluye o no)
+            resultado['precio_plancha'] = self.calcular_precio_plancha(datos, num_tintas, es_manga)
+            
+            # Agregar cálculos de troquel si corresponde y tenemos mejor opción
+            if datos.incluye_troquel and mejor_opcion:
                 calculo_troquel = self.calcular_valor_troquel(
                     datos=datos,
-                    repeticiones=mejor_opcion['repeticiones'],
+                    repeticiones=mejor_opcion.repeticiones,  # Usar repeticiones de la mejor opción
                     troquel_existe=datos.troquel_existe
                 )
-                valor_troquel = calculo_troquel['valor']
-                detalles_troquel = calculo_troquel['detalles']
+                resultado['valor_troquel'] = calculo_troquel['valor']
+            
+            # Cálculo de área de etiqueta
+            if mejor_opcion:
+                resultado['area_etiqueta'] = self.calcular_area_etiqueta(
+                    datos, 
+                    num_tintas, 
+                    mejor_opcion.medida_mm, 
+                    mejor_opcion.repeticiones
+                )['area']
+                resultado['unidad_montaje_sugerida'] = mejor_opcion.dientes
+                
+            # Calcular valor de tinta
+            if num_tintas > 0:
+                resultado['valor_tinta'] = self.calcular_valor_tinta_etiqueta(
+                    resultado['area_etiqueta'],
+                    num_tintas
+                )['valor']
+            
+            return resultado
+        except Exception as e:
+            return {'error': str(e)}
+
+    def generar_debug_info(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
+        """
+        Genera información detallada de depuración para comparar con Excel
+        
+        Args:
+            datos: Objeto DatosLitografia con los datos de entrada
+            num_tintas: Número de tintas
+            es_manga: True si es manga, False si es etiqueta
+            
+        Returns:
+            Dict: Diccionario con todos los valores intermedios y finales para depuración
+        """
+        debug_info = {
+            "entradas": {
+                "ancho": datos.ancho,
+                "avance": datos.avance,
+                "pistas": datos.pistas,
+                "num_tintas": num_tintas,
+                "es_manga": es_manga,
+                "gap": datos.gap,
+                "gap_avance": datos.gap_avance,
+                "incluye_planchas": datos.incluye_planchas,
+                "incluye_troquel": datos.incluye_troquel,
+                "troquel_existe": datos.troquel_existe
+            },
+            "calculos_intermedios": {},
+            "resultados": {}
+        }
+        
+        try:
+            # 1. Ancho total
+            ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
+            debug_info["calculos_intermedios"]["ancho_total"] = ancho_total
+            
+            # 2. Desperdicio
+            reporte_desperdicio = self.calcular_desperdicio(datos)
+            debug_info["calculos_intermedios"]["reporte_desperdicio"] = reporte_desperdicio
+            
+            # Extraer datos de la mejor opción de desperdicio
+            if reporte_desperdicio.get("mejor_opcion"):
+                mejor_opcion = reporte_desperdicio["mejor_opcion"]
+                debug_info["calculos_intermedios"]["mejor_opcion"] = {
+                    "dientes": mejor_opcion.get("dientes"),
+                    "repeticiones": mejor_opcion.get("repeticiones"),
+                    "medida_mm": mejor_opcion.get("medida_mm"),
+                    "desperdicio": mejor_opcion.get("desperdicio")
+                }
+            
+            # 3. Precio de plancha (con detalles extendidos)
+            calculo_plancha = self.calcular_precio_plancha(datos, num_tintas, es_manga)
+            debug_info["calculos_intermedios"]["calculo_plancha"] = calculo_plancha
+            
+            # Agregar detalles adicionales del cálculo de la plancha
+            if calculo_plancha.get("detalles"):
+                detalles = calculo_plancha["detalles"]
+                debug_info["calculos_intermedios"]["plancha_desglose"] = {
+                    "valor_mm": detalles.get("valor_mm"),
+                    "gap_fijo": detalles.get("gap_fijo"),
+                    "avance_fijo": detalles.get("avance_fijo"),
+                    "ancho_total": detalles.get("ancho_total"),
+                    "mm_unidad_montaje": detalles.get("mm_unidad_montaje"),
+                    "s3": detalles.get("s3"),
+                    "s4": detalles.get("s4"),
+                    "formula": f"{detalles.get('valor_mm')} * {detalles.get('s3')} * {detalles.get('s4')} * {detalles.get('num_tintas')}",
+                    "resultado": calculo_plancha.get("precio")
+                }
+            
+            # 4. Área de etiqueta (factor crucial)
+            area_etiqueta = None
+            if reporte_desperdicio.get("mejor_opcion"):
+                mejor_opcion = reporte_desperdicio["mejor_opcion"]
+                calculo_area = self.calcular_area_etiqueta(
+                    datos=datos, 
+                    num_tintas=num_tintas,
+                    medida_montaje=mejor_opcion.get("medida_mm"),
+                    repeticiones=mejor_opcion.get("repeticiones")
+                )
+                area_etiqueta = calculo_area.get("area")
+                debug_info["calculos_intermedios"]["area_etiqueta"] = {
+                    "valor": area_etiqueta,
+                    "detalles": calculo_area.get("detalles")
+                }
+            
+            # 5. Valor de tinta por etiqueta
+            if area_etiqueta:
+                calculo_tinta = self.calcular_valor_tinta_etiqueta(
+                    area_etiqueta=area_etiqueta,
+                    num_tintas=num_tintas
+                )
+                debug_info["calculos_intermedios"]["valor_tinta"] = {
+                    "valor": calculo_tinta.get("valor"),
+                    "detalles": calculo_tinta.get("detalles")
+                }
+            
+            # 6. Valor de troquel
+            if datos.incluye_troquel and reporte_desperdicio.get("mejor_opcion"):
+                mejor_opcion = reporte_desperdicio["mejor_opcion"]
+                calculo_troquel = self.calcular_valor_troquel(
+                    datos=datos,
+                    repeticiones=mejor_opcion.get("repeticiones"),
+                    troquel_existe=datos.troquel_existe
+                )
+                debug_info["calculos_intermedios"]["valor_troquel"] = {
+                    "valor": calculo_troquel.get("valor"),
+                    "detalles": calculo_troquel.get("detalles")
+                }
+            
+            # 7. Comparación directa con valores del Excel
+            debug_info["comparacion_excel"] = {
+                "ancho": datos.ancho,
+                "avance": datos.avance,
+                "pistas": datos.pistas,
+                "tintas": num_tintas,
+                "area_etiqueta": area_etiqueta,
+                "valor_plancha": calculo_plancha.get("precio"),
+                "valor_plancha_por_tinta": calculo_plancha.get("precio") / num_tintas if num_tintas > 0 else 0,
+                "desperdicio_mm": mejor_opcion.get("desperdicio") if reporte_desperdicio.get("mejor_opcion") else None,
+                "dientes": mejor_opcion.get("dientes") if reporte_desperdicio.get("mejor_opcion") else None
+            }
+            
+            return debug_info
+            
+        except Exception as e:
+            debug_info["error"] = str(e)
+            return debug_info
+
+    def calcular_desperdicio_por_escala(self, datos: DatosLitografia, num_tintas: int, valor_material_mm2: float, escala: int) -> Dict:
+        """
+        Calcula el desperdicio por escala según la fórmula:
+        (s3 * s7 * o7) + (10% * Papel/lam)
+        
+        Donde:
+        - s3 = mismo valor calculado en planchas (gap_fijo + ancho_total)
+        - s7 = mm por color (30000 * num_tintas)
+        - o7 = precio por mm² del material
+        - Papel/lam = área_etiqueta * valor_material_mm2 * escala
+        """
+        try:
+            # 1. Obtener S3 del cálculo de planchas
+            calculo_plancha = self.calcular_precio_plancha(datos, num_tintas)
+            
+            # Verificar si calculo_plancha tiene la estructura esperada
+            if isinstance(calculo_plancha, dict) and ('error' in calculo_plancha or 'detalles' not in calculo_plancha):
+                return {
+                    'error': 'No se pudo calcular el precio de plancha correctamente',
+                    'valor': 0,
+                    'detalles': {
+                        's3': 0,
+                        's7': 0,
+                        'o7': 0,
+                        'primera_parte': 0,
+                        'papel_lam': 0,
+                        'segunda_parte': 0,
+                        'area_etiqueta': 0,
+                        'escala': escala
+                    }
+                }
+            
+            s3 = calculo_plancha['detalles']['s3']
+            
+            # 2. Calcular S7 (mm por color)
+            s7 = 30000 * num_tintas if num_tintas > 0 else 0
+            
+            # 3. O7 es el precio por mm² del material
+            o7 = valor_material_mm2 / 1000000  # Convertir a millones
+            
+            # 4. Primera parte: (s3 * s7 * o7)
+            primera_parte = s3 * s7 * o7
+            
+            # 5. Calcular papel/lam usando CalculadoraCostosEscala
+            calc_costos = CalculadoraCostosEscala()
+            mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos)
+            calculo_area = self.calcular_area_etiqueta(
+                datos, 
+                num_tintas, 
+                mejor_opcion.medida_mm, 
+                mejor_opcion.repeticiones
+            )
+            area_etiqueta = calculo_area['area']
+            papel_lam = calc_costos.calcular_papel_lam(escala, area_etiqueta, valor_material_mm2, 0)
+            
+            # 6. Segunda parte: 10% del papel/lam
+            segunda_parte = 0.1 * papel_lam
+            
+            # 7. Desperdicio total
+            desperdicio_total = primera_parte + segunda_parte
+            
+            # Debug info consolidado
+            print(f"\n=== CÁLCULO DE DESPERDICIO (Escala {escala}) ===")
+            print(f"1. Fórmula: (s3 * s7 * o7) + (10% * Papel/lam)")
+            print(f"2. Valores:")
+            print(f"   - s3 (Gap + Ancho Total): {s3} mm")
+            print(f"   - s7 (mm por color): {s7} mm")
+            print(f"   - o7 (precio material): ${o7:.8f}/mm²")
+            print(f"   - Primera parte (s3 * s7 * o7): ${primera_parte:.2f}")
+            print(f"   - Papel/lam: ${papel_lam:.2f}")
+            print(f"   - Segunda parte (10% * Papel/lam): ${segunda_parte:.2f}")
+            print(f"3. Desperdicio total: ${desperdicio_total:.2f}")
             
             return {
-                'ancho_total': ancho_total,
-                'unidad_montaje_sugerida': unidad_montaje,
-                'desperdicio': reporte_desperdicio,
-                'precio_plancha': calculo_plancha['precio'],
-                'detalles_plancha': calculo_plancha['detalles'],
-                'valor_troquel': valor_troquel,
-                'detalles_troquel': detalles_troquel,
-                'area_etiqueta': area_etiqueta,
-                'detalles_area': detalles_area,
-                'valor_tinta': valor_tinta,
-                'detalles_tinta': detalles_tinta,
-                'datos_entrada': {
-                    'ancho': datos.ancho,
-                    'avance': datos.avance,
-                    'pistas': datos.pistas,
-                    'incluye_planchas': datos.incluye_planchas,
-                    'incluye_troquel': datos.incluye_troquel,
-                    'num_tintas': num_tintas,
-                    'es_manga': es_manga
+                'valor': desperdicio_total,
+                'detalles': {
+                    's3': s3,
+                    's7': s7,
+                    'o7': o7,
+                    'primera_parte': primera_parte,
+                    'papel_lam': papel_lam,
+                    'segunda_parte': segunda_parte,
+                    'area_etiqueta': area_etiqueta,
+                    'escala': escala
                 }
             }
         except Exception as e:
+            print(f"Error al calcular desperdicio: {str(e)}")
             return {
                 'error': str(e),
-                'ancho_total': None,
-                'unidad_montaje_sugerida': None,
-                'desperdicio': None,
-                'precio_plancha': None,
-                'detalles_plancha': None,
-                'valor_troquel': None,
-                'detalles_troquel': None,
-                'area_etiqueta': None,
-                'detalles_area': None,
-                'valor_tinta': None,
-                'detalles_tinta': None,
-                'datos_entrada': {
-                    'ancho': datos.ancho,
-                    'avance': datos.avance,
-                    'pistas': datos.pistas,
-                    'incluye_planchas': datos.incluye_planchas,
-                    'incluye_troquel': datos.incluye_troquel,
-                    'num_tintas': num_tintas,
-                    'es_manga': es_manga
+                'valor': 0,
+                'detalles': {
+                    's3': 0,
+                    's7': 0,
+                    'o7': 0,
+                    'primera_parte': 0,
+                    'papel_lam': 0,
+                    'segunda_parte': 0,
+                    'area_etiqueta': 0,
+                    'escala': escala
                 }
             }
+
+    def calcular_desperdicio_escala_completo(self, datos: DatosLitografia, num_tintas: int, valor_material_mm2: float = 1800.0) -> Dict:
+        """
+        Calcula el desperdicio para diferentes escalas de producción
+        
+        Args:
+            datos: Objeto DatosLitografia
+            num_tintas: Número de tintas
+            valor_material_mm2: Precio por mm² del material (default: 1800.0)
+        
+        Returns:
+            Dict con los valores de desperdicio para diferentes escalas
+        """
+        escalas = [1000, 2000, 3000, 5000]
+        resultados_desperdicio = {}
+        
+        # Obtener S3 una sola vez para todas las escalas
+        calculo_plancha = self.calcular_precio_plancha(datos, num_tintas)
+        
+        # Verificar si calculo_plancha tiene la estructura esperada
+        if isinstance(calculo_plancha, dict) and ('error' in calculo_plancha or 'detalles' not in calculo_plancha):
+            return {'error': 'No se pudo calcular el precio de plancha correctamente'}
+        
+        s3 = calculo_plancha['detalles']['s3']
+        
+        print("\n=== RESUMEN DE DESPERDICIOS POR ESCALA ===")
+        print(f"S3 (Gap + Ancho Total): {s3} mm")
+        print(f"Número de tintas: {num_tintas}")
+        print(f"Valor material: ${valor_material_mm2}/mm²\n")
+        
+        for escala in escalas:
+            resultado = self.calcular_desperdicio_por_escala(datos, num_tintas, valor_material_mm2, escala)
+            resultados_desperdicio[escala] = resultado
+        
+        return resultados_desperdicio
+
+    def obtener_input_numerico(self, mensaje: str, minimo: float = 0.1) -> float:
+        """Obtiene un input numérico con validación"""
+        while True:
+            try:
+                valor = float(input(mensaje))
+                if valor < minimo:
+                    print(f"El valor debe ser mayor a {minimo}")
+                    continue
+                return valor
+            except ValueError:
+                print("Por favor ingrese un número válido")
+
+    def _print_info_global(self, num_tintas: int, ancho_total: float, valor_material: float):
+        print("\n=== INFORMACIÓN GLOBAL ===")
+        print(f"Número de tintas: {num_tintas}")
+        print(f"Ancho total: {ancho_total:.2f} mm")  # Usar el ancho_total pasado como parámetro
+        print(f"Gap fijo: {self.G4} mm")
+        print(f"Valor material: ${valor_material:f}/mm²")
+
+    def calcular_precio_troquel(self, datos: DatosLitografia) -> Dict:
+        """
+        Calcula el precio del troquel según la fórmula:
+        Precio troquel = (ancho + avance) * 1800
+        """
+        try:
+            precio_troquel = (datos.ancho + datos.avance) * 1800
+            
+            return {
+                'valor': precio_troquel,
+                'detalles': {
+                    'ancho': datos.ancho,
+                    'avance': datos.avance
+                }
+            }
+        except Exception as e:
+            return {'error': str(e)}
