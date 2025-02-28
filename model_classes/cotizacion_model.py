@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from decimal import Decimal
+from uuid import UUID
+from datetime import datetime
 
 @dataclass
 class EtiquetaConfig:
@@ -99,4 +101,89 @@ class ResultadoCotizacion:
     @property
     def mejor_resultado(self) -> Optional[ResultadoEscala]:
         """Devuelve el resultado de la primera escala si existe"""
-        return self.resultados_escalas[0] if self.resultados_escalas else None 
+        return self.resultados_escalas[0] if self.resultados_escalas else None
+
+@dataclass
+class Cotizacion:
+    id: Optional[int] = None
+    nombre_cliente: str = ''
+    descripcion: str = ''
+    tintas: str = ''
+    material_id: Optional[int] = None
+    acabado_id: Optional[int] = None
+    comercial_id: Optional[int] = None
+    updated_at: Optional[datetime] = None
+    planchas_x_separado: bool = False
+    existe_troquel: bool = False
+    avance_mm: float = 0.0
+    descripcion_tecnica: Optional[str] = None
+    numero_pistas: int = 0
+    referencia_cliente_id: Optional[int] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
+    numero_cotizacion: Optional[str] = None
+    colores_tinta: Optional[int] = None
+    unidades_por_rollo: Optional[int] = None
+    estado: str = 'Pendiente'
+    avance: float = 0.0
+    tipo_impresion_id: Optional[int] = None
+    escalas: List['Escala'] = field(default_factory=list)
+
+@dataclass
+class Material:
+    id: Optional[int] = None
+    nombre: str = ''
+    valor: float = 0.0
+    updated_at: Optional[datetime] = None
+    code: str = ''
+
+@dataclass
+class Acabado:
+    id: Optional[int] = None
+    nombre: str = ''
+    valor: float = 0.0
+    updated_at: Optional[datetime] = None
+    code: str = ''
+
+@dataclass
+class Cliente:
+    id: Optional[int] = None
+    nombre: str = ''
+    codigo: Optional[str] = None
+    persona_contacto: Optional[str] = None
+    correo_electronico: Optional[str] = None
+    telefono: Optional[str] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
+
+@dataclass
+class Comercial:
+    id: Optional[UUID] = None
+    nombre: str = ''
+    updated_at: Optional[datetime] = None
+
+@dataclass
+class Escala:
+    id: Optional[int] = None
+    cotizacion_id: Optional[int] = None
+    cantidad_maxima: int = 0
+    precio: float = 0.0
+    updated_at: Optional[datetime] = None
+
+@dataclass
+class ReferenciaCliente:
+    cliente_id: int
+    codigo_referencia: str
+    id: Optional[int] = None
+    descripcion: Optional[str] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
+    tipo_impresion_id: Optional[int] = None
+
+@dataclass
+class TipoImpresion:
+    id: Optional[int] = None
+    nombre: str = ''
+    descripcion: Optional[str] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None 

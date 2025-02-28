@@ -58,7 +58,7 @@ def generar_tabla_resultados(resultados: List[Dict]) -> pd.DataFrame:
             'MO y Maq': f"${r['mo_y_maq']:,.2f}",
             'Tintas': f"${r['tintas']:,.2f}",
             'Papel/lam': f"${r['papel_lam']:,.2f}",
-            'Desperdicio': f"${r['desperdicio_tintas']:,.2f} + ${r['desperdicio_porcentaje']:,.2f} = ${r['desperdicio_total']:,.2f}"
+            'Desperdicio': f"${r['desperdicio_total']:,.2f}"
         }
         for r in resultados
     ])
