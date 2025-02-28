@@ -60,16 +60,16 @@ class CalculadoraCostosEscala:
             
         return ancho_redondeado, mensaje
         
-    def calcular_metros(self, escala: int, datos: DatosEscala) -> float:
+    def calcular_metros(self, escala: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
         Calcula los metros según la fórmula: =(A8/$E$3)*(($D$4+$C$5)/1000)
         donde:
         - A8 = escala
         - $E$3 = pistas
-        - $D$4 = avance + 2.6 (gap fijo)
+        - $D$4 = avance + gap (gap es 0 para mangas, 2.6 para etiquetas)
         - $C$5 = desperdicio de la unidad de montaje
         """
-        GAP_FIJO = 2.6  # Gap fijo para el avance
+        GAP_FIJO = 0 if es_manga else 2.6  # Gap es 0 para mangas, 2.6 para etiquetas
         d4 = datos.avance_total + GAP_FIJO  # Avance + gap fijo
         return (escala / datos.pistas) * ((d4 + datos.desperdicio) / 1000)
         
@@ -81,19 +81,35 @@ class CalculadoraCostosEscala:
         """Calcula el montaje según la fórmula: Tintas * MO Montaje"""
         return num_tintas * datos.mo_montaje
         
-    def calcular_mo_y_maq(self, tiempo_horas: float, num_tintas: int, datos: DatosEscala) -> float:
+    def calcular_mo_y_maq(self, tiempo_horas: float, num_tintas: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
         Calcula MO y Maq según la fórmula:
-        SI(tintas>0;SI(F8<1;MO Impresión;MO Impresión*(F8)));SI(F8<1;MO Troquelado;MO Troquelado*(F8)))
+        Para etiquetas:
+            SI(tintas>0;SI(F8<1;MO Impresión;MO Impresión*(F8)));SI(F8<1;MO Troquelado;MO Troquelado*(F8)))
+        Para mangas:
+            Se suma además MO Sellado (50000) y MO Corte (50000)
         """
+        # Constantes para mangas
+        MO_SELLADO = 50000
+        MO_CORTE = 50000
+        
+        # Cálculo base (igual que antes)
         if num_tintas > 0:
             if tiempo_horas < 1:
-                return datos.mo_impresion
-            return datos.mo_impresion * tiempo_horas
+                base = datos.mo_impresion
+            else:
+                base = datos.mo_impresion * tiempo_horas
         else:
             if tiempo_horas < 1:
-                return datos.mo_troquelado
-            return datos.mo_troquelado * tiempo_horas
+                base = datos.mo_troquelado
+            else:
+                base = datos.mo_troquelado * tiempo_horas
+        
+        # Para mangas, sumar MO Sellado y MO Corte
+        if es_manga:
+            return base + MO_SELLADO + MO_CORTE
+        
+        return base
             
     def calcular_tintas(self, escala: int, num_tintas: int, valor_etiqueta: float, datos: DatosEscala) -> float:
         """
@@ -321,15 +337,15 @@ class CalculadoraCostosEscala:
             datos.rentabilidad = 45.0 if es_manga else 40.0  # 45% para mangas, 40% para etiquetas
             
             for escala in datos.escalas:
-                # Calcular metros lineales
-                metros = self.calcular_metros(escala, datos)
+                # Calcular metros lineales considerando si es manga o no
+                metros = self.calcular_metros(escala, datos, es_manga)
                 
                 # Calcular tiempo en horas
                 tiempo_horas = self.calcular_tiempo_horas(metros, datos)
                 
                 # Calcular costos
                 montaje = self.calcular_montaje(num_tintas, datos)
-                mo_y_maq = self.calcular_mo_y_maq(tiempo_horas, num_tintas, datos)
+                mo_y_maq = self.calcular_mo_y_maq(tiempo_horas, num_tintas, datos, es_manga)
                 tintas = self.calcular_tintas(escala, num_tintas, valor_etiqueta, datos)
                 papel_lam = self.calcular_papel_lam(escala, datos.area_etiqueta, valor_material, valor_acabado)
                 
@@ -338,13 +354,26 @@ class CalculadoraCostosEscala:
                 GAP_PLANCHAS = 40  # gap constante de planchas
 
                 if num_tintas > 0:
-                    mm_totales = MM_COLOR * num_tintas
-                    # El método devuelve una tupla, tomamos solo el primer valor
-                    ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
-                    # Asegurarnos de que ancho_total sea un número
-                    if isinstance(ancho_total, tuple):
-                        ancho_total = ancho_total[0]
-                    desperdicio_tintas = (mm_totales * valor_material * (ancho_total + GAP_PLANCHAS)) / 1000000
+                    mm_totales = MM_COLOR * num_tintas  # S7
+                    
+                    if es_manga:
+                        # Cálculo específico para mangas
+                        C3 = 0  # GAP para mangas es 0
+                        B3 = datos.ancho  # B3 es el ancho
+                        D3 = B3 + C3  # D3 = ancho + GAP_MANGA
+                        E3 = datos.pistas
+                        Q3 = D3 * E3 + C3  # Q3 = (ancho + GAP_MANGA) * pistas + GAP_MANGA
+                        GAP_FIJO = 50  # R3 para mangas
+                        s3 = GAP_FIJO + Q3  # R3 + Q3
+                        
+                        # Desperdicio para mangas = S7 × S3 × O7
+                        desperdicio_tintas = mm_totales * s3 * (valor_material / 1000000)
+                    else:
+                        # Cálculo para etiquetas (código existente)
+                        ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
+                        if isinstance(ancho_total, tuple):
+                            ancho_total = ancho_total[0]
+                        desperdicio_tintas = (mm_totales * valor_material * (ancho_total + GAP_PLANCHAS)) / 1000000
                 else:
                     desperdicio_tintas = 0
                 

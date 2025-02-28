@@ -11,13 +11,14 @@ class OpcionDesperdicio:
     ancho_total: float  # Nuevo campo para mostrar el ancho total incluyendo gaps
 
 class CalculadoraDesperdicio:
-    def __init__(self, ancho_maquina: float = 325, gap_mm: float = 3):
+    def __init__(self, ancho_maquina: float = 325, gap_mm: float = 3, es_manga: bool = False):
         # Constantes de la máquina
         self.ANCHO_MAQUINA = ancho_maquina
         self.GAP_MM = gap_mm  # Gap para ancho total
-        self.GAP_AVANCE = 2.6  # Gap fijo para el avance
+        self.GAP_AVANCE = 2.6  # Gap fijo para el avance (solo para etiquetas)
         self.DESPERDICIO_MINIMO = 2.6
         self.MAX_REPETICIONES = 20  # Máximo de repeticiones a considerar (hasta la columna Z)
+        self.es_manga = es_manga  # Nuevo flag para diferenciar mangas de etiquetas
         
         # Datos de la tabla
         self.data = {
@@ -47,7 +48,12 @@ class CalculadoraDesperdicio:
             raise ValueError("Existen números de dientes inválidos (nulos o negativos)")
 
     def _calcular_ancho_total(self, avance_mm: float, repeticiones: int) -> float:
-        """Calcula el ancho total incluyendo gaps entre repeticiones"""
+        """
+        Calcula el ancho total incluyendo gaps entre repeticiones.
+        Para mangas, no se incluye el gap entre repeticiones.
+        """
+        if self.es_manga:
+            return avance_mm * repeticiones
         return (avance_mm * repeticiones) + (self.GAP_MM * (repeticiones - 1))
 
     def _validar_ancho_total(self, ancho_total: float) -> bool:
@@ -66,30 +72,34 @@ class CalculadoraDesperdicio:
     def _calcular_desperdicio_individual(self, medida_mm: float, avance: float, repeticiones: int) -> float:
         """
         Calcula el desperdicio para una medida específica.
-        
-        Args:
-            medida_mm: Medida en mm de la tabla
-            avance: Avance sin gap
-            repeticiones: Número de repeticiones a calcular
-            
-        Returns:
-            float: Desperdicio calculado o 999.9999 si es inválido
+        Para mangas, no se agrega el GAP_AVANCE.
+        Para etiquetas, se agrega el GAP_AVANCE.
         """
-        # Agregar el gap al avance para el cálculo
-        avance_con_gap = avance + self.GAP_AVANCE
+        # Para mangas, usar el avance directo. Para etiquetas, agregar el gap
+        avance_efectivo = avance if self.es_manga else avance + self.GAP_AVANCE
         
         # Si la medida es menor que el espacio necesario, es inválido
-        if medida_mm < (repeticiones * avance_con_gap):
+        if medida_mm < (repeticiones * avance_efectivo):
             return 999.9999
             
-        # Calcular el desperdicio como en Excel
-        return abs(medida_mm - avance_con_gap * repeticiones) / repeticiones
+        # Calcular el desperdicio
+        return abs(medida_mm - avance_efectivo * repeticiones) / repeticiones
 
     def _filtrar_opciones_validas(self, opciones: List[OpcionDesperdicio]) -> List[OpcionDesperdicio]:
-        """Filtra las opciones según el criterio de desperdicio mínimo"""
-        # Filtrar solo opciones con desperdicio menor a 999 (inválido)
+        """
+        Filtra las opciones según el criterio de desperdicio mínimo.
+        Solo se consideran válidas las opciones con desperdicio < 999.
+        Se ordenan por el valor absoluto del desperdicio para encontrar la opción que más se acerca a 0.
+        """
+        # Filtrar opciones con desperdicio válido (menor a 999)
         opciones_validas = [op for op in opciones if op.desperdicio < 999]
-        return sorted(opciones_validas, key=lambda x: x.desperdicio)
+        
+        if not opciones_validas:
+            return []
+        
+        # Ordenar por el valor absoluto del desperdicio y luego por dientes
+        # Esto asegura que se seleccione la opción que minimiza el desperdicio real
+        return sorted(opciones_validas, key=lambda x: (abs(x.desperdicio), x.dientes))
 
     def _calcular_max_repeticiones(self, avance_mm: float) -> int:
         """Calcula el máximo número de repeticiones posibles considerando el ancho de máquina y gaps"""
