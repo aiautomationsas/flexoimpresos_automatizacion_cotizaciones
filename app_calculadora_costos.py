@@ -124,7 +124,7 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
                            num_tintas: int, valor_plancha: float, valor_material: float, 
                            valor_acabado: float, reporte_troquel: Dict = None, 
                            valor_plancha_separado: Optional[float] = None, 
-                           identificador: Optional[str] = None,
+                           codigo_unico: Optional[str] = None,
                            es_manga: bool = False) -> str:
     """Genera un informe técnico detallado"""
     dientes = reporte_lito['desperdicio']['mejor_opcion'].get('dientes', 'N/A')
@@ -203,16 +203,16 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
 - **Valor Plancha Ajustado**: ${valor_plancha_separado:.2f}
 """ if valor_plancha_separado is not None else ""
     
-    id_info = f"""
-### Identificador
+    codigo_unico_info = f"""
+### Código Único
 ```
-{identificador}
+{codigo_unico}
 ```
-""" if identificador else ""
+""" if codigo_unico else ""
     
     return f"""
 ## Informe Técnico de Cotización
-{id_info}
+{codigo_unico_info}
 ### Parámetros de Impresión
 - **Ancho**: {datos_entrada.ancho} mm
 - **Avance**: {datos_entrada.avance} mm
@@ -235,9 +235,9 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
 def generar_identificador(tipo_impresion: str, material_code: str, ancho: float, avance: float,
                          num_tintas: int, acabado_code: str, nombre_cliente: str, referencia: str,
                          num_rollos: int, consecutivo: int = 1984) -> str:
-    """Genera el identificador único para la cotización"""
+    """Genera el código único para la cotización"""
     tipo = "ET" if "ETIQUETA" in tipo_impresion.upper() else "MT"
-    material = material_code.upper()
+    material = material_code.split('-')[0].upper()  # Only take the part before the first '-'
     medidas = f"{int(ancho)}X{int(avance)}MM"
     
     if "FOIL" in acabado_code.upper():
@@ -257,9 +257,10 @@ def calcular_valor_plancha_separado(valor_plancha_dict: Dict) -> float:
             return detalles['precio_sin_constante']
     return 0
 
-def crear_datos_cotizacion(cliente: str, referencia: str, identificador: str, material: str,
+def crear_datos_cotizacion(cliente: str, referencia: str, codigo_unico: str, material: str,
                           acabado: str, num_tintas: int, num_rollos: int, valor_troquel: Dict,
-                          valor_plancha_separado: Optional[float], resultados: List[Dict]) -> Dict:
+                          valor_plancha_separado: Optional[float], resultados: List[Dict],
+                          es_manga: bool = False, tipo_grafado: Optional[str] = None) -> Dict:
     """Crea el diccionario de datos para la cotización"""
     # Extraer el valor numérico del troquel del diccionario
     valor_troquel_final = valor_troquel.get('valor', 0) if isinstance(valor_troquel, dict) else 0
@@ -268,14 +269,16 @@ def crear_datos_cotizacion(cliente: str, referencia: str, identificador: str, ma
         'consecutivo': 1984,
         'cliente': cliente,
         'referencia': referencia,
-        'identificador': identificador,
+        'identificador': codigo_unico,
         'material': material.split('(')[0].strip(),
         'acabado': acabado.split('(')[0].strip(),
         'num_tintas': num_tintas,
         'num_rollos': num_rollos,
         'valor_troquel': valor_troquel_final,
         'valor_plancha_separado': valor_plancha_separado,
-        'resultados': resultados
+        'resultados': resultados,
+        'es_manga': es_manga,
+        'tipo_grafado': tipo_grafado
     }
 
 def main():
@@ -291,8 +294,13 @@ def main():
         st.error(f"Error al conectar con la base de datos: {str(e)}")
         return
     
-    # Sección de datos de litografía
-    st.header("Datos de la etiquetas o mangas a cotizar")
+    # Definir tipo de impresión primero
+    tipo_impresion_seleccionado = st.selectbox(
+        "Tipo de Impresión",
+        options=[(t.id, t.nombre) for t in tipos_impresion],
+        format_func=lambda x: x[1]
+    )
+    es_manga = "MANGA" in tipo_impresion_seleccionado[1].upper()
     
     col1, col2, col3 = st.columns(3)
     
@@ -301,6 +309,19 @@ def main():
                                help="El ancho no puede exceder 335mm")
         avance = st.number_input("Avance/Largo (mm)", min_value=0.1, value=100.0, step=0.1)
         pistas = st.number_input("Número de pistas", min_value=1, value=1, step=1)
+        
+        # Mover materiales aquí
+        materiales_filtrados = [
+            m for m in materiales 
+            if es_manga and any(code in m.code.upper() for code in ['PVC', 'PETG'])
+            or not es_manga
+        ]
+        
+        material_seleccionado = st.selectbox(
+            "Material",
+            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})") for m in materiales_filtrados],
+            format_func=lambda x: x[1]
+        )
         
     with col2:
         num_tintas = st.number_input("Número de tintas", min_value=0, value=4, step=1)
@@ -312,15 +333,30 @@ def main():
                                   options=["Sí", "No"], 
                                   index=1, 
                                   horizontal=True)
-        num_rollos = st.number_input("Número de etiquetas por rollo", min_value=1, value=1000, step=100)
-    
-    with col3:
-        tipo_impresion_seleccionado = st.selectbox(
-            "Tipo de Impresión",
-            options=[(t.id, t.nombre) for t in tipos_impresion],
+        
+        # Mover acabados aquí
+        acabado_seleccionado = (0, "Sin acabado ($0.00)") if es_manga else st.selectbox(
+            "Acabado",
+            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})") for a in acabados],
             format_func=lambda x: x[1]
         )
-    
+
+    with col3:
+        # Agregar selección de grafado para mangas
+        tipo_grafado = None
+        if es_manga:
+            tipo_grafado = st.selectbox(
+                "Tipo de Grafado",
+                options=[
+                    "Sin grafado",
+                    "Vertical Total",
+                    "Horizontal Total",
+                    "Horizontal + Vertical Total"
+                ]
+            )
+        
+        num_rollos = st.number_input("Número de etiquetas por rollo", min_value=1, value=1000, step=100)
+
     # Sección de escalas
     st.header("Escalas de Producción")
     escalas_text = st.text_input(
@@ -355,31 +391,18 @@ def main():
                 format_func=lambda x: x[1]
             ) if referencias else None
 
-    # Sección de materiales y acabados
-    st.header("Materiales y Acabados")
-    col1, col2 = st.columns(2)
+    # Validación de ancho total antes de calcular
+    calculadora_lito = CalculadoraLitografia()
+    f3, mensaje_ancho = calculadora_lito.calcular_ancho_total(num_tintas, pistas, ancho)
     
-    with col1:
-        es_manga = "MANGA" in tipo_impresion_seleccionado[1].upper()
-        materiales_filtrados = [
-            m for m in materiales 
-            if es_manga and any(code in m.code.upper() for code in ['PVC', 'PETG'])
-            or not es_manga
-        ]
-        
-        material_seleccionado = st.selectbox(
-            "Material",
-            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})") for m in materiales_filtrados],
-            format_func=lambda x: x[1]
-        )
+    if mensaje_ancho:
+        st.error(mensaje_ancho)
+        if "ERROR" in mensaje_ancho:
+            return  # Stop further processing if it's a critical error
+        else:
+            # Show a warning but allow continuation
+            st.warning("Por favor ajuste el número de pistas o el ancho para continuar.")
 
-    with col2:
-        acabado_seleccionado = (0, "Sin acabado ($0.00)") if es_manga else st.selectbox(
-            "Acabado",
-            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})") for a in acabados],
-            format_func=lambda x: x[1]
-        )
-    
     # Botón para calcular
     if st.button("Calcular", type="primary"):
         try:
@@ -407,6 +430,15 @@ def main():
             
             # Detener captura de la consola
             console_capture.stop()
+            
+            # Verificar condiciones especiales para el troquel en mangas
+            if es_manga and tipo_grafado == "Horizontal + Vertical Total":
+                mejor_opcion = reporte_lito.get('desperdicio', {}).get('mejor_opcion', {})
+                if mejor_opcion and mejor_opcion.get('desperdicio', 0) > 2:
+                    # Forzar troquel_existe a False si el desperdicio es mayor a 2mm
+                    datos_lito.troquel_existe = False
+                    # Regenerar el reporte con el nuevo valor de troquel
+                    reporte_lito = calculadora.generar_reporte_completo(datos_lito, num_tintas, es_manga)
             
             # Guardar logs de litografía
             logs_litografia = console_capture.get_logs()
@@ -440,12 +472,6 @@ def main():
             valor_plancha, valor_plancha_dict = obtener_valor_plancha(reporte_lito)
             valor_troquel = obtener_valor_troquel(reporte_lito)
             
-            print("\n=== DEPURACIÓN VALORES PLANCHA Y TROQUEL ===")
-            print(f"valor_plancha (original): {valor_plancha}")
-            print(f"valor_plancha (tipo): {type(valor_plancha)}")
-            print(f"valor_troquel (original): {valor_troquel}")
-            print(f"valor_troquel (tipo): {type(valor_troquel)}")
-            
             valor_material = extraer_valor_precio(material_seleccionado[1])
             valor_acabado = 0 if es_manga else extraer_valor_precio(acabado_seleccionado[1])
             
@@ -454,20 +480,9 @@ def main():
             valor_plancha_para_calculo = 0 if planchas_por_separado == "Sí" else valor_plancha
             if planchas_por_separado == "Sí":
                 valor_plancha_separado = calcular_valor_plancha_separado(valor_plancha_dict)
-                print(f"planchas_por_separado = Sí, valor_plancha_para_calculo = 0")
-                print(f"valor_plancha_separado: {valor_plancha_separado}")
-            else:
-                print(f"planchas_por_separado = No, valor_plancha_para_calculo = {valor_plancha_para_calculo}")
-            
-            print(f"valor_plancha_para_calculo (final): {valor_plancha_para_calculo}")
-            print(f"valor_plancha_para_calculo (tipo): {type(valor_plancha_para_calculo)}")
             
             # Calcular costos
             calculadora = CalculadoraCostosEscala()
-            
-            # Iniciar captura de la consola
-            console_capture.clear()
-            console_capture.start()
             
             resultados = calculadora.calcular_costos_por_escala(
                 datos=datos,
@@ -480,311 +495,103 @@ def main():
                 es_manga=es_manga
             )
             
-            # Detener captura de la consola
-            console_capture.stop()
-            
             if resultados:
                 # Mostrar tabla de resultados
                 st.subheader("Tabla de Resultados")
                 df = generar_tabla_resultados(resultados)
                 st.dataframe(df, hide_index=True, use_container_width=True)
 
-                # Agregar sección para mostrar los logs de la consola
-                with st.expander("Logs de Depuración (Consola)"):
-                    tabs = st.tabs(["Cálculo de Costos", "Cálculo de Litografía"])
-                    
-                    with tabs[0]:  # Cálculo de Costos
-                        logs = console_capture.get_logs()
-                        if logs:
-                            for log_type, log_content in logs:
-                                if log_type == "stderr":
-                                    st.error(log_content)
-                                else:
-                                    # Dividir el log en secciones para mejor visualización
-                                    sections = log_content.split("===")
-                                    for i, section in enumerate(sections):
-                                        if i > 0:  # Ignorar la primera sección vacía
-                                            section_title = section.split("\n")[0].strip()
-                                            section_content = "\n".join(section.split("\n")[1:])
-                                            if section_title:
-                                                st.markdown(f"### {section_title}")
-                                                st.code(section_content)
-                                                st.markdown("---")
-                        else:
-                            st.write("No hay logs de cálculo de costos disponibles.")
-                    
-                    with tabs[1]:  # Cálculo de Litografía
-                        if logs_litografia:
-                            for log_type, log_content in logs_litografia:
-                                if log_type == "stderr":
-                                    st.error(log_content)
-                                else:
-                                    # Dividir el log en secciones para mejor visualización
-                                    sections = log_content.split("===")
-                                    for i, section in enumerate(sections):
-                                        if i > 0:  # Ignorar la primera sección vacía
-                                            section_title = section.split("\n")[0].strip()
-                                            section_content = "\n".join(section.split("\n")[1:])
-                                            if section_title:
-                                                st.markdown(f"### {section_title}")
-                                                st.code(section_content)
-                                                st.markdown("---")
-                        else:
-                            st.write("No hay logs de cálculo de litografía disponibles.")
-
-                # Agregar sección de depuración para el valor de la plancha
-                with st.expander("Depuración del Valor de la Plancha"):
-                    cols = st.columns(2)
-                    
-                    with cols[0]:
-                        st.subheader("Datos de Entrada")
-                        st.write(f"**Tipo de Impresión:** {'Manga' if es_manga else 'Etiqueta'}")
-                        st.write(f"**Número de Tintas:** {num_tintas}")
-                        st.write(f"**Pistas:** {datos.pistas}")
-                        st.write(f"**Ancho:** {datos.ancho} mm")
-                        st.write(f"**Avance:** {datos.avance} mm")
-                        st.write(f"**Incluye Planchas:** {planchas_por_separado}")
-                    
-                    with cols[1]:
-                        st.subheader("Valores de la Plancha")
-                        st.write(f"**Valor Plancha (Original):** ${valor_plancha}")
-                        st.write(f"**Valor Plancha (Para Cálculo):** ${valor_plancha_para_calculo}")
-                        
-                        if planchas_por_separado == "Sí":
-                            if valor_plancha_separado is not None:
-                                st.write(f"**Valor Plancha Separado:** ${valor_plancha_separado}")
-                                st.info("Como 'Planchas por Separado' está configurado como 'Sí', el valor de la plancha para el cálculo es 0, y se utiliza el valor separado para mostrar al cliente.")
-                            else:
-                                st.error("No se pudo calcular el valor de la plancha separado.")
-                    
-                    # Mostrar detalles del cálculo de la plancha
-                    st.subheader("Detalles del Cálculo de la Plancha")
-                    if isinstance(valor_plancha_dict, dict) and 'detalles' in valor_plancha_dict:
-                        detalles = valor_plancha_dict['detalles']
-                        
-                        # Crear una tabla con los detalles
-                        detalles_list = []
-                        for k, v in detalles.items():
-                            if isinstance(v, (int, float)):
-                                valor_formateado = f"{v:.2f}" if k != 'constante' else f"{v}"
-                            else:
-                                valor_formateado = str(v)
-                            detalles_list.append({"Parámetro": k, "Valor": valor_formateado})
-                        
-                        df_detalles = pd.DataFrame(detalles_list)
-                        st.table(df_detalles)
-                        
-                        # Verificar si precio_sin_constante existe
-                        if 'precio_sin_constante' in detalles:
-                            cols2 = st.columns(2)
-                            with cols2[0]:
-                                st.write(f"**Precio sin constante:** ${detalles['precio_sin_constante']:.2f}")
-                            
-                            # Recalcular el precio
-                            if 'constante' in detalles and detalles['constante'] != 0:
-                                precio_recalculado = detalles['precio_sin_constante'] / detalles['constante']
-                                with cols2[1]:
-                                    st.write(f"**Precio recalculado:** ${precio_recalculado:.2f}")
-                                
-                                # Verificar si coincide con el valor original
-                                if abs(precio_recalculado - valor_plancha) > 0.01:
-                                    st.error(f"**¡Discrepancia en el precio de la plancha!** Recalculado: ${precio_recalculado:.2f}, Original: ${valor_plancha:.2f}")
-                    else:
-                        st.write("No hay detalles disponibles para el cálculo de la plancha.")
-                    
-                    # Mostrar la fórmula de cálculo
-                    st.subheader("Fórmula de Cálculo")
-                    formula = """
-                    Precio Plancha = (VALOR_MM * S3 * S4 * num_tintas) / constante
-                    
-                    Donde:
-                    - VALOR_MM = $1.5/mm
-                    - S3 = GAP_FIJO + Q3
-                    - Q3 = D3 * E3 + C3
-                    - D3 = B3 + C3
-                    - B3 = ancho
-                    - C3 = 0 para mangas o etiquetas con 1 pista, 3 para etiquetas con más de 1 pista
-                    - E3 = número de pistas
-                    - GAP_FIJO = 50 mm
-                    - S4 = mm_unidad_montaje + AVANCE_FIJO
-                    - AVANCE_FIJO = 30 mm
-                    - constante = 10000000 si planchas_por_separado es True, 1 si no
-                    """
-                    st.code(formula)
-                
-                # Agregar sección de depuración para el valor unitario
-                with st.expander("Depuración del Valor Unitario"):
-                    # Usar tabs para organizar la información
-                    tabs_unitario = st.tabs(["Datos de Entrada", "Cálculos por Escala", "Recálculo"])
-                    
-                    with tabs_unitario[0]:  # Datos de Entrada
-                        st.write(f"**Tipo de Impresión:** {'Manga' if es_manga else 'Etiqueta'}")
-                        st.write(f"**Número de Tintas:** {num_tintas}")
-                        st.write(f"**Pistas:** {datos.pistas}")
-                        st.write(f"**Ancho:** {datos.ancho} mm")
-                        st.write(f"**Avance:** {datos.avance} mm")
-                        st.write(f"**Área Etiqueta:** {datos.area_etiqueta} mm²")
-                        st.write(f"**Valor Material:** ${valor_material}/mm²")
-                        st.write(f"**Valor Acabado:** ${valor_acabado}/mm²")
-                        st.write(f"**Valor Plancha:** ${valor_plancha_para_calculo}")
-                        st.write(f"**Valor Troquel:** ${valor_troquel}")
-                        st.write(f"**Rentabilidad:** {datos.rentabilidad}%")
-                    
-                    with tabs_unitario[1]:  # Cálculos por Escala
-                        for i, r in enumerate(resultados):
-                            st.markdown(f"### Escala: {r['escala']:,}")
-                            
-                            # Componentes de costos
-                            st.write("**Componentes de Costos:**")
-                            componentes = {
-                                "Montaje": r['montaje'],
-                                "MO y Maq": r['mo_y_maq'],
-                                "Tintas": r['tintas'],
-                                "Papel/lam": r['papel_lam'],
-                                "Desperdicio": r['desperdicio'],
-                            }
-                            
-                            # Crear DataFrame para mostrar componentes
-                            df_componentes = pd.DataFrame([
-                                {"Componente": k, "Valor": f"${v:,.2f}"} 
-                                for k, v in componentes.items()
-                            ])
-                            st.table(df_componentes)
-                            
-                            # Desglose del desperdicio
-                            st.write("**Desglose del Desperdicio:**")
-                            desperdicio_info = {
-                                "Desperdicio por Tintas": r['desperdicio_tintas'],
-                                "Desperdicio por Porcentaje": r['desperdicio_porcentaje'],
-                                "Desperdicio Total": r['desperdicio']
-                            }
-                            df_desperdicio = pd.DataFrame([
-                                {"Componente": k, "Valor": f"${v:,.2f}"} 
-                                for k, v in desperdicio_info.items()
-                            ])
-                            st.table(df_desperdicio)
-                            
-                            # Suma de costos
-                            suma_costos = r['montaje'] + r['mo_y_maq'] + r['tintas'] + r['papel_lam'] + r['desperdicio']
-                            st.write(f"**Suma de Costos:** ${suma_costos:,.2f}")
-                            
-                            # Cálculo del valor unitario
-                            factor_rentabilidad = (100 - datos.rentabilidad) / 100
-                            costos_indirectos = suma_costos / factor_rentabilidad
-                            costos_fijos = valor_plancha_para_calculo + valor_troquel
-                            costos_totales = costos_indirectos + costos_fijos
-                            valor_unidad_calculado = costos_totales / r['escala']
-                            
-                            st.write("**Cálculo del Valor Unitario:**")
-                            st.write(f"Factor Rentabilidad (100 - {datos.rentabilidad})/100: {factor_rentabilidad:.4f}")
-                            st.write(f"Costos Indirectos (Suma Costos / Factor Rentabilidad): ${costos_indirectos:,.2f}")
-                            st.write(f"Costos Fijos (Valor Plancha + Valor Troquel): ${costos_fijos:,.2f}")
-                            st.write(f"Costos Totales (Costos Indirectos + Costos Fijos): ${costos_totales:,.2f}")
-                            st.write(f"Valor Unitario (Costos Totales / Escala): ${valor_unidad_calculado:.6f}")
-                            st.write(f"Valor Unitario (Almacenado): ${r['valor_unidad']:.6f}")
-                            
-                            # Verificar si hay discrepancia
-                            if abs(valor_unidad_calculado - r['valor_unidad']) > 0.000001:
-                                st.error(f"¡Discrepancia detectada! La diferencia es: {valor_unidad_calculado - r['valor_unidad']:.6f}")
-                            
-                            # Mostrar la fórmula completa
-                            st.write("**Fórmula Completa:**")
-                            formula = f"""
-                            Valor Unitario = (((Suma de Costos) / ((100 - Rentabilidad) / 100)) + (Valor Troquel + Valor Plancha)) / Escala
-                            
-                            Valor Unitario = ((({suma_costos:,.2f}) / ((100 - {datos.rentabilidad}) / 100)) + ({valor_troquel:,.2f} + {valor_plancha_para_calculo:,.2f})) / {r['escala']:,}
-                            
-                            Valor Unitario = ((({suma_costos:,.2f}) / {factor_rentabilidad:.4f}) + {costos_fijos:,.2f}) / {r['escala']:,}
-                            
-                            Valor Unitario = ({costos_indirectos:,.2f} + {costos_fijos:,.2f}) / {r['escala']:,}
-                            
-                            Valor Unitario = {costos_totales:,.2f} / {r['escala']:,}
-                            
-                            Valor Unitario = {valor_unidad_calculado:.6f}
-                            """
-                            st.code(formula)
-                            
-                            st.markdown("---")
-                    
-                    with tabs_unitario[2]:  # Recálculo
-                        if st.button("Recalcular Valores Unitarios"):
-                            st.write("Recalculando valores unitarios con los datos actuales...")
-                            
-                            # Crear una nueva instancia de la calculadora
-                            calculadora_recalculo = CalculadoraCostosEscala()
-                            resultados_recalculo = calculadora_recalculo.calcular_costos_por_escala(
-                                datos=datos,
-                                num_tintas=num_tintas,
-                                valor_etiqueta=valor_etiqueta,
-                                valor_plancha=valor_plancha_para_calculo,
-                                valor_troquel=valor_troquel,
-                                valor_material=valor_material,
-                                valor_acabado=valor_acabado,
-                                es_manga=es_manga
-                            )
-                            
-                            # Mostrar resultados recalculados
-                            if resultados_recalculo:
-                                df_recalculo = generar_tabla_resultados(resultados_recalculo)
-                                st.write("**Tabla de Resultados Recalculados:**")
-                                st.dataframe(df_recalculo, hide_index=True, use_container_width=True)
-                                
-                                # Comparar resultados
-                                st.write("**Comparación de Resultados:**")
-                                for i, (r_orig, r_recalc) in enumerate(zip(resultados, resultados_recalculo)):
-                                    st.write(f"**Escala {r_orig['escala']:,}:**")
-                                    st.write(f"Valor Unitario Original: ${r_orig['valor_unidad']:.6f}")
-                                    st.write(f"Valor Unitario Recalculado: ${r_recalc['valor_unidad']:.6f}")
-                                    st.write(f"Diferencia: ${r_recalc['valor_unidad'] - r_orig['valor_unidad']:.6f}")
-                                    st.write("---")
-                        else:
-                            st.write("Haz clic en el botón para recalcular los valores unitarios.")
-
-                # Separador visual
-                st.divider()
-
-                # Informe técnico
-                st.subheader("Informe Técnico")
-                identificador = generar_identificador(
+                # Generar identificador
+                codigo_unico = generar_identificador(
                     tipo_impresion=tipo_impresion_seleccionado[1],
-                    material_code=db.get_material_code(material_seleccionado[0]),
+                    material_code=material_seleccionado[1].split('-')[0].strip(),
                     ancho=ancho,
                     avance=avance,
                     num_tintas=num_tintas,
-                    acabado_code=db.get_acabado_code(acabado_seleccionado[0]),
+                    acabado_code=acabado_seleccionado[1].split('-')[0].strip(),
                     nombre_cliente=cliente_seleccionado[1],
                     referencia=referencia_seleccionada[1],
-                    num_rollos=num_rollos,
-                    consecutivo=1984
+                    num_rollos=num_rollos
                 )
-                st.markdown(generar_informe_tecnico(
-                    datos, 
-                    resultados, 
-                    reporte_lito, 
-                    num_tintas, 
-                    valor_plancha, 
-                    valor_material, 
-                    valor_acabado, 
-                    reporte_lito.get('valor_troquel', 0),
-                    valor_plancha_separado,
-                    identificador,
-                    es_manga=es_manga
-                ))
-            
+
+                # Mostrar información técnica para impresión
+                st.subheader("Información Técnica para Impresión")
+                
+                # Crear columnas para la información técnica
+                col_info1, col_info2 = st.columns(2)
+                
+                with col_info1:
+                    st.markdown("#### Identificador")
+                    
+                    # Destacar visualmente el código único
+                    st.markdown(f"""
+<div style='
+    background-color: #f0f2f6; 
+    border: 2px solid #3498db; 
+    border-radius: 10px; 
+    padding: 10px; 
+    text-align: center; 
+    margin-bottom: 10px;
+'>
+    <p style='
+        font-size: 16px; 
+        font-weight: bold; 
+        color: #2980b9; 
+        word-wrap: break-word;
+        margin: 0;
+    '>{codigo_unico}</p>
+</div>
+""", unsafe_allow_html=True)
+                    
+                    st.write(f"**Ancho:** {ancho} mm")
+                    st.write(f"**Avance:** {avance} mm")
+                    st.write(f"**Pistas:** {pistas}")
+                    st.write(f"**Área de Etiqueta:** {reporte_lito['area_etiqueta']['area']:.2f} mm²")
+                    st.write(f"**Etiquetas por Rollo:** {num_rollos}")
+                    
+                    if es_manga:
+                        st.markdown("#### Información de Manga")
+                        st.write(f"**Tipo de Grafado:** {tipo_grafado}")
+                        if tipo_grafado == "Horizontal + Vertical Total":
+                            mejor_opcion = reporte_lito.get('desperdicio', {}).get('mejor_opcion', {})
+                            st.write(f"**Desperdicio:** {mejor_opcion.get('desperdicio', 0):.2f} mm")
+                
+                with col_info2:
+                    st.markdown("#### Detalles de Producción")
+                    st.write(f"**Material:** {material_seleccionado[1].split('(')[0].strip()}")
+                    if not es_manga:
+                        st.write(f"**Acabado:** {acabado_seleccionado[1].split('(')[0].strip()}")
+                    st.write(f"**Número de Tintas:** {num_tintas}")
+                    st.write(f"**Planchas por Separado:** {planchas_por_separado}")
+                    if planchas_por_separado == "Sí":
+                        st.write(f"**Valor Plancha:** ${valor_plancha_separado:,.2f}")
+                    st.write(f"**Troquel Existe:** {troquel_existe}")
+                    if troquel_existe == "Sí":
+                        valor_troquel_final = reporte_lito.get('valor_troquel', {}).get('valor', 0)
+                        st.write(f"**Valor Troquel:** ${valor_troquel_final:,.2f}")
+                
+                # Mostrar detalles del desperdicio
+                st.markdown("#### Detalles de Desperdicio")
+                st.write(f"**Desperdicio Total:** {mejor_opcion['desperdicio']:.2f} mm")
+                if 'dientes' in mejor_opcion:
+                    st.write(f"**Dientes:** {mejor_opcion['dientes']}")
+
                 # Generar PDF
                 pdf_gen = CotizacionPDF()
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
                     datos_cotizacion = crear_datos_cotizacion(
                         cliente=cliente_seleccionado[1],
                         referencia=referencia_seleccionada[1],
-                        identificador=identificador,
+                        codigo_unico=codigo_unico,
                         material=material_seleccionado[1],
                         acabado=acabado_seleccionado[1],
                         num_tintas=num_tintas,
                         num_rollos=num_rollos,
                         valor_troquel=reporte_lito.get('valor_troquel', 0),
                         valor_plancha_separado=valor_plancha_separado,
-                        resultados=resultados
+                        resultados=resultados,
+                        es_manga=es_manga,
+                        tipo_grafado=tipo_grafado if es_manga else None
                     )
                     pdf_gen.generar_pdf(datos_cotizacion, tmp_file.name)
                     
@@ -795,14 +602,6 @@ def main():
                             file_name=f"cotizacion_{datos_cotizacion['consecutivo']}.pdf",
                             mime="application/pdf"
                         )
-            
-            # Calculate the area of the label using the central method
-            calculadora_litografia = CalculadoraLitografia()
-            calculo_area = calculadora_litografia.calcular_area_etiqueta(datos_lito, num_tintas, datos_lito.avance, datos.pistas, es_manga)
-            
-            # Set the area in DatosEscala if present
-            if 'area' in calculo_area:
-                datos.set_area_etiqueta(calculo_area['area'])
             
         except Exception as e:
             st.error(f"Error en el cálculo: {str(e)}")

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 import math
 from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
 from calculadora_base import CalculadoraBase
@@ -75,34 +75,50 @@ class CalculadoraLitografia(CalculadoraBase):
             es_manga=es_manga
         )
 
-    def calcular_ancho_total(self, num_tintas: int, pistas: int, ancho_usuario: float) -> float:
+    def calcular_ancho_total(self, num_tintas: int, pistas: int, ancho: float) -> Tuple[float, Optional[str]]:
         """
         Calcula el ancho total según la fórmula:
-        F3 = REDONDEAR.MAS(SI(B2=0;((E3*D3-C3)+10);((E3*D3-C3)+20));-1)
-        
-        Donde:
+        ROUNDUP(IF(B2=0, ((E3*D3-C3)+10), ((E3*D3-C3)+20)), -1)
+        donde:
         - B2 = número de tintas
-        - E3 = número de pistas
-        - D3 = B3 + C3 (ancho_usuario + C3)
-        - C3 = 0 si pistas <= 1, GAP si pistas > 1
+        - E3 = pistas
+        - C3 = valor fijo de 3
+        - D3 = ancho + C3
+        
+        Returns:
+            Tuple[float, Optional[str]]: (ancho_total, mensaje_recomendacion)
+            El mensaje_recomendacion será None si no hay problemas
         """
-        # Determinar C3 según el número de pistas
+        # Usar el GAP de la clase base
         C3 = 0 if pistas <= 1 else self.GAP
         
-        # 1. Calcular D3 = ancho_usuario + C3
-        D3 = ancho_usuario + C3
+        # Calcular D3 = ancho + C3
+        d3 = ancho + C3
         
-        # 2. Calcular base = E3 * D3 - C3
-        base = (pistas * D3) - C3
+        # Calcular base = pistas * D3 - C3
+        base = pistas * d3 - C3
         
-        # 3. Agregar incremento según tintas
+        # Incremento según número de tintas
         incremento = 10 if num_tintas == 0 else 20
-        ancho_total = base + incremento
         
-        # 4. Redondear hacia arriba al siguiente múltiplo de 10
-        ancho_total = math.ceil(ancho_total / 10) * 10
+        # Calcular resultado
+        resultado = base + incremento
         
-        return ancho_total
+        # Redondear hacia arriba al siguiente múltiplo de 10
+        ancho_redondeado = math.ceil(resultado / 10) * 10
+        
+        mensaje = None
+        if ancho_redondeado > self.ANCHO_MAXIMO:
+            # Calcular pistas recomendadas
+            ancho_con_gap = ancho + C3
+            pistas_recomendadas = math.floor((self.ANCHO_MAXIMO - incremento + C3) / ancho_con_gap)
+            
+            if ancho > self.ANCHO_MAXIMO:
+                mensaje = f"ERROR: El ancho base ({ancho}mm) excede el máximo permitido ({self.ANCHO_MAXIMO}mm)"
+            else:
+                mensaje = f"ADVERTENCIA: El ancho total calculado ({ancho_redondeado}mm) excede el máximo permitido ({self.ANCHO_MAXIMO}mm). Se recomienda usar {pistas_recomendadas} pistas o menos."
+        
+        return ancho_redondeado, mensaje
 
     def calcular_desperdicio(self, datos: DatosLitografia, es_manga: bool = False) -> Dict:
         """
@@ -120,7 +136,7 @@ class CalculadoraLitografia(CalculadoraBase):
 
     def obtener_mejor_opcion_desperdicio(self, datos: DatosLitografia, es_manga: bool = False) -> Optional[OpcionDesperdicio]:
         """
-        Obtiene la mejor opción de desperdicio según el tipo de impresión
+        Obtiene la mejor opción de desperdicio según el tipo de producto
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios

@@ -4,11 +4,20 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from datetime import datetime
+import math
 
 class CotizacionPDF:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         self.width, self.height = letter
+
+    def _ajustar_valor_plancha(self, valor: float) -> float:
+        """
+        Aplica la fórmula =REDONDEAR.MAS(valor/0.75;-3) al valor de la plancha
+        """
+        valor_ajustado = valor / 0.75
+        # Redondear hacia arriba al siguiente múltiplo de 1000
+        return math.ceil(valor_ajustado / 1000) * 1000
 
     def generar_pdf(self, datos_cotizacion, path_salida):
         """
@@ -70,11 +79,13 @@ class CotizacionPDF:
         elements.append(Paragraph(f"Tintas: {datos_cotizacion['num_tintas']}", self.styles['Normal']))
         elements.append(Paragraph(f"ET X ROLLO: {datos_cotizacion['num_rollos']:,}", self.styles['Normal']))
         
-        if datos_cotizacion['valor_troquel'] > 0:
-            elements.append(Paragraph(f"Costo Troquel: ${datos_cotizacion['valor_troquel']:,.2f} ESTIMADO", self.styles['Normal']))
+        # Agregar tipo de grafado si es manga
+        if datos_cotizacion.get('es_manga') and datos_cotizacion.get('tipo_grafado'):
+            elements.append(Paragraph(f"Grafado: {datos_cotizacion['tipo_grafado']}", self.styles['Normal']))
         
         if datos_cotizacion['valor_plancha_separado']:
-            elements.append(Paragraph(f"Costo Preprensa: ${datos_cotizacion['valor_plancha_separado']:,.2f} ESTIMADO", self.styles['Normal']))
+            valor_ajustado = self._ajustar_valor_plancha(datos_cotizacion['valor_plancha_separado'])
+            elements.append(Paragraph(f"Planchas por separado: ${valor_ajustado:,.0f}", self.styles['Normal']))
         
         elements.append(Spacer(1, 20))
 
