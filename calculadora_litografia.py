@@ -2,47 +2,65 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 import math
 from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
-from calculadora_costos_escala import CalculadoraCostosEscala
+from calculadora_base import CalculadoraBase
 
 class DatosLitografia:
-    """Clase para almacenar los datos necesarios para los cálculos de litografía"""
+    """
+    Clase para almacenar los datos necesarios para los cálculos de litografía.
+    
+    Esta clase encapsula todos los parámetros requeridos para realizar cálculos
+    relacionados con litografía, como dimensiones, configuración de pistas,
+    y opciones de inclusión de planchas y troqueles.
+    """
     def __init__(self, ancho: float, avance: float, pistas: int = 1,
-                 incluye_planchas: bool = True, incluye_troquel: bool = True,
+                 planchas_por_separado: bool = True, incluye_troquel: bool = True,
                  troquel_existe: bool = False, gap: float = 3.0, 
                  gap_avance: float = 2.6, ancho_maximo: float = 335.0):
         """
+        Inicializa un objeto DatosLitografia con los parámetros especificados.
+        
         Args:
             ancho: Ancho en mm
             avance: Avance/Largo en mm
             pistas: Número de pistas
-            incluye_planchas: Si se deben incluir planchas en el cálculo
+            planchas_por_separado: Si las planchas se cobran por separado (True) o se incluyen en el cálculo (False)
             incluye_troquel: Si se debe incluir troquel en el cálculo
             troquel_existe: Si ya tienen el troquel (True) o hay que hacer uno nuevo (False)
-            gap: Valor fijo de gap para ancho
-            gap_avance: Valor fijo de gap para avance
+            gap: Valor fijo de gap para ancho (0 para mangas o etiquetas con 1 pista, 3.0 para etiquetas con más de 1 pista)
+            gap_avance: Valor fijo de gap para avance (0 para mangas, 2.6 para etiquetas)
             ancho_maximo: Ancho máximo permitido
         """
         self.ancho = ancho
         self.avance = avance
         self.pistas = pistas
-        self.incluye_planchas = incluye_planchas
+        self.planchas_por_separado = planchas_por_separado
         self.incluye_troquel = incluye_troquel
         self.troquel_existe = troquel_existe
         self.gap = gap
         self.gap_avance = gap_avance
         self.ancho_maximo = ancho_maximo
 
-class CalculadoraLitografia:
+class CalculadoraLitografia(CalculadoraBase):
+    """
+    Calculadora para litografía que maneja los cálculos específicos de este proceso.
+    """
+    
+    # Constantes específicas de litografía
+    VALOR_MM_PLANCHA = 1.5  # Valor por mm de plancha
+    ANCHO_MAXIMO = 335.0    # Ancho máximo permitido en mm
+    
     def __init__(self):
-        self.ancho_maximo = 335.0  # mm
-        self._calculadora_desperdicios = None  # Inicializar como None
+        """Inicializa la calculadora de litografía."""
+        super().__init__()
+        self._calculadora_desperdicios = None
+        self._calculadora_desperdicios_manga = None
 
     @property
     def calculadora_desperdicios(self) -> CalculadoraDesperdicio:
         """Devuelve la calculadora de desperdicios actual"""
         if self._calculadora_desperdicios is None:
             self._calculadora_desperdicios = CalculadoraDesperdicio(
-                ancho_maquina=self.ancho_maximo,
+                ancho_maquina=self.ANCHO_MAXIMO,
                 gap_mm=2.6  # Este gap solo se usa para etiquetas
             )
         return self._calculadora_desperdicios
@@ -52,7 +70,7 @@ class CalculadoraLitografia:
         Obtiene una instancia de CalculadoraDesperdicio configurada según el tipo
         """
         return CalculadoraDesperdicio(
-            ancho_maquina=self.ancho_maximo,
+            ancho_maquina=self.ANCHO_MAXIMO,
             gap_mm=2.6,  # Este gap solo se usa para etiquetas
             es_manga=es_manga
         )
@@ -65,11 +83,11 @@ class CalculadoraLitografia:
         Donde:
         - B2 = número de tintas
         - E3 = número de pistas
-        - D3 = B3 + C3 (ancho_usuario + 3)
-        - C3 = 3 (constante para gap)
+        - D3 = B3 + C3 (ancho_usuario + C3)
+        - C3 = 0 si pistas <= 1, GAP si pistas > 1
         """
-        # Constantes
-        C3 = 3  # Gap constante
+        # Determinar C3 según el número de pistas
+        C3 = 0 if pistas <= 1 else self.GAP
         
         # 1. Calcular D3 = ancho_usuario + C3
         D3 = ancho_usuario + C3
@@ -159,115 +177,122 @@ class CalculadoraLitografia:
 
     def calcular_precio_plancha(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """
-        Calcula el precio de la plancha según la fórmula:
-        precio = (valor_mm * (ancho_total + gap_fijo) * (mm_unidad_montaje + avance_fijo) * num_tintas) / constante
+        Calcula el precio de la plancha basado en dimensiones y número de tintas.
         
-        Para mangas:
-        S3 = R3 + Q3
-        Q3 = D3 * E3 + C3
-        C3 = 0 (para mangas)
-        D3 = B3 + C3 (donde B3 es el ancho)
-        E3 = número de pistas
+        El cálculo se basa en la fórmula:
+        precio = (VALOR_MM_PLANCHA * S3 * S4 * num_tintas) / constante
         
         Donde:
-        - valor_mm = $1.5/mm
-        - gap_fijo = 50 mm para mangas, 40 mm para etiquetas
-        - avance_fijo = 30 mm
-        - constante = número muy grande si planchas por separado (resultando en precio = 0), 1 si no
-        """
-        # Constantes
-        VALOR_MM = 1.5  # Nuevo valor: $1.5/mm
-        GAP_FIJO = 50 if es_manga else 40  # GAP fijo en mm según tipo (R3)
-        AVANCE_FIJO = 30  # R4: Avance fijo en mm
+        - S3 = GAP_FIJO + Q3 (ancho total ajustado con gap fijo)
+        - S4 = mm_unidad_montaje + AVANCE_FIJO (largo total ajustado)
+        - Q3 = resultado de _calcular_q3 (ancho total con gaps entre pistas)
+        - constante = 10000000 si planchas por separado (planchas_por_separado=True), 1 si no (planchas_por_separado=False)
         
-        try:
-            if es_manga:
-                # Cálculo especial de S3 para mangas
-                C3 = 0  # GAP para mangas es 0
-                B3 = datos.ancho  # B3 es el ancho, no el número de tintas
-                D3 = B3 + C3  # D3 = ancho + GAP_MANGA
-                E3 = datos.pistas
-                Q3 = D3 * E3 + C3  # Q3 = (ancho + GAP_MANGA) * pistas + GAP_MANGA
-                s3 = GAP_FIJO + Q3  # R3 + Q3
-            else:
-                # Calcular ancho total (F3) para etiquetas
-                ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
-                s3 = GAP_FIJO + ancho_total
+        Args:
+            datos: Objeto DatosLitografia con los datos necesarios
+            num_tintas: Número de tintas (colores)
+            es_manga: True si es manga, False si es etiqueta
             
-            # Obtener mm de la unidad de montaje (Q4)
+        Returns:
+            Dict con el precio calculado y detalles del cálculo
+            
+        Raises:
+            ValueError: Si no se puede determinar la unidad de montaje
+        """
+        try:
+            print("\n=== INICIO CÁLCULO DE PLANCHA ===")
+            print(f"Datos de entrada:")
+            print(f"- Ancho: {datos.ancho} mm")
+            print(f"- Pistas: {datos.pistas}")
+            print(f"- Número de tintas: {num_tintas}")
+            print(f"- Es manga: {es_manga}")
+            print(f"- Incluye planchas: {datos.planchas_por_separado}")
+            
+            # 1. Calcular Q3 (ancho total ajustado) usando el método auxiliar
+            q3_result = self._calcular_q3(num_tintas, datos.ancho, datos.pistas, es_manga)
+            q3 = q3_result['q3']
+            c3 = q3_result['c3']
+            d3 = q3_result['d3']
+            
+            # 2. Calcular S3 = GAP_FIJO + Q3 (ancho total con gap fijo)
+            s3 = self.GAP_FIJO + q3
+            
+            # 3. Obtener mm de la unidad de montaje (para S4)
             mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
             if not mejor_opcion:
                 raise ValueError("No se pudo determinar la unidad de montaje")
             mm_unidad_montaje = mejor_opcion.medida_mm
             
-            # Calcular S4 = Q4 + R4 (mm_unidad_montaje + avance_fijo)
-            s4 = mm_unidad_montaje + AVANCE_FIJO
+            # 4. Calcular S4 = mm_unidad_montaje + AVANCE_FIJO (largo total)
+            s4 = mm_unidad_montaje + self.AVANCE_FIJO
             
-            # Calcular precio sin constante (precio real)
-            precio_sin_constante = VALOR_MM * s3 * s4 * num_tintas
+            # 5. Calcular precio sin aplicar constante
+            precio_sin_constante = self.VALOR_MM_PLANCHA * s3 * s4 * num_tintas
             
-            # Determinar constante según si las planchas son por separado
-            constante = 1000000 if datos.incluye_planchas else 1
+            # 6. Determinar constante según si las planchas se cobran por separado
+            # NOTA: En la interfaz, "Planchas por separado" = "Sí" se traduce a planchas_por_separado=True
+            # Si planchas_por_separado es True, significa que las planchas se cobran por separado y la constante debe ser 10000000
+            # Si planchas_por_separado es False, significa que las planchas se incluyen en el cálculo y la constante debe ser 1
+            constante = 10000000 if datos.planchas_por_separado else 1
             
-            # Calcular precio final
+            # 7. Calcular precio final
             precio = precio_sin_constante / constante
             
-            # Imprimir información detallada en la consola
+            # Imprimir información detallada para depuración
             print("\n=== CÁLCULO DE PLANCHA ===")
-            print(f"VALOR_MM: ${VALOR_MM}/mm")
-            if es_manga:
-                print(f"B3 (Ancho): {B3} mm")
-                print(f"C3 (GAP mangas): {C3} mm")
-                print(f"D3 (ancho + C3): {D3} mm")
-                print(f"E3 (pistas): {E3}")
-                print(f"Q3 (D3*E3+C3): {Q3} mm")
-            else:
-                print(f"Ancho total: {ancho_total} mm")
-            print(f"Gap fijo (R3): {GAP_FIJO} mm")
+            print(f"VALOR_MM: ${self.VALOR_MM_PLANCHA}/mm")
+            print(f"B3 (Ancho): {datos.ancho} mm")
+            print(f"C3 (GAP): {c3} mm")
+            print(f"D3 (ancho + C3): {d3} mm")
+            print(f"E3 (pistas): {datos.pistas}")
+            print(f"Q3 (D3*E3+C3): {q3} mm")
+            print(f"Gap fijo (R3): {self.GAP_FIJO} mm")
             print(f"S3 (Total): {s3} mm")
             print(f"Unidad montaje: {mm_unidad_montaje} mm")
-            print(f"Avance fijo: {AVANCE_FIJO} mm")
+            print(f"Avance fijo: {self.AVANCE_FIJO} mm")
             print(f"S4 (Unidad + Avance): {s4} mm")
             print(f"Número de tintas: {num_tintas}")
-            print(f"Planchas por separado: {datos.incluye_planchas}")
+            print(f"Planchas por separado: {datos.planchas_por_separado}")
             print(f"Constante: {constante}")
             print(f"Precio sin constante: ${precio_sin_constante:.2f}")
             print(f"Precio final: ${precio:.2f}")
             
+            # Verificar si el precio es razonable (validación)
+            if precio_sin_constante > 0 and num_tintas > 0:
+                precio_por_tinta = precio_sin_constante / num_tintas
+                print(f"Precio por tinta: ${precio_por_tinta:.2f}")
+                
+                if precio_por_tinta < 10000 or precio_por_tinta > 1000000:
+                    print(f"ADVERTENCIA: El precio por tinta parece inusual: ${precio_por_tinta:.2f}")
+            
+            # Preparar detalles para el retorno
             detalles = {
-                'valor_mm': VALOR_MM,
-                'gap_fijo': GAP_FIJO,
-                'avance_fijo': AVANCE_FIJO,
+                'valor_mm': self.VALOR_MM_PLANCHA,
+                'gap_fijo': self.GAP_FIJO,
+                'avance_fijo': self.AVANCE_FIJO,
                 'mm_unidad_montaje': mm_unidad_montaje,
                 's3': s3,
                 's4': s4,
+                'q3': q3,
+                'c3': c3,
+                'd3': d3,
                 'num_tintas': num_tintas,
                 'es_manga': es_manga,
-                'incluye_planchas': datos.incluye_planchas,
+                'planchas_por_separado': datos.planchas_por_separado,
                 'constante': constante,
                 'precio_sin_constante': precio_sin_constante
             }
-            
-            if es_manga:
-                detalles.update({
-                    'b3': B3,
-                    'c3': C3,
-                    'd3': D3,
-                    'e3': E3,
-                    'q3': Q3
-                })
-            else:
-                detalles['ancho_total'] = ancho_total
             
             return {
                 'precio': precio,
                 'detalles': detalles
             }
+            
         except Exception as e:
-            print(f"Error en cálculo de plancha: {str(e)}")
+            print(f"Error en cálculo de precio de plancha: {str(e)}")
             return {
+                'precio': 0,
                 'error': str(e),
-                'precio': None,
                 'detalles': None
             }
 
@@ -331,110 +356,102 @@ class CalculadoraLitografia:
     def calcular_area_etiqueta(self, datos: DatosLitografia, num_tintas: int, 
                               medida_montaje: float, repeticiones: int, es_manga: bool = False) -> Dict:
         """
-        Calcula el área de la etiqueta según la fórmula:
-        Si num_tintas = 0:
-            area = (Q3/E3) * (Q4/E4)
-        Si no:
-            area = (S3/E3) * (Q4/E4)
-            
-        Para mangas:
-        S3 = R3 + Q3
-        Q3 = D3 * E3 + C3
-        C3 = 0 (para mangas)
-        D3 = B3 + C3 (donde B3 es el ancho)
-        E3 = número de pistas
+        Calcula el área de la etiqueta basada en dimensiones y configuración.
         
-        Para etiquetas:
-        Q3 = D3*E3 + C3
-        D3 = ancho + gap (3mm)
-        E3 = número de pistas
-        C3 = gap (3mm)
-        Q4 = medida de montaje
-        E4 = repeticiones (del cálculo de desperdicio)
-        S3 = R3 + F3
-        F3 = ancho total
-        R3 = gap fijo (40mm para etiquetas, 50mm para mangas)
+        El cálculo del área depende del número de tintas:
+        - Si num_tintas = 0: area = (Q3/E3) * (Q4/E4)
+        - Si num_tintas > 0: area = (S3/E3) * (Q4/E4)
+        
+        Donde:
+        - Q3 = Ancho total ajustado (calculado por _calcular_q3)
+        - S3 = GAP_FIJO + Q3 (ancho total con gap fijo)
+        - E3 = Número de pistas
+        - Q4 = Medida de montaje en mm
+        - E4 = Número de repeticiones
         
         Args:
             datos: Objeto DatosLitografia con los datos necesarios
-            num_tintas: Número de tintas
-            medida_montaje: Medida de montaje en mm
-            repeticiones: Número de repeticiones
+            num_tintas: Número de tintas (colores)
+            medida_montaje: Medida de montaje en mm (Q4)
+            repeticiones: Número de repeticiones (E4)
             es_manga: True si es manga, False si es etiqueta
             
         Returns:
-            Dict con el área calculada y los valores intermedios
+            Dict con el área calculada y los valores intermedios utilizados
         """
         try:
-            # Q4 es la medida de montaje y E4 las repeticiones (común para ambos)
-            q4 = medida_montaje
-            e4 = repeticiones
+            # 1. Definir parámetros comunes
+            q4 = medida_montaje  # Medida de montaje
+            e4 = repeticiones    # Número de repeticiones
+            e3 = datos.pistas    # Número de pistas
             
-            if es_manga:
-                # Cálculo especial de S3 para mangas
-                C3 = 0  # GAP para mangas es 0
-                B3 = datos.ancho  # B3 es el ancho
-                D3 = B3 + C3  # D3 = ancho + GAP_MANGA
-                E3 = datos.pistas
-                Q3 = D3 * E3 + C3  # Q3 = (ancho + GAP_MANGA) * pistas + GAP_MANGA
-                GAP_FIJO = 50  # R3 para mangas
-                s3 = GAP_FIJO + Q3  # R3 + Q3
-            else:
-                # Constantes para etiquetas
-                GAP = 3  # mm para D3 y C3
-                GAP_FIJO = 40  # R3 para etiquetas
+            # 2. Calcular Q3 usando el método auxiliar
+            q3_result = self._calcular_q3(num_tintas, datos.ancho, e3, es_manga)
+            q3 = q3_result['q3']
+            c3 = q3_result['c3']
+            d3 = q3_result['d3']
+            
+            # 3. Calcular S3 = GAP_FIJO + Q3
+            s3 = self.GAP_FIJO + q3
+            
+            # 4. Calcular ancho total para etiquetas (solo para información adicional)
+            f3 = None
+            f3_detalles = None
+            if not es_manga:
+                f3 = self.calcular_ancho_total(num_tintas, e3, datos.ancho)
                 
-                # Cálculos para Q3
-                d3 = datos.ancho + GAP
-                e3 = datos.pistas
-                c3 = GAP
-                q3 = (d3 * e3) + c3
+                # Calcular detalles de f3 para depuración
+                C3_f3 = 0 if e3 <= 1 else self.GAP
+                D3_f3 = datos.ancho + C3_f3
+                base_f3 = (e3 * D3_f3) - C3_f3
+                incremento_f3 = 10 if num_tintas == 0 else 20
+                f3_sin_redondeo = base_f3 + incremento_f3
+                f3_redondeado = math.ceil(f3_sin_redondeo / 10) * 10
                 
-                # Cálculos para S3
-                f3 = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
-                s3 = GAP_FIJO + f3
+                f3_detalles = {
+                    'c3_f3': C3_f3,
+                    'd3_f3': D3_f3,
+                    'base_f3': base_f3,
+                    'incremento_f3': incremento_f3,
+                    'f3_sin_redondeo': f3_sin_redondeo,
+                    'f3_redondeado': f3_redondeado
+                }
             
-            # Variables comunes para el cálculo final
-            e3 = datos.pistas  # E3 es el número de pistas en ambos casos
-            q3 = Q3 if es_manga else q3  # Usar Q3 de manga o etiqueta según corresponda
-            
-            # Calcular área según fórmula
+            # 5. Calcular área según fórmula basada en número de tintas
             if num_tintas == 0:
                 area_ancho = q3/e3
-                area_largo = q4/e4
-                area = area_ancho * area_largo
+                formula_usada = 'Q3/E3 * Q4/E4'
+                calculo_detallado = f"({q3}/{e3}) * ({q4}/{e4})"
             else:
                 area_ancho = s3/e3
+                formula_usada = 'S3/E3 * Q4/E4'
+                calculo_detallado = f"({s3}/{e3}) * ({q4}/{e4})"
+                
                 area_largo = q4/e4
                 area = area_ancho * area_largo
             
-            # Preparar detalles según tipo
+            # 6. Preparar detalles del cálculo
             detalles = {
-                'q4': q4,
-                'e4': e4,
-                'e3': e3,
+                'q3': q3,
+                'c3': c3,
+                'd3': d3,
                 's3': s3,
-                'formula_usada': 'Q3/E3 * Q4/E4' if num_tintas == 0 else 'S3/E3 * Q4/E4',
+                'q4': q4,
+                'e3': e3,
+                'e4': e4,
+                'gap_fijo': self.GAP_FIJO,
+                'formula_usada': formula_usada,
                 'area_ancho': area_ancho,
                 'area_largo': area_largo,
-                'calculo_detallado': f"({q3 if num_tintas == 0 else s3}/{e3}) * ({q4}/{e4})"
+                'calculo_detallado': calculo_detallado,
+                'es_manga': es_manga
             }
             
-            if es_manga:
+            # Agregar detalles específicos para etiquetas
+            if not es_manga and f3 is not None:
                 detalles.update({
-                    'b3': B3,
-                    'c3': C3,
-                    'd3': D3,
-                    'q3': Q3,
-                    'gap_fijo': GAP_FIJO
-                })
-            else:
-                detalles.update({
-                    'q3': q3,
-                    'd3': d3,
-                    'c3': c3,
                     'f3': f3,
-                    'gap_fijo': GAP_FIJO
+                    'f3_detalles': f3_detalles
                 })
             
             return {
@@ -442,6 +459,7 @@ class CalculadoraLitografia:
                 'detalles': detalles
             }
         except Exception as e:
+            print(f"Error en cálculo de área de etiqueta: {str(e)}")
             return {
                 'error': str(e),
                 'area': None,
@@ -465,18 +483,14 @@ class CalculadoraLitografia:
             Dict con el valor calculado y los valores intermedios
         """
         try:
-            # Constantes
-            GRAMOS_M2 = 8  # gr/m2
-            VALOR_MM2 = 0.00000800  # $/mm2
-            
             # Calcular valor por etiqueta
-            valor_etiqueta = num_tintas * VALOR_MM2 * area_etiqueta
+            valor_etiqueta = num_tintas * self.VALOR_MM2_TINTA * area_etiqueta
             
             return {
                 'valor': valor_etiqueta,
                 'detalles': {
-                    'gramos_m2': GRAMOS_M2,
-                    'valor_mm2': VALOR_MM2,
+                    'gramos_m2': self.GRAMOS_M2_TINTA,
+                    'valor_mm2': self.VALOR_MM2_TINTA,
                     'area_etiqueta': area_etiqueta,
                     'num_tintas': num_tintas
                 }
@@ -491,51 +505,69 @@ class CalculadoraLitografia:
     def generar_reporte_completo(self, datos: DatosLitografia, num_tintas: int, es_manga: bool = False) -> Dict:
         """Genera un reporte completo con todos los cálculos"""
         try:
-            # Calcular ancho total primero (una sola vez)
-            ancho_total = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
-            
-            # Inicializar el resultado
+            # Inicializar resultado con valores por defecto
             resultado = {
-                'ancho_total': ancho_total,
-                'desperdicio': self.calcular_desperdicio(datos, es_manga)
+                'ancho_total': self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho),
+                'valor_tinta': 0  # Inicializar valor_tinta a 0 por defecto
             }
             
-            # Obtener mejor opción primero ya que la necesitamos para varios cálculos
+            # Cálculo de desperdicio
+            resultado['desperdicio'] = self.calcular_desperdicio(datos, es_manga)
+            
+            # Obtener mejor opción de desperdicio
             mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
             
-            # Calcular precio de plancha siempre (independientemente de si se incluye o no)
+            if not mejor_opcion:
+                return {
+                    'error': 'No se encontró una opción válida de desperdicio',
+                    'detalles': 'Revise los valores de ancho y avance'
+                }
+            
+            # Cálculo de precio de plancha
             resultado['precio_plancha'] = self.calcular_precio_plancha(datos, num_tintas, es_manga)
             
-            # Agregar cálculos de troquel si corresponde y tenemos mejor opción
-            if datos.incluye_troquel and mejor_opcion:
-                calculo_troquel = self.calcular_valor_troquel(
-                    datos=datos,
-                    repeticiones=mejor_opcion.repeticiones,  # Usar repeticiones de la mejor opción
+            # Cálculo de valor de troquel
+            if datos.incluye_troquel:
+                resultado['valor_troquel'] = self.calcular_valor_troquel(
+                    datos,
+                    mejor_opcion.repeticiones,
                     troquel_existe=datos.troquel_existe
                 )
-                resultado['valor_troquel'] = calculo_troquel['valor']
             
             # Cálculo de área de etiqueta
-            if mejor_opcion:
-                resultado['area_etiqueta'] = self.calcular_area_etiqueta(
-                    datos, 
-                    num_tintas, 
-                    mejor_opcion.medida_mm, 
-                    mejor_opcion.repeticiones,
-                    es_manga
-                )['area']
-                resultado['unidad_montaje_sugerida'] = mejor_opcion.dientes
+            calculo_area = self.calcular_area_etiqueta(
+                datos, 
+                num_tintas, 
+                mejor_opcion.medida_mm, 
+                mejor_opcion.repeticiones,
+                es_manga
+            )
+            resultado['area_etiqueta'] = calculo_area
+            resultado['unidad_montaje_sugerida'] = mejor_opcion.dientes
                 
-            # Calcular valor de tinta
-            if num_tintas > 0:
-                resultado['valor_tinta'] = self.calcular_valor_tinta_etiqueta(
-                    resultado['area_etiqueta'],
-                    num_tintas
-                )['valor']
+            # Calcular valor de tinta solo si hay tintas y el área se calculó correctamente
+            if num_tintas > 0 and isinstance(calculo_area, dict) and 'area' in calculo_area and calculo_area['area'] is not None:
+                try:
+                    calculo_tinta = self.calcular_valor_tinta_etiqueta(
+                        calculo_area['area'],
+                        num_tintas
+                    )
+                    if isinstance(calculo_tinta, dict) and 'valor' in calculo_tinta and calculo_tinta['valor'] is not None:
+                        resultado['valor_tinta'] = calculo_tinta['valor']
+                    else:
+                        print("Advertencia: El cálculo de tinta no devolvió un valor válido")
+                except Exception as e:
+                    print(f"Error al calcular valor de tinta: {str(e)}")
+            else:
+                print(f"No se calculó valor de tinta: num_tintas={num_tintas}, area_calculada={'Si' if isinstance(calculo_area, dict) and 'area' in calculo_area else 'No'}")
             
             return resultado
         except Exception as e:
-            return {'error': str(e)}
+            return {
+                'error': str(e),
+                'detalles': 'Error al generar el reporte completo',
+                'valor_tinta': 0  # Asegurar que valor_tinta esté presente incluso en caso de error
+            }
 
     def generar_debug_info(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """
@@ -558,7 +590,7 @@ class CalculadoraLitografia:
                 "es_manga": es_manga,
                 "gap": datos.gap,
                 "gap_avance": datos.gap_avance,
-                "incluye_planchas": datos.incluye_planchas,
+                "planchas_por_separado": datos.planchas_por_separado,
                 "incluye_troquel": datos.incluye_troquel,
                 "troquel_existe": datos.troquel_existe
             },
@@ -716,8 +748,7 @@ class CalculadoraLitografia:
                 # 4. Primera parte: (s3 * s7 * o7)
                 primera_parte = s3 * s7 * o7
                 
-                # 5. Calcular papel/lam usando CalculadoraCostosEscala
-                calc_costos = CalculadoraCostosEscala()
+                # 5. Calcular papel/lam directamente sin usar CalculadoraCostosEscala
                 mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
                 calculo_area = self.calcular_area_etiqueta(
                     datos, 
@@ -727,7 +758,7 @@ class CalculadoraLitografia:
                     es_manga
                 )
                 area_etiqueta = calculo_area['area']
-                papel_lam = calc_costos.calcular_papel_lam(escala, area_etiqueta, valor_material_mm2, 0)
+                papel_lam = area_etiqueta * valor_material_mm2 * escala
                 
                 # 6. Segunda parte: 10% del papel/lam
                 segunda_parte = 0.1 * papel_lam
@@ -837,7 +868,7 @@ class CalculadoraLitografia:
         print("\n=== INFORMACIÓN GLOBAL ===")
         print(f"Número de tintas: {num_tintas}")
         print(f"Ancho total: {ancho_total:.2f} mm")  # Usar el ancho_total pasado como parámetro
-        print(f"Gap fijo: {self.G4} mm")
+        print(f"Gap fijo: {self.GAP_FIJO} mm")
         print(f"Valor material: ${valor_material:f}/mm²")
 
     def calcular_precio_troquel(self, datos: DatosLitografia) -> Dict:
@@ -857,3 +888,10 @@ class CalculadoraLitografia:
             }
         except Exception as e:
             return {'error': str(e)}
+
+    def _calcular_q3(self, num_tintas: int, ancho: float, pistas: int, es_manga: bool = False) -> Dict:
+        """
+        Método auxiliar para calcular Q3, C3 y D3 para cálculos de área y precio.
+        Este método es un wrapper del método de la clase base para mantener compatibilidad.
+        """
+        return self.calcular_q3(ancho, pistas, es_manga)

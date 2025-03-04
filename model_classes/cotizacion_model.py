@@ -46,7 +46,7 @@ class ConfiguracionProduccion:
     etiqueta: EtiquetaConfig
     material: MaterialConfig
     escalas: List[int] = field(default_factory=lambda: [1000, 2000, 3000, 5000])
-    incluye_planchas: bool = False
+    planchas_por_separado: bool = False
     troquel_existe: bool = False
     num_rollos: int = 1000
     

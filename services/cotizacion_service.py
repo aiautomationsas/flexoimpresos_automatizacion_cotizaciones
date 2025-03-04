@@ -26,7 +26,7 @@ class CotizacionService:
             ancho=config.etiqueta.ancho,
             avance=config.etiqueta.avance,
             pistas=config.etiqueta.pistas,
-            incluye_planchas=not config.incluye_planchas,
+            planchas_por_separado=config.planchas_por_separado,
             incluye_troquel=True,
             troquel_existe=config.troquel_existe,
             gap=config.etiqueta.gap,
@@ -76,7 +76,7 @@ class CotizacionService:
         valor_plancha_separado = None
         valor_plancha_para_calculo = valor_plancha
         
-        if config.incluye_planchas:
+        if config.planchas_por_separado:
             valor_plancha_separado = self._calcular_valor_plancha_separado(valor_plancha_dict)
             valor_plancha_para_calculo = 0
         
