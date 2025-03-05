@@ -232,22 +232,11 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
 {plancha_info}
 """
 
-def generar_identificador(tipo_impresion: str, material_code: str, ancho: float, avance: float,
-                         num_tintas: int, acabado_code: str, nombre_cliente: str, referencia: str,
-                         num_rollos: int, consecutivo: int = 1984) -> str:
-    """Genera el código único para la cotización"""
-    tipo = "ET" if "ETIQUETA" in tipo_impresion.upper() else "MT"
-    material = material_code.split('-')[0].upper()  # Only take the part before the first '-'
-    medidas = f"{int(ancho)}X{int(avance)}MM"
-    
-    if "FOIL" in acabado_code.upper():
-        tintas = f"{num_tintas}T+FOIL"
-        acabado = acabado_code.upper().replace("FOIL", "").replace("+", "").strip()
-    else:
-        tintas = f"{num_tintas}T"
-        acabado = acabado_code.upper()
-    
-    return f"{tipo} {material} {medidas} {tintas} {acabado} RX{num_rollos} {nombre_cliente.upper()} {referencia.upper()} {consecutivo}"
+def generar_identificador(tipo_producto: str, material_code: str, ancho: float, avance: float,
+                       num_pistas: int, num_tintas: int) -> str:
+    """Genera un identificador único para la cotización"""
+    tipo = "ET" if "ETIQUETA" in tipo_producto.upper() else "MT"
+    return f"{tipo}-{material_code}-{ancho:.0f}x{avance:.0f}-{num_pistas}P-{num_tintas}T"
 
 def calcular_valor_plancha_separado(valor_plancha_dict: Dict) -> float:
     """Calcula el valor de la plancha cuando se cobra por separado"""
@@ -288,19 +277,19 @@ def main():
         db = DBManager()
         materiales = db.get_materiales()
         acabados = db.get_acabados()
-        tipos_impresion = db.get_tipos_impresion()
+        tipos_producto = db.get_tipos_producto()
         
     except Exception as e:
         st.error(f"Error al conectar con la base de datos: {str(e)}")
         return
     
-    # Definir tipo de impresión primero
-    tipo_impresion_seleccionado = st.selectbox(
-        "Tipo de Impresión",
-        options=[(t.id, t.nombre) for t in tipos_impresion],
+    # Definir tipo de producto primero
+    tipo_producto_seleccionado = st.selectbox(
+        "Tipo de Producto",
+        options=[(t.id, t.nombre) for t in tipos_producto],
         format_func=lambda x: x[1]
     )
-    es_manga = "MANGA" in tipo_impresion_seleccionado[1].upper()
+    es_manga = "MANGA" in tipo_producto_seleccionado[1].upper()
     
     col1, col2, col3 = st.columns(3)
     
@@ -503,15 +492,12 @@ def main():
 
                 # Generar identificador
                 codigo_unico = generar_identificador(
-                    tipo_impresion=tipo_impresion_seleccionado[1],
+                    tipo_producto=tipo_producto_seleccionado[1],
                     material_code=material_seleccionado[1].split('-')[0].strip(),
                     ancho=ancho,
                     avance=avance,
-                    num_tintas=num_tintas,
-                    acabado_code=acabado_seleccionado[1].split('-')[0].strip(),
-                    nombre_cliente=cliente_seleccionado[1],
-                    referencia=referencia_seleccionada[1],
-                    num_rollos=num_rollos
+                    num_pistas=pistas,
+                    num_tintas=num_tintas
                 )
 
                 # Mostrar información técnica para impresión

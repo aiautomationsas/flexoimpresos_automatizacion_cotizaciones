@@ -126,8 +126,11 @@ class Cotizacion:
     unidades_por_rollo: Optional[int] = None
     estado: str = 'Pendiente'
     avance: float = 0.0
-    tipo_impresion_id: Optional[int] = None
+    tipo_producto_id: Optional[int] = None
     escalas: List['Escala'] = field(default_factory=list)
+    etiquetas_por_rollo: Optional[int] = None
+    es_recotizacion: bool = False
+    precio_escala: List[int] = field(default_factory=list)
 
 @dataclass
 class Material:
@@ -178,10 +181,10 @@ class ReferenciaCliente:
     descripcion: Optional[str] = None
     creado_en: Optional[datetime] = None
     actualizado_en: Optional[datetime] = None
-    tipo_impresion_id: Optional[int] = None
+    tipo_producto_id: Optional[int] = None
 
 @dataclass
-class TipoImpresion:
+class TipoProducto:
     id: Optional[int] = None
     nombre: str = ''
     descripcion: Optional[str] = None

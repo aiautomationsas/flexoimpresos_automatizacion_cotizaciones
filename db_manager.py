@@ -1,6 +1,6 @@
 from supabase import create_client, Client
 from typing import List, Optional
-from models import Cotizacion, Material, Acabado, Cliente, Comercial, Escala, ReferenciaCliente, TipoImpresion
+from models import Cotizacion, Material, Acabado, Cliente, Comercial, Escala, ReferenciaCliente, TipoProducto
 import os
 import logging
 from dotenv import load_dotenv
@@ -226,7 +226,7 @@ class DBManager:
                 'p_cliente_id': referencia.cliente_id,
                 'p_codigo_referencia': referencia.codigo_referencia,
                 'p_descripcion': referencia.descripcion,
-                'p_tipo_impresion_id': referencia.tipo_impresion_id
+                'p_tipo_producto_id': referencia.tipo_producto_id
             }
             
             print("Datos RPC preparados:")
@@ -291,9 +291,9 @@ class DBManager:
         cotizacion_data['escalas'] = escalas
         return Cotizacion(**cotizacion_data)
 
-    def get_tipos_impresion(self) -> List[TipoImpresion]:
-        response = self.client.table('tipo_impresion').select('*').execute()
-        return [TipoImpresion(**item) for item in response.data]
+    def get_tipos_producto(self) -> List[TipoProducto]:
+        response = self.client.table('tipo_producto').select('*').execute()
+        return [TipoProducto(**item) for item in response.data]
 
     def crear_cliente_prueba(self):
         try:
