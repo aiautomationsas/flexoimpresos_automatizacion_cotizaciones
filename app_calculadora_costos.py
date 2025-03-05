@@ -14,9 +14,21 @@ from datetime import datetime
 
 # Configuración de página
 st.set_page_config(
-    page_title="Cotizador Flexo Impresos",
+    page_title="Sistema de Cotización - Flexo Impresos",
+    page_icon="🏭",
     layout="wide"
 )
+
+# Título principal con estilo
+st.markdown("""
+    <h1 style='text-align: center; color: #2c3e50;'>
+        🏭 Sistema de Cotización - Flexo Impresos
+    </h1>
+    <p style='text-align: center; color: #7f8c8d; font-size: 1.2em;'>
+        Calculadora de costos para productos flexográficos
+    </p>
+    <hr>
+""", unsafe_allow_html=True)
 
 # Inicializar la base de datos
 db = DBManager()
@@ -376,7 +388,7 @@ def main():
             referencias = db.get_referencias_cliente(cliente_seleccionado[0])
             referencia_seleccionada = st.selectbox(
                 "Referencia",
-                options=[(r.id, r.codigo_referencia) for r in referencias] if referencias else [],
+                options=[(r.id, r.descripcion) for r in referencias] if referencias else [],
                 format_func=lambda x: x[1]
             ) if referencias else None
 

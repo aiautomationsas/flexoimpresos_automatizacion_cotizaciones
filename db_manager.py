@@ -193,10 +193,9 @@ class DBManager:
             print(f"\n=== INICIO GET_REFERENCIAS_CLIENTE para cliente_id={cliente_id} ===")
             
             # Llamar a RPC para obtener referencias
-            response = self.client.rpc(
-                'obtener_referencias_cliente',
-                {'p_cliente_id': cliente_id}
-            ).execute()
+            response = self.client.table('referencias_cliente').select(
+                'descripcion'
+            ).eq('cliente_id', cliente_id).execute()
             
             print("Respuesta de get_referencias_cliente:")
             print("Tipo de respuesta:", type(response))
@@ -206,7 +205,7 @@ class DBManager:
                 print("No se encontraron referencias para este cliente")
                 return []
             
-            referencias = [ReferenciaCliente(**item) for item in response.data]
+            referencias = [ReferenciaCliente(cliente_id=cliente_id, **item) for item in response.data]
             print(f"Número de referencias encontradas: {len(referencias)}")
             print("=== FIN GET_REFERENCIAS_CLIENTE ===\n")
             return referencias
@@ -224,7 +223,6 @@ class DBManager:
             # Preparar datos RPC
             rpc_data = {
                 'p_cliente_id': referencia.cliente_id,
-                'p_codigo_referencia': referencia.codigo_referencia,
                 'p_descripcion': referencia.descripcion,
                 'p_tipo_producto_id': referencia.tipo_producto_id
             }

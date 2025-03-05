@@ -176,7 +176,6 @@ class Escala:
 @dataclass
 class ReferenciaCliente:
     cliente_id: int
-    codigo_referencia: str
     id: Optional[int] = None
     descripcion: Optional[str] = None
     creado_en: Optional[datetime] = None
