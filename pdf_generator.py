@@ -92,15 +92,9 @@ class CotizacionPDF:
         if datos_cotizacion.get('es_manga') and datos_cotizacion.get('tipo_grafado'):
             elements.append(Paragraph(f"Grafado: {datos_cotizacion['tipo_grafado']}", self.styles['Normal']))
         
-        # Si no se incluyen planchas, ajustar el valor
+        # Si no se incluyen planchas, mostrar "Planchas por separado" con el valor original
         if datos_cotizacion['valor_plancha_separado'] and not datos_cotizacion.get('es_manga'):
-            valor_ajustado = self._ajustar_valor_plancha(datos_cotizacion['valor_plancha_separado'])
-            elements.append(Paragraph(f"Planchas por separado: ${valor_ajustado:,.0f}", self.styles['Normal']))
-        
-        # Agregar valor de plancha si no está incluida
-        if datos_cotizacion.get('valor_plancha_separado'):
-            elements.append(Spacer(1, 10))
-            elements.append(Paragraph(f"Valor Plancha: ${datos_cotizacion['valor_plancha_separado']:,.2f}", self.styles['Normal']))
+            elements.append(Paragraph(f"Planchas por separado: ${datos_cotizacion['valor_plancha_separado']:,.0f}", self.styles['Normal']))
         
         elements.append(Spacer(1, 20))
 
@@ -139,6 +133,9 @@ class CotizacionPDF:
         elements.append(Paragraph("Política de Cobranza:", self.styles['Heading2']))
         elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
         elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
+        
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("Vigencia de la cotización: 30 días", self.styles['Normal']))
         
         # Agregar firma del comercial
         if datos_cotizacion.get('comercial_nombre'):
