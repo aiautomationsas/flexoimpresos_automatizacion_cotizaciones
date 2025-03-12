@@ -11,6 +11,7 @@ import tempfile
 from pdf_generator import CotizacionPDF
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
+import math
 
 # Configuración de página
 st.set_page_config(
@@ -291,13 +292,18 @@ def calcular_valor_plancha_separado(valor_plancha_dict: Dict) -> float:
     if isinstance(valor_plancha_dict, dict) and 'detalles' in valor_plancha_dict:
         detalles = valor_plancha_dict['detalles']
         if 'precio_sin_constante' in detalles:
-            return detalles['precio_sin_constante']
+            # Calcular el valor base
+            valor_base = detalles['precio_sin_constante'] / 0.75
+            # Redondear al múltiplo de 1000 más cercano hacia arriba
+            return math.ceil(valor_base / 1000) * 1000
     return 0
 
 def crear_datos_cotizacion(cliente: str, referencia: str, codigo_unico: str, material: str,
                           acabado: str, num_tintas: int, num_rollos: int, valor_troquel: Dict,
                           valor_plancha_separado: Optional[float], resultados: List[Dict],
-                          es_manga: bool = False, tipo_grafado: Optional[str] = None) -> Dict:
+                          es_manga: bool = False, tipo_grafado: Optional[str] = None,
+                          adhesivo_tipo: Optional[str] = None, comercial_nombre: Optional[str] = None,
+                          comercial_email: Optional[str] = None, comercial_telefono: Optional[str] = None) -> Dict:
     """Crea el diccionario de datos para la cotización"""
     # Extraer el valor numérico del troquel del diccionario
     valor_troquel_final = valor_troquel.get('valor', 0) if isinstance(valor_troquel, dict) else 0
@@ -307,15 +313,19 @@ def crear_datos_cotizacion(cliente: str, referencia: str, codigo_unico: str, mat
         'cliente': cliente,
         'referencia': referencia,
         'identificador': codigo_unico,
-        'material': material.split('(')[0].strip(),
-        'acabado': acabado.split('(')[0].strip(),
+        'material': material,
+        'acabado': acabado,
         'num_tintas': num_tintas,
         'num_rollos': num_rollos,
         'valor_troquel': valor_troquel_final,
         'valor_plancha_separado': valor_plancha_separado,
         'resultados': resultados,
         'es_manga': es_manga,
-        'tipo_grafado': tipo_grafado
+        'tipo_grafado': tipo_grafado,
+        'adhesivo_tipo': adhesivo_tipo,
+        'comercial_nombre': comercial_nombre,
+        'comercial_email': comercial_email,
+        'comercial_telefono': comercial_telefono
     }
 
 def main():
@@ -356,7 +366,7 @@ def main():
         
         material_seleccionado = st.selectbox(
             "Material",
-            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre) for m in materiales_filtrados],
+            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre, m.adhesivo_tipo) for m in materiales_filtrados],
             format_func=lambda x: x[2]
         )
         
@@ -424,7 +434,7 @@ def main():
             referencias = db.get_referencias_cliente(cliente_seleccionado[0])
             referencia_seleccionada = st.selectbox(
                 "Referencia",
-                options=[(r.id, r.descripcion) for r in referencias] if referencias else [],
+                options=[(r.id, r.descripcion, r.comercial_nombre, r.comercial_email, r.comercial_telefono) for r in referencias] if referencias else [],
                 format_func=lambda x: x[1]
             ) if referencias else None
 
@@ -622,15 +632,19 @@ def main():
                         cliente=cliente_seleccionado[1],
                         referencia=referencia_seleccionada[1],
                         codigo_unico=codigo_unico,
-                        material=material_seleccionado[1],
-                        acabado=acabado_seleccionado[1],
+                        material=material_seleccionado[1].split(' - ')[1].split(' ($')[0],  # Extraer solo el nombre
+                        acabado=acabado_seleccionado[1].split(' - ')[1].split(' ($')[0],   # Extraer solo el nombre
                         num_tintas=num_tintas,
                         num_rollos=num_rollos,
                         valor_troquel=reporte_lito.get('valor_troquel', 0),
                         valor_plancha_separado=valor_plancha_separado,
                         resultados=resultados,
                         es_manga=es_manga,
-                        tipo_grafado=tipo_grafado if es_manga else None
+                        tipo_grafado=tipo_grafado if es_manga else None,
+                        adhesivo_tipo=material_seleccionado[3] if len(material_seleccionado) > 3 else None,
+                        comercial_nombre=referencia_seleccionada[2] if len(referencia_seleccionada) > 2 else None,
+                        comercial_email=referencia_seleccionada[3] if len(referencia_seleccionada) > 3 else None,
+                        comercial_telefono=referencia_seleccionada[4] if len(referencia_seleccionada) > 4 else None
                     )
                     pdf_gen.generar_pdf(datos_cotizacion, tmp_file.name)
                     

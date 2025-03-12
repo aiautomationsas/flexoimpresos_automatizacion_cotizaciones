@@ -44,12 +44,12 @@ class CotizacionPDF:
 
         # Encabezado
         header_data = [
-            ['FLEXO IMPRESOS S.A.S.', ''],
-            ['Nit: 900.528.680-0', f'COTIZACION'],
-            ['Dirección: Calle 28A # 65A - 9', f'CTZ{datos_cotizacion["consecutivo"]:08d}'],
-            ['Medellín, Colombia', ''],
-            ['Teléfono: 57 (604) 4449661', ''],
-            ['www.flexoimpresos.com', '']
+            ['FLEXO IMPRESOS S.A.S.'],
+            ['NIT: 901.297.493-1'],
+            ['Calle 79 Sur # 47 G 21'],
+            ['La Estrella - Antioquia'],
+            ['Tel: (604) 604 0404'],
+            ['Identificador']
         ]
         
         header_table = Table(header_data, colWidths=[4*inch, 2*inch])
@@ -72,20 +72,35 @@ class CotizacionPDF:
         # Asunto y detalles
         elements.append(Paragraph(f"Asunto: Cotización {datos_cotizacion['referencia']}", self.styles['Normal']))
         elements.append(Spacer(1, 10))
-        elements.append(Paragraph(f"Etiquetas: {datos_cotizacion['identificador']}", self.styles['Normal']))
+        elements.append(Paragraph(f"Identificador: {datos_cotizacion['identificador']}", self.styles['Normal']))
         elements.append(Paragraph(f"Material: {datos_cotizacion['material']}", self.styles['Normal']))
-        elements.append(Paragraph(f"Adhesivo: PERMANENTE", self.styles['Normal']))
-        elements.append(Paragraph(f"Terminación: {datos_cotizacion['acabado']}", self.styles['Normal']))
+        
+        # Solo mostrar adhesivo si tiene un valor válido
+        if datos_cotizacion.get('adhesivo_tipo') and datos_cotizacion['adhesivo_tipo'].strip():
+            elements.append(Paragraph(f"Adhesivo: {datos_cotizacion['adhesivo_tipo']}", self.styles['Normal']))
+        
+        elements.append(Paragraph(f"Acabado: {datos_cotizacion['acabado']}", self.styles['Normal']))
         elements.append(Paragraph(f"Tintas: {datos_cotizacion['num_tintas']}", self.styles['Normal']))
-        elements.append(Paragraph(f"ET X ROLLO: {datos_cotizacion['num_rollos']:,}", self.styles['Normal']))
+        
+        # Modificar el texto según sea etiqueta o manga
+        if datos_cotizacion.get('es_manga'):
+            elements.append(Paragraph(f"MT X PAQUETE: {datos_cotizacion['num_rollos']:,}", self.styles['Normal']))
+        else:
+            elements.append(Paragraph(f"ET X ROLLO: {datos_cotizacion['num_rollos']:,}", self.styles['Normal']))
         
         # Agregar tipo de grafado si es manga
         if datos_cotizacion.get('es_manga') and datos_cotizacion.get('tipo_grafado'):
             elements.append(Paragraph(f"Grafado: {datos_cotizacion['tipo_grafado']}", self.styles['Normal']))
         
-        if datos_cotizacion['valor_plancha_separado']:
+        # Si no se incluyen planchas, ajustar el valor
+        if datos_cotizacion['valor_plancha_separado'] and not datos_cotizacion.get('es_manga'):
             valor_ajustado = self._ajustar_valor_plancha(datos_cotizacion['valor_plancha_separado'])
             elements.append(Paragraph(f"Planchas por separado: ${valor_ajustado:,.0f}", self.styles['Normal']))
+        
+        # Agregar valor de plancha si no está incluida
+        if datos_cotizacion.get('valor_plancha_separado'):
+            elements.append(Spacer(1, 10))
+            elements.append(Paragraph(f"Valor Plancha: ${datos_cotizacion['valor_plancha_separado']:,.2f}", self.styles['Normal']))
         
         elements.append(Spacer(1, 20))
 
@@ -115,15 +130,34 @@ class CotizacionPDF:
         elements.append(Paragraph("% de Tolerancia: 10% + ó - de acuerdo a la cantidad pedida", self.styles['Normal']))
         elements.append(Spacer(1, 20))
 
-        elements.append(Paragraph("Política de entrega:", self.styles['Normal']))
-        elements.append(Paragraph("Repeticiones: 8 días calendario desde el envío de la OC", self.styles['Normal']))
-        elements.append(Paragraph("Cambios: 13 días calendario desde la aprobación de la sherpa", self.styles['Normal']))
-        elements.append(Paragraph("Nuevas: 15 días calendario desde la aprobación de la sherpa", self.styles['Normal']))
-        elements.append(Spacer(1, 20))
-
-        elements.append(Paragraph("Política de cartera:", self.styles['Normal']))
-        elements.append(Paragraph("Se retiene el despacho con una mora de 16 a 30 días", self.styles['Normal']))
-        elements.append(Paragraph("Se retiene producción con una mora de 31 a 45 días", self.styles['Normal']))
+        elements.append(Paragraph("Política de Entrega:", self.styles['Heading2']))
+        elements.append(Paragraph("• Repeticiones: 13 días calendario a partir de la confirmación del pedido", self.styles['Normal']))
+        elements.append(Paragraph("• Cambios: 15 días calendario a partir de la aprobación del sherpa", self.styles['Normal']))
+        elements.append(Paragraph("• Nuevos: 20 días calendario a partir de la aprobación del sherpa", self.styles['Normal']))
+        
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("Política de Cobranza:", self.styles['Heading2']))
+        elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
+        elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
+        
+        # Agregar firma del comercial
+        if datos_cotizacion.get('comercial_nombre'):
+            elements.append(Spacer(1, 40))  # Espacio adicional antes de la firma
+            
+            # Crear estilo para la firma
+            firma_style = ParagraphStyle(
+                'Firma',
+                parent=self.styles['Normal'],
+                alignment=1,  # Centrado
+                spaceAfter=6  # Espacio después de cada línea
+            )
+            
+            # Agregar datos del comercial
+            elements.append(Paragraph(datos_cotizacion['comercial_nombre'].upper(), firma_style))
+            if datos_cotizacion.get('comercial_email'):
+                elements.append(Paragraph(datos_cotizacion['comercial_email'], firma_style))
+            if datos_cotizacion.get('comercial_telefono'):
+                elements.append(Paragraph(f"Cel {datos_cotizacion['comercial_telefono']}", firma_style))
 
         # Generar PDF
         doc.build(elements) 

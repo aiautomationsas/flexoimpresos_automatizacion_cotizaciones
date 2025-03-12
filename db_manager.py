@@ -53,10 +53,30 @@ class DBManager:
 
     def get_materiales(self) -> List[Material]:
         try:
-            response = self.client.table('materiales').select('*').execute()
+            # Consulta simple a la tabla materiales
+            response = self.client.from_('materiales').select(
+                'id, nombre, valor, updated_at, code, id_adhesivos, adhesivos(tipo)'
+            ).execute()
+            
             if not response.data:
                 logging.warning("No se encontraron materiales")
-            return [Material(**item) for item in response.data]
+                return []
+            
+            # Procesar los resultados para aplanar la estructura
+            materiales = []
+            for item in response.data:
+                material_data = {
+                    'id': item['id'],
+                    'nombre': item['nombre'],
+                    'valor': item['valor'],
+                    'updated_at': item['updated_at'],
+                    'code': item['code'],
+                    'id_adhesivos': item['id_adhesivos'],
+                    'adhesivo_tipo': item['adhesivos']['tipo'] if item['adhesivos'] else None
+                }
+                materiales.append(Material(**material_data))
+            
+            return materiales
         except Exception as e:
             logging.error(f"Error al obtener materiales: {str(e)}")
             raise
@@ -192,10 +212,21 @@ class DBManager:
         try:
             print(f"\n=== INICIO GET_REFERENCIAS_CLIENTE para cliente_id={cliente_id} ===")
             
-            # Llamar a RPC para obtener referencias
-            response = self.client.table('referencias_cliente').select(
-                'descripcion'
-            ).eq('cliente_id', cliente_id).execute()
+            # Consulta directa con JOIN para obtener referencias con datos del comercial
+            response = (
+                self.client.from_('referencias_cliente')
+                .select('''
+                    *,
+                    comercial:comerciales!referencias_cliente_id_comercial_fkey(
+                        id,
+                        nombre,
+                        email,
+                        celular
+                    )
+                ''')
+                .eq('cliente_id', cliente_id)
+                .execute()
+            )
             
             print("Respuesta de get_referencias_cliente:")
             print("Tipo de respuesta:", type(response))
@@ -205,7 +236,25 @@ class DBManager:
                 print("No se encontraron referencias para este cliente")
                 return []
             
-            referencias = [ReferenciaCliente(cliente_id=cliente_id, **item) for item in response.data]
+            referencias = []
+            for item in response.data:
+                # Extraer los datos del comercial del objeto anidado
+                comercial_data = item.get('comercial', {})
+                comercial_nombre = comercial_data.get('nombre', '') if comercial_data else ''
+                comercial_email = comercial_data.get('email', '') if comercial_data else ''
+                comercial_telefono = str(comercial_data.get('celular', '')) if comercial_data else ''
+                
+                # Crear un diccionario con los datos necesarios
+                ref_data = {
+                    'cliente_id': cliente_id,
+                    'descripcion': item['descripcion'],
+                    'id_comercial': item['id_comercial'],
+                    'comercial_nombre': comercial_nombre,
+                    'comercial_email': comercial_email,
+                    'comercial_telefono': comercial_telefono
+                }
+                referencias.append(ReferenciaCliente(**ref_data))
+            
             print(f"Número de referencias encontradas: {len(referencias)}")
             print("=== FIN GET_REFERENCIAS_CLIENTE ===\n")
             return referencias

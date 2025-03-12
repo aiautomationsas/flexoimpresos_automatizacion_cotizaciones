@@ -139,6 +139,16 @@ class Material:
     valor: float = 0.0
     updated_at: Optional[datetime] = None
     code: str = ''
+    id_adhesivos: Optional[int] = None
+    adhesivo_tipo: Optional[str] = None
+
+@dataclass
+class Adhesivo:
+    id: Optional[int] = None
+    tipo: str = ''
+    descripcion: Optional[str] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
 
 @dataclass
 class Acabado:
@@ -181,6 +191,10 @@ class ReferenciaCliente:
     creado_en: Optional[datetime] = None
     actualizado_en: Optional[datetime] = None
     tipo_producto_id: Optional[int] = None
+    id_comercial: Optional[int] = None
+    comercial_nombre: Optional[str] = None
+    comercial_email: Optional[str] = None
+    comercial_telefono: Optional[str] = None
 
 @dataclass
 class TipoProducto:
