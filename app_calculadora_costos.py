@@ -245,10 +245,46 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
 """
 
 def generar_identificador(tipo_producto: str, material_code: str, ancho: float, avance: float,
-                       num_pistas: int, num_tintas: int) -> str:
-    """Genera un identificador único para la cotización"""
-    tipo = "ET" if "ETIQUETA" in tipo_producto.upper() else "MT"
-    return f"{tipo}-{material_code}-{ancho:.0f}x{avance:.0f}-{num_pistas}P-{num_tintas}T"
+                       num_pistas: int, num_tintas: int, acabado_code: str, etiquetas_rollo: int,
+                       cliente: str, referencia: str, consecutivo: int) -> str:
+    """Genera un identificador único para la cotización con el siguiente formato:
+    TIPO MATERIAL ANCHO_x_AVANCE TINTAS [ACABADO] [RX/MX_ETIQUETAS] CLIENTE REFERENCIA CONSECUTIVO"""
+    # 1. Tipo de producto
+    es_manga = "MANGA" in tipo_producto.upper()
+    tipo = "ET"  # Por defecto es ET
+    
+    # 2. Código de material ya viene como parámetro
+    material_code = material_code.split('-')[0].strip()
+    
+    # 3. Formato ancho x avance
+    dimensiones = f"{ancho:.0f}x{avance:.0f}"
+    
+    # 4. Número de tintas
+    tintas = f"{num_tintas}T"
+    
+    # 7. Cliente (nombre completo, eliminando texto entre paréntesis)
+    cliente_limpio = cliente.split('(')[0].strip().upper()
+    
+    # 8. Referencia (descripción completa, eliminando texto entre paréntesis)
+    referencia_limpia = referencia.split('(')[0].strip().upper()
+    
+    # 9. Consecutivo con 4 dígitos
+    cons = f"{consecutivo:04d}"
+    
+    # Construir el identificador según sea manga o etiqueta
+    if es_manga:
+        # Para mangas: TIPO MATERIAL ANCHO_x_AVANCE TINTAS MX_ETIQUETAS CLIENTE REFERENCIA CONSECUTIVO
+        etiquetas = f"MX{etiquetas_rollo}"
+        identificador = f"{tipo} {material_code} {dimensiones} {tintas} {etiquetas} {cliente_limpio} {referencia_limpia} {cons}"
+    else:
+        # Para etiquetas: TIPO MATERIAL ANCHO_x_AVANCE TINTAS ACABADO RX_ETIQUETAS CLIENTE REFERENCIA CONSECUTIVO
+        # Extraer solo la parte antes del guión para el acabado
+        acabado_code = acabado_code.split('-')[0].strip()
+        etiquetas = f"RX{etiquetas_rollo}"
+        identificador = f"{tipo} {material_code} {dimensiones} {tintas} {acabado_code} {etiquetas} {cliente_limpio} {referencia_limpia} {cons}"
+    
+    # Convertir a mayúsculas
+    return identificador.upper()
 
 def calcular_valor_plancha_separado(valor_plancha_dict: Dict) -> float:
     """Calcula el valor de la plancha cuando se cobra por separado"""
@@ -320,26 +356,26 @@ def main():
         
         material_seleccionado = st.selectbox(
             "Material",
-            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})") for m in materiales_filtrados],
-            format_func=lambda x: x[1]
+            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre) for m in materiales_filtrados],
+            format_func=lambda x: x[2]
         )
         
     with col2:
         num_tintas = st.number_input("Número de tintas", min_value=0, value=4, step=1)
         planchas_por_separado = st.radio("¿Planchas por separado?", 
                                     options=["Sí", "No"], 
-                                    index=0, 
+                                    index=1,
                                     horizontal=True)
         troquel_existe = st.radio("¿Existe troquel?", 
                                   options=["Sí", "No"], 
-                                  index=1, 
+                                  index=0,
                                   horizontal=True)
         
         # Mover acabados aquí
-        acabado_seleccionado = (0, "Sin acabado ($0.00)") if es_manga else st.selectbox(
+        acabado_seleccionado = (0, "Sin acabado ($0.00)", "Sin acabado") if es_manga else st.selectbox(
             "Acabado",
-            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})") for a in acabados],
-            format_func=lambda x: x[1]
+            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})", a.nombre) for a in acabados],
+            format_func=lambda x: x[2]
         )
 
     with col3:
@@ -509,7 +545,12 @@ def main():
                     ancho=ancho,
                     avance=avance,
                     num_pistas=pistas,
-                    num_tintas=num_tintas
+                    num_tintas=num_tintas,
+                    acabado_code=acabado_seleccionado[1].split('-')[0].strip(),
+                    etiquetas_rollo=num_rollos,
+                    cliente=cliente_seleccionado[1],
+                    referencia=referencia_seleccionada[1],
+                    consecutivo=1984
                 )
 
                 # Mostrar información técnica para impresión
@@ -556,9 +597,9 @@ def main():
                 
                 with col_info2:
                     st.markdown("#### Detalles de Producción")
-                    st.write(f"**Material:** {material_seleccionado[1].split('(')[0].strip()}")
+                    st.write(f"**Material:** {material_seleccionado[2]}")
                     if not es_manga:
-                        st.write(f"**Acabado:** {acabado_seleccionado[1].split('(')[0].strip()}")
+                        st.write(f"**Acabado:** {acabado_seleccionado[2]}")
                     st.write(f"**Número de Tintas:** {num_tintas}")
                     st.write(f"**Planchas por Separado:** {planchas_por_separado}")
                     if planchas_por_separado == "Sí":
