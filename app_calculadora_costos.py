@@ -280,9 +280,15 @@ def generar_identificador(tipo_producto: str, material_code: str, ancho: float, 
     else:
         # Para etiquetas: TIPO MATERIAL ANCHO_x_AVANCE TINTAS ACABADO RX_ETIQUETAS CLIENTE REFERENCIA CONSECUTIVO
         # Extraer solo la parte antes del guión para el acabado
-        acabado_code = acabado_code.split('-')[0].strip()
+        if acabado_code:
+            acabado_code = acabado_code.split('-')[0].strip()
         etiquetas = f"RX{etiquetas_rollo}"
-        identificador = f"{tipo} {material_code} {dimensiones} {tintas} {acabado_code} {etiquetas} {cliente_limpio} {referencia_limpia} {cons}"
+        # Si hay código de acabado, incluirlo en el identificador
+        if acabado_code:
+            identificador = f"{tipo} {material_code} {dimensiones} {tintas} {acabado_code} {etiquetas} {cliente_limpio} {referencia_limpia} {cons}"
+        else:
+            # Si no hay código de acabado, omitirlo completamente
+            identificador = f"{tipo} {material_code} {dimensiones} {tintas} {etiquetas} {cliente_limpio} {referencia_limpia} {cons}"
     
     # Convertir a mayúsculas
     return identificador.upper()
@@ -382,7 +388,7 @@ def main():
                                   horizontal=True)
         
         # Mover acabados aquí
-        acabado_seleccionado = (0, "Sin acabado ($0.00)", "Sin acabado") if es_manga else st.selectbox(
+        acabado_seleccionado = (10, "SA - Sin acabado ($0.00)", "Sin acabado") if es_manga else st.selectbox(
             "Acabado",
             options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})", a.nombre) for a in acabados],
             format_func=lambda x: x[2]
@@ -548,7 +554,8 @@ def main():
                 df = generar_tabla_resultados(resultados)
                 st.dataframe(df, hide_index=True, use_container_width=True)
 
-                # Generar identificador
+                # Generar identificador una sola vez y reutilizarlo
+                acabado_code = "" if es_manga or acabado_seleccionado[0] == 10 else acabado_seleccionado[1]
                 codigo_unico = generar_identificador(
                     tipo_producto=tipo_producto_seleccionado[1],
                     material_code=material_seleccionado[1].split('-')[0].strip(),
@@ -556,7 +563,7 @@ def main():
                     avance=avance,
                     num_pistas=pistas,
                     num_tintas=num_tintas,
-                    acabado_code=acabado_seleccionado[1].split('-')[0].strip(),
+                    acabado_code=acabado_code,
                     etiquetas_rollo=num_rollos,
                     cliente=cliente_seleccionado[1],
                     referencia=referencia_seleccionada[1],
@@ -633,7 +640,7 @@ def main():
                         referencia=referencia_seleccionada[1],
                         codigo_unico=codigo_unico,
                         material=material_seleccionado[1].split(' - ')[1].split(' ($')[0],  # Extraer solo el nombre
-                        acabado=acabado_seleccionado[1].split(' - ')[1].split(' ($')[0],   # Extraer solo el nombre
+                        acabado="Sin acabado" if es_manga else acabado_seleccionado[2],   # Usar el nombre del acabado directamente
                         num_tintas=num_tintas,
                         num_rollos=num_rollos,
                         valor_troquel=reporte_lito.get('valor_troquel', 0),
@@ -641,7 +648,7 @@ def main():
                         resultados=resultados,
                         es_manga=es_manga,
                         tipo_grafado=tipo_grafado if es_manga else None,
-                        adhesivo_tipo=material_seleccionado[3] if len(material_seleccionado) > 3 else None,
+                        adhesivo_tipo=material_seleccionado[3] if len(material_seleccionado) > 3 and material_seleccionado[3] else "No aplica",
                         comercial_nombre=referencia_seleccionada[2] if len(referencia_seleccionada) > 2 else None,
                         comercial_email=referencia_seleccionada[3] if len(referencia_seleccionada) > 3 else None,
                         comercial_telefono=referencia_seleccionada[4] if len(referencia_seleccionada) > 4 else None
