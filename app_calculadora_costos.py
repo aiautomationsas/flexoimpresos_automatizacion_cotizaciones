@@ -409,7 +409,7 @@ def main():
         try:
             # Configuración inicial
             datos_lito = DatosLitografia(
-                ancho=ancho,
+                ancho=ancho * 2 + 20 if es_manga else ancho,  # Multiplicar por 2 y sumar 20 solo para mangas
                 avance=avance,
                 pistas=pistas,
                 planchas_por_separado=planchas_por_separado == "Sí",
