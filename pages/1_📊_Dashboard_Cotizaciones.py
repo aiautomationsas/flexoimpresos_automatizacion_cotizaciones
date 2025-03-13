@@ -156,7 +156,7 @@ def get_cotizaciones_data(comercial_id=None):
     try:
         # Construir la consulta base
         query = db.client.from_('cotizaciones').select(
-            'id, numero_cotizacion, creado_en, estado, referencia_cliente_id, estado:estados_cotizacion(id), es_recotizacion'
+            'id, numero_cotizacion, creado_en, estado, referencia_cliente_id, estado:estados_cotizacion(id), es_recotizacion, motivo_rechazo, motivo_rechazo:motivos_rechazo(id, motivo)'
         ).order('creado_en.desc')
         
         # Obtener las cotizaciones
@@ -190,6 +190,7 @@ def get_cotizaciones_data(comercial_id=None):
             cliente_info = ref_info.get('cliente', {})
             comercial_info = ref_info.get('comercial', {})
             estado_info = row.get('estado', {})
+            motivo_rechazo_info = row.get('motivo_rechazo', {})
             
             # Obtener el ID del estado y mapearlo al nombre correspondiente
             estado_id = estado_info.get('id') if estado_info else None
@@ -205,7 +206,8 @@ def get_cotizaciones_data(comercial_id=None):
                 'nombre_cliente': cliente_info.get('nombre', 'Sin cliente'),
                 'comercial_id': ref_info.get('id_comercial'),
                 'nombre_comercial': comercial_info.get('nombre', 'Sin asignar'),
-                'es_recotizacion': row.get('es_recotizacion', False)
+                'es_recotizacion': row.get('es_recotizacion', False),
+                'motivo_rechazo': motivo_rechazo_info.get('motivo') if estado_nombre == 'Rechazada' else None
             })
             
         df = pd.DataFrame(data)
@@ -587,6 +589,76 @@ else:
                 help="Porcentaje de cotizaciones aprobadas sobre el total"
             )
 
+    # Después de la sección de métricas principales, agregar:
+    
+    # Análisis de Rechazos
+    st.markdown("""
+        <h3 style='margin-bottom: 1.5rem;'>
+            <span style='background: linear-gradient(120deg, #2980b9, #2c3e50); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>
+                ❌ Análisis de Rechazos
+            </span>
+        </h3>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Gráfico de motivos de rechazo
+        df_rechazadas = df_filtrado[df_filtrado['estado'] == 'Rechazada']
+        if not df_rechazadas.empty:
+            motivos_rechazo = df_rechazadas['motivo_rechazo'].value_counts()
+            
+            fig_motivos = px.pie(
+                values=motivos_rechazo.values,
+                names=motivos_rechazo.index,
+                title='Distribución de Motivos de Rechazo',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_motivos.update_traces(
+                textposition='inside',
+                textinfo='percent+label',
+                hovertemplate='%{label}<br>%{value} cotizaciones<br>%{percent}'
+            )
+            fig_motivos.update_layout(CHART_THEME)
+            st.plotly_chart(fig_motivos, use_container_width=True)
+        else:
+            st.info("No hay cotizaciones rechazadas en el período seleccionado")
+    
+    with col2:
+        # Métricas de rechazo
+        if not df_rechazadas.empty:
+            # Tasa de rechazo por cliente
+            rechazo_por_cliente = df_rechazadas.groupby('nombre_cliente').size()
+            cliente_mas_rechazos = rechazo_por_cliente.idxmax()
+            num_rechazos_max = rechazo_por_cliente.max()
+            
+            st.metric(
+                "Cliente con Más Rechazos",
+                cliente_mas_rechazos,
+                f"{num_rechazos_max} rechazos",
+                help="Cliente con mayor número de cotizaciones rechazadas"
+            )
+            
+            # Motivo más común de rechazo
+            motivo_comun = df_rechazadas['motivo_rechazo'].mode()[0] if not df_rechazadas['motivo_rechazo'].empty else "No especificado"
+            cantidad_motivo = df_rechazadas['motivo_rechazo'].value_counts().iloc[0]
+            
+            st.metric(
+                "Motivo Más Común de Rechazo",
+                motivo_comun,
+                f"{cantidad_motivo} casos",
+                help="Motivo más frecuente de rechazo de cotizaciones"
+            )
+            
+            # Tasa de rechazo general
+            tasa_rechazo = (len(df_rechazadas) / len(df_filtrado)) * 100
+            st.metric(
+                "Tasa de Rechazo General",
+                f"{tasa_rechazo:.1f}%",
+                help="Porcentaje de cotizaciones rechazadas sobre el total"
+            )
+
     # Detalle de Cotizaciones con nuevo estilo
     st.markdown("""
         <h3 style='margin-bottom: 1.5rem;'>
@@ -615,10 +687,12 @@ else:
         'fecha_cotizacion',
         'estado',
         'nombre_comercial',
-        'nombre_cliente'
+        'nombre_cliente',
+        'motivo_rechazo'
     ]].copy()
     
     df_display['fecha_cotizacion'] = df_display['fecha_cotizacion'].dt.strftime('%Y-%m-%d %H:%M')
+    df_display['motivo_rechazo'] = df_display['motivo_rechazo'].fillna('-')
     
     st.dataframe(
         df_display.sort_values('fecha_cotizacion', ascending=False),
