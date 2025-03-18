@@ -123,34 +123,65 @@ class CalculadoraCostosEscala(CalculadoraBase):
         
     def calcular_mo_y_maq(self, tiempo_horas: float, num_tintas: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
-        Calcula MO y Maq según la fórmula:
+        Calcula MO y Maq según la fórmula.
+
         Para etiquetas:
-            SI(tintas>0;SI(F8<1;MO Impresión;MO Impresión*(F8)));SI(F8<1;MO Troquelado;MO Troquelado*(F8)))
+            Si numero_tintas > 0:
+                Si tiempo_horas < 1:
+                    resultado = mo_impresion
+                Si no:
+                    resultado = mo_impresion * tiempo_horas
+            Si no:
+                Si tiempo_horas < 1:
+                    resultado = mo_troquelado
+                Si no:
+                    resultado = mo_troquelado * tiempo_horas
+
         Para mangas:
-            Se suma además MO Sellado (50000) y MO Corte (50000)
+            Si numero_tintas > 0:
+                Si tiempo_horas < 1:
+                    resultado = mo_impresion + mo_sellado + mo_corte
+                Si no:
+                    resultado = (mo_impresion + mo_sellado + mo_corte) * tiempo_horas
+            Si no:
+                Si tiempo_horas < 1:
+                    resultado = mo_troquelado + mo_sellado + mo_corte
+                Si no:
+                    resultado = (mo_troquelado + mo_sellado + mo_corte) * tiempo_horas
         """
         # Constantes para mangas
         MO_SELLADO = 50000
         MO_CORTE = 50000
         
-        # Cálculo base (igual que antes)
+        if not es_manga:
+            # Cálculo para etiquetas (sin cambios)
+            if num_tintas > 0:
+                if tiempo_horas < 1:
+                    base = datos.mo_impresion
+                else:
+                    base = datos.mo_impresion * tiempo_horas
+            else:
+                if tiempo_horas < 1:
+                    base = datos.mo_troquelado
+                else:
+                    base = datos.mo_troquelado * tiempo_horas
+            return base
+        
+        # Cálculo para mangas
         if num_tintas > 0:
-            if tiempo_horas < 1:
-                base = datos.mo_impresion
-            else:
-                base = datos.mo_impresion * tiempo_horas
+            base_mo = datos.mo_impresion
         else:
-            if tiempo_horas < 1:
-                base = datos.mo_troquelado
-            else:
-                base = datos.mo_troquelado * tiempo_horas
-        
-        # Para mangas, sumar MO Sellado y MO Corte
-        if es_manga:
-            return base + MO_SELLADO + MO_CORTE
-        
-        return base
+            base_mo = datos.mo_troquelado
             
+        # Suma total de MO incluyendo sellado y corte
+        total_mo = base_mo + MO_SELLADO + MO_CORTE
+        
+        # Aplicar factor de tiempo según la lógica requerida
+        if tiempo_horas < 1:
+            return total_mo
+        else:
+            return total_mo * tiempo_horas
+
     def calcular_tintas(self, escala: int, num_tintas: int, area_etiqueta: float, datos: DatosEscala) -> float:
         """
         Calcula el valor de tintas según la fórmula:
