@@ -102,20 +102,44 @@ class CalculadoraCostosEscala(CalculadoraBase):
         
     def calcular_metros(self, escala: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
-        Calcula los metros según la fórmula: =(A8/$E$3)*(($D$4+$C$5)/1000)
+        Calcula los metros según la fórmula: (Escala / Pistas) * ((Avance_total + Desperdicio_unidad) / 1000)
         donde:
-        - A8 = escala
-        - $E$3 = pistas
-        - $D$4 = avance + gap (gap es 0 para mangas, 2.6 para etiquetas)
-        - $C$5 = desperdicio de la unidad de montaje
+        - Avance_total = Avance + GAP (2.6 para etiquetas, 0 para mangas)
+        - Desperdicio_unidad = desperdicio por los dientes del troquel
         """
-        GAP_FIJO = 0 if es_manga else 2.6  # Gap es 0 para mangas, 2.6 para etiquetas
-        d4 = datos.avance_total + GAP_FIJO  # Avance + gap fijo
-        return (escala / datos.pistas) * ((d4 + datos.desperdicio) / 1000)
+        # GAP solo para etiquetas
+        gap = 2.6 if not es_manga else 0
+        
+        # Avance total incluye el GAP
+        avance_total = datos.avance + gap
+        
+        # Desperdicio por unidad (dientes del troquel)
+        desperdicio_unidad = datos.desperdicio
+        
+        # Cálculo paso a paso
+        factor_escala = escala / datos.pistas
+        factor_avance = (avance_total + desperdicio_unidad) / 1000
+        metros = factor_escala * factor_avance
+        
+        return metros
         
     def calcular_tiempo_horas(self, metros: float, datos: DatosEscala) -> float:
         """Calcula el tiempo en horas según la fórmula: metros / velocidad_maquina / 60"""
-        return metros / datos.velocidad_maquina / 60
+        tiempo = metros / datos.velocidad_maquina / 60
+        
+        # Debug detallado
+        debug_info = f"""
+=== DEBUG CÁLCULO DE TIEMPO ===
+Inputs:
+- Metros: {metros:.2f}
+- Velocidad máquina: {datos.velocidad_maquina:.2f} m/min
+
+Cálculo:
+1. Tiempo (horas) = {metros:.2f} / {datos.velocidad_maquina:.2f} / 60 = {tiempo:.2f}
+"""
+        print(debug_info)
+        
+        return tiempo
         
     def calcular_montaje(self, num_tintas: int, datos: DatosEscala) -> float:
         """Calcula el montaje según la fórmula: Tintas * MO Montaje"""
@@ -123,64 +147,31 @@ class CalculadoraCostosEscala(CalculadoraBase):
         
     def calcular_mo_y_maq(self, tiempo_horas: float, num_tintas: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
-        Calcula MO y Maq según la fórmula.
-
+        Calcula MO y Maq según la fórmula:
+        
         Para etiquetas:
-            Si numero_tintas > 0:
-                Si tiempo_horas < 1:
-                    resultado = mo_impresion
-                Si no:
-                    resultado = mo_impresion * tiempo_horas
-            Si no:
-                Si tiempo_horas < 1:
-                    resultado = mo_troquelado
-                Si no:
-                    resultado = mo_troquelado * tiempo_horas
-
-        Para mangas:
-            Si numero_tintas > 0:
-                Si tiempo_horas < 1:
-                    resultado = mo_impresion + mo_sellado + mo_corte
-                Si no:
-                    resultado = (mo_impresion + mo_sellado + mo_corte) * tiempo_horas
-            Si no:
-                Si tiempo_horas < 1:
-                    resultado = mo_troquelado + mo_sellado + mo_corte
-                Si no:
-                    resultado = (mo_troquelado + mo_sellado + mo_corte) * tiempo_horas
+        if Tintas > 0:
+            if t(h) < 1:
+                MO_y_Maq = MO_Impresion
+            else:
+                MO_y_Maq = MO_Impresion * t(h)
+        else:
+            if t_h < 1:
+                MO_y_Maq = MO_Troquelado
+            else:
+                MO_y_Maq = MO_Troquelado * t(h)
         """
-        # Constantes para mangas
+        if not es_manga:
+            # Cálculo para etiquetas
+            base_mo = datos.mo_impresion if num_tintas > 0 else datos.mo_troquelado
+            return base_mo if tiempo_horas < 1 else base_mo * tiempo_horas
+        
+        # Cálculo para mangas (mantener lógica existente)
         MO_SELLADO = 50000
         MO_CORTE = 50000
-        
-        if not es_manga:
-            # Cálculo para etiquetas (sin cambios)
-            if num_tintas > 0:
-                if tiempo_horas < 1:
-                    base = datos.mo_impresion
-                else:
-                    base = datos.mo_impresion * tiempo_horas
-            else:
-                if tiempo_horas < 1:
-                    base = datos.mo_troquelado
-                else:
-                    base = datos.mo_troquelado * tiempo_horas
-            return base
-        
-        # Cálculo para mangas
-        if num_tintas > 0:
-            base_mo = datos.mo_impresion
-        else:
-            base_mo = datos.mo_troquelado
-            
-        # Suma total de MO incluyendo sellado y corte
+        base_mo = datos.mo_impresion if num_tintas > 0 else datos.mo_troquelado
         total_mo = base_mo + MO_SELLADO + MO_CORTE
-        
-        # Aplicar factor de tiempo según la lógica requerida
-        if tiempo_horas < 1:
-            return total_mo
-        else:
-            return total_mo * tiempo_horas
+        return total_mo if tiempo_horas < 1 else total_mo * tiempo_horas
 
     def calcular_tintas(self, escala: int, num_tintas: int, area_etiqueta: float, datos: DatosEscala) -> float:
         """
@@ -380,57 +371,6 @@ class CalculadoraCostosEscala(CalculadoraBase):
             traceback.print_exc()
             return 0
         
-    def calcular_mm_valor(self, datos: DatosEscala, num_tintas: int, valor_material: float, es_manga: bool = False) -> float:
-        """
-        Calcula el valor de MM según la fórmula:
-        S7 × S3 × O7
-        donde:
-        - S7 = MM_COLOR * num_tintas
-        - S3 = GAP_FIJO + Q3
-        - O7 = valor_material / 1000000
-        """
-        try:
-            if num_tintas <= 0:
-                return 0
-                
-            # Calcular mm totales
-            mm_totales = self.MM_COLOR * num_tintas
-            
-            # Calcular Q3 usando el método auxiliar
-            resultado_q3 = self._calcular_q3(
-                num_tintas=num_tintas,
-                ancho=datos.ancho,
-                pistas=datos.pistas,
-                es_manga=es_manga
-            )
-            
-            # Extraer Q3 del resultado
-            q3 = resultado_q3['q3']
-            c3 = resultado_q3['c3']
-            d3 = resultado_q3['d3']
-            
-            # Calcular S3 = GAP_FIJO + Q3
-            s3 = self.GAP_FIJO + q3
-            
-            # Calcular valor MM
-            valor_mm = mm_totales * s3 * (valor_material / 1000000)
-            
-            print(f"\n--- Verificación del Cálculo de Valor MM ---")
-            print(f"MM Totales (S7): {mm_totales}")
-            print(f"Valor Material (O7): {valor_material}")
-            print(f"C3 (GAP): {c3}")
-            print(f"D3 (ancho + GAP): {d3}")
-            print(f"E3 (pistas): {datos.pistas}")
-            print(f"Q3: {q3}")
-            print(f"R3 (GAP_FIJO): {self.GAP_FIJO}")
-            print(f"S3 (GAP_FIJO + Q3): {s3}")
-            print(f"Valor MM: ${valor_mm:.2f}")
-            
-            return valor_mm
-        except Exception as e:
-            print(f"Error en cálculo de valor MM: {str(e)}")
-            return 0
-        
     def calcular_desperdicio_tintas(self, datos: DatosEscala, num_tintas: int, valor_material: float, es_manga: bool = False) -> float:
         """
         Calcula el desperdicio de tintas según la fórmula:
@@ -490,63 +430,23 @@ class CalculadoraCostosEscala(CalculadoraBase):
         es_manga: bool = False
     ) -> List[Dict]:
         """
-        Calcula los costos detallados para cada escala de producción.
-        
-        Este método realiza un cálculo completo de todos los componentes de costo
-        para cada escala de producción especificada, incluyendo:
-        - Montaje
-        - Mano de obra y maquinaria
-        - Tintas
-        - Papel/laminado
-        - Desperdicios (por tintas y porcentaje)
-        - Valor por unidad
-        
-        Args:
-            datos: Objeto con los datos base para el cálculo
-            num_tintas: Número de tintas utilizadas
-            valor_etiqueta: Valor por etiqueta
-            valor_plancha: Valor de la plancha
-            valor_troquel: Valor del troquel
-            valor_material: Valor del material por mm²
-            valor_acabado: Valor del acabado por mm²
-            es_manga: True si es manga, False si es etiqueta
-            
-        Returns:
-            List[Dict]: Lista de resultados para cada escala con todos los componentes de costo
-            
-        Raises:
-            ValueError: Si ocurre un error durante el cálculo
+        Calcula los costos para cada escala especificada.
         """
-        print("\n=== VALORES INICIALES PARA CÁLCULO ===")
-        print(f"Ancho: {datos.ancho} mm")
-        print(f"Avance: {datos.avance} mm")
-        print(f"Área etiqueta: {datos.area_etiqueta} mm²")
-        print(f"Valor material: ${valor_material}/mm²")
-        print(f"Valor acabado: ${valor_acabado}/mm²")
-        print(f"Es manga: {es_manga}")
-        print(f"Valor etiqueta: ${valor_etiqueta}")
-        print(f"Valor plancha: ${valor_plancha}")
-        print(f"Valor troquel: ${valor_troquel}")
-        print(f"Número de tintas: {num_tintas}")
-        print(f"Escalas: {datos.escalas}")
-        print(f"Pistas: {datos.pistas}")
-        
-        resultados = []
-        
         try:
-            # 1. Convertir todos los valores a float para asegurar compatibilidad
-            valor_etiqueta = float(valor_etiqueta)
-            valor_plancha = float(valor_plancha)
-            valor_troquel = float(valor_troquel)
-            valor_material = float(valor_material)
-            valor_acabado = float(valor_acabado)
+            resultados = []
+            porcentaje_desperdicio = datos.porcentaje_desperdicio / 100
             
-            # 2. Ajustar porcentaje de desperdicio y rentabilidad según el tipo
-            porcentaje_desperdicio = 0.30 if es_manga else 0.10  # 30% para mangas, 10% para etiquetas
-            datos.rentabilidad = 45.0 if es_manga else 40.0  # 45% para mangas, 40% para etiquetas
-            
-            print(f"Porcentaje de desperdicio: {porcentaje_desperdicio * 100}%")
-            print(f"Rentabilidad: {datos.rentabilidad}%")
+            # Debug inicial
+            print("\n=== INICIO CÁLCULO DE COSTOS POR ESCALA ===")
+            print(f"Datos de entrada:")
+            print(f"- Número de tintas: {num_tintas}")
+            print(f"- Valor etiqueta: ${valor_etiqueta:.6f}")
+            print(f"- Valor plancha: ${valor_plancha:.2f}")
+            print(f"- Valor troquel: ${valor_troquel:.2f}")
+            print(f"- Valor material: ${valor_material:.6f}/mm²")
+            print(f"- Valor acabado: ${valor_acabado:.6f}/mm²")
+            print(f"- Es manga: {es_manga}")
+            print(f"- Porcentaje desperdicio: {porcentaje_desperdicio * 100}%")
             
             # 3. Calcular costos para cada escala
             for escala in datos.escalas:
@@ -596,31 +496,28 @@ class CalculadoraCostosEscala(CalculadoraBase):
                 suma_costos = montaje + mo_y_maq + tintas + papel_lam + desperdicio
                 print(f"Suma de costos variables: ${suma_costos:.2f}")
                 
-                # 3.6 Calcular valor por unidad y valor MM
+                # 3.6 Calcular valor por unidad
                 valor_unidad = self.calcular_valor_unidad_full(
                     suma_costos, datos, escala, valor_plancha, valor_troquel
                 )
                 print(f"Valor por unidad: ${valor_unidad:.6f}")
                 
-                valor_mm = self.calcular_mm_valor(datos, num_tintas, valor_material, es_manga)
-                print(f"Valor MM: ${valor_mm:.2f}")
-                
                 # 3.7 Agregar resultados a la lista
                 resultados.append({
                     'escala': escala,
                     'valor_unidad': valor_unidad,
-                    'valor_mm': valor_mm,
                     'metros': metros,
                     'tiempo_horas': tiempo_horas,
                     'montaje': montaje,
                     'mo_y_maq': mo_y_maq,
                     'tintas': tintas,
                     'papel_lam': papel_lam,
-                    'desperdicio': desperdicio,
+                    'desperdicio': datos.desperdicio,  # Agregar el desperdicio original (por dientes)
                     'desperdicio_tintas': desperdicio_tintas,
                     'desperdicio_porcentaje': desperdicio_porcentaje,
                     'num_tintas': num_tintas,
                     'ancho': datos.ancho,
+                    'avance': datos.avance,  # Agregar el avance a los resultados
                     'porcentaje_desperdicio': porcentaje_desperdicio
                 })
             
@@ -630,3 +527,22 @@ class CalculadoraCostosEscala(CalculadoraBase):
             import traceback
             traceback.print_exc()
             raise ValueError(f"Error en cálculo de costos: {str(e)}")
+
+    def generar_tabla_resultados(self, resultados: List[Dict]) -> pd.DataFrame:
+        """Genera una tabla formateada con los resultados de la cotización"""
+        print("\n=== DEPURACIÓN TABLA RESULTADOS ===")
+        
+        return pd.DataFrame([
+            {
+                'Escala': f"{r['escala']:,}",
+                'Valor Unidad': f"${float(r['valor_unidad']):.2f}",
+                'Metros': f"{r['metros']:.2f} = ({r['escala']:,}/2) × ({150}+2.6+{r.get('desperdicio', 0):.1f})/1000",
+                'Tiempo (h)': f"{r['tiempo_horas']:.2f}",
+                'Montaje': f"${r['montaje']:,.2f}",
+                'MO y Maq': f"${r['mo_y_maq']:,.2f}",
+                'Tintas': f"${r['tintas']:,.2f}",
+                'Papel/lam': f"${r['papel_lam']:,.2f}",
+                'Desperdicio': f"${r['desperdicio_total']:,.2f}"
+            }
+            for r in resultados
+        ])

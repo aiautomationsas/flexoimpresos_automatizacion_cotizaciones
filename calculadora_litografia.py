@@ -15,7 +15,8 @@ class DatosLitografia:
     def __init__(self, ancho: float, avance: float, pistas: int = 1,
                  planchas_por_separado: bool = True, incluye_troquel: bool = True,
                  troquel_existe: bool = False, gap: float = 3.0, 
-                 gap_avance: float = 2.6, ancho_maximo: float = 335.0):
+                 gap_avance: float = 2.6, ancho_maximo: float = 335.0,
+                 tipo_grafado: Optional[str] = None):
         """
         Inicializa un objeto DatosLitografia con los parámetros especificados.
         
@@ -29,6 +30,8 @@ class DatosLitografia:
             gap: Valor fijo de gap para ancho (0 para mangas o etiquetas con 1 pista, 3.0 para etiquetas con más de 1 pista)
             gap_avance: Valor fijo de gap para avance (0 para mangas, 2.6 para etiquetas)
             ancho_maximo: Ancho máximo permitido
+            tipo_grafado: Tipo de grafado para mangas (None, "Sin grafado", "Vertical Total", 
+                         "Horizontal Total", "Horizontal Total + Vertical")
         """
         self.ancho = ancho
         self.avance = avance
@@ -39,6 +42,9 @@ class DatosLitografia:
         self.gap = gap
         self.gap_avance = gap_avance
         self.ancho_maximo = ancho_maximo
+        self.tipo_grafado = tipo_grafado
+        # Calcular constante de troquel basada en el tipo de grafado
+        self.constante_troquel = 1 if tipo_grafado == "Horizontal Total + Vertical" else 2
 
 class CalculadoraLitografia(CalculadoraBase):
     """
@@ -315,39 +321,43 @@ class CalculadoraLitografia(CalculadoraBase):
     def calcular_valor_troquel(self, datos: DatosLitografia, repeticiones: int, 
                             valor_mm: float = 100, troquel_existe: bool = False) -> Dict:
         """
-        Calcula el valor del troquel según la fórmula:
-        ((25*5000) + max(700000, ((ancho+avance)*2*pistas*repeticiones)*valor_mm)) / factor
-        
-        donde:
-        - factor = 2 si el troquel YA EXISTE
-        - factor = 1 si hay que FABRICAR el troquel
-        
-        Args:
-            datos: Objeto DatosLitografia con los datos necesarios
-            repeticiones: Número de repeticiones
-            valor_mm: Valor por mm del troquel (default: 100)
-            troquel_existe: True si ya tienen el troquel, False si hay que hacer uno nuevo
-            
-        Returns:
-            Dict con el valor calculado y los valores intermedios
+        Calcula el valor del troquel según el tipo de producto y grafado.
         """
         try:
             # Constantes
-            FACTOR_EXISTENTE = 2  # Si ya tienen el troquel (divide por 2)
-            FACTOR_NUEVO = 1      # Si hay que hacer un troquel nuevo (divide por 1, osea no divide)
+            FACTOR_BASE = 25 * 5000
             VALOR_MINIMO = 700000
-            FACTOR_BASE = 25 * 5000  # 25 * 5000 = 125000
             
-            # Calcular el valor base del troquel
+            # Debug inicial
+            print("\n=== INICIO CÁLCULO TROQUEL ===")
+            print(f"Tipo grafado recibido: {getattr(datos, 'tipo_grafado', 'No definido')}")
+            
+            # Calcular valor base
             perimetro = (datos.ancho + datos.avance) * 2
             valor_base = perimetro * datos.pistas * repeticiones * valor_mm
-            
-            # Tomar el máximo entre el valor base y el mínimo
             valor_calculado = max(VALOR_MINIMO, valor_base)
             
-            # Agregar el factor base y dividir por el factor según si existe o no
-            factor_division = FACTOR_EXISTENTE if troquel_existe else FACTOR_NUEVO
+            # Determinar si es manga y el factor de división
+            es_manga = hasattr(datos, 'tipo_grafado') and datos.tipo_grafado is not None
+            
+            if es_manga:
+                # Lógica específica para mangas
+                factor_division = 1 if datos.tipo_grafado == "Horizontal Total + Vertical" else 2
+                print(f"ES MANGA - Tipo grafado: {datos.tipo_grafado}")
+                print(f"Factor división seleccionado: {factor_division}")
+            else:
+                # Lógica para etiquetas
+                factor_division = 2 if troquel_existe else 1
+                print("ES ETIQUETA")
+                print(f"Troquel existe: {troquel_existe}")
+                print(f"Factor división seleccionado: {factor_division}")
+            
+            # Calcular valor final
             valor_final = (FACTOR_BASE + valor_calculado) / factor_division
+            
+            print(f"Valor base: ${valor_base:,.2f}")
+            print(f"Valor calculado (max con mínimo): ${valor_calculado:,.2f}")
+            print(f"Valor final: ${valor_final:,.2f}")
             
             return {
                 'valor': valor_final,
@@ -358,11 +368,12 @@ class CalculadoraLitografia(CalculadoraBase):
                     'valor_calculado': valor_calculado,
                     'factor_base': FACTOR_BASE,
                     'factor_division': factor_division,
-                    'troquel_existe': troquel_existe,
-                    'valor_mm': valor_mm
+                    'es_manga': es_manga,
+                    'tipo_grafado': datos.tipo_grafado if es_manga else None
                 }
             }
         except Exception as e:
+            print(f"ERROR en cálculo troquel: {str(e)}")
             return {
                 'error': str(e),
                 'valor': None,

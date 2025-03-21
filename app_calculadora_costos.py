@@ -13,6 +13,20 @@ from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 import math
 
+# Constantes para cálculos y configuración
+RENTABILIDAD_MANGAS = 45.0  # Porcentaje de rentabilidad para mangas
+RENTABILIDAD_ETIQUETAS = 40.0  # Porcentaje de rentabilidad para etiquetas
+DESPERDICIO_MANGAS = 30.0  # Porcentaje de desperdicio para mangas
+DESPERDICIO_ETIQUETAS = 10.0  # Porcentaje de desperdicio para etiquetas
+VELOCIDAD_MAQUINA_NORMAL = 20.0  # Velocidad normal de la máquina en m/min
+VELOCIDAD_MAQUINA_MANGAS_7_TINTAS = 7.0  # Velocidad especial para mangas con 7 tintas
+GAP_AVANCE_ETIQUETAS = 2.6  # GAP al avance para etiquetas en mm
+GAP_AVANCE_MANGAS = 0  # GAP al avance para mangas en mm
+GAP_PISTAS_ETIQUETAS = 3.0  # GAP entre pistas para etiquetas en mm
+GAP_PISTAS_MANGAS = 0  # GAP entre pistas para mangas en mm
+FACTOR_ANCHO_MANGAS = 2  # Factor de multiplicación para el ancho en mangas
+INCREMENTO_ANCHO_MANGAS = 20  # Incremento en mm para el ancho en mangas
+
 # Configuración de página
 st.set_page_config(
     page_title="Sistema de Cotización - Flexo Impresos",
@@ -102,33 +116,19 @@ def obtener_valor_troquel(reporte_lito: Dict) -> float:
     valor_troquel = reporte_lito.get('valor_troquel', {'valor': 0})
     return valor_troquel['valor'] if isinstance(valor_troquel, dict) else valor_troquel
 
-def generar_tabla_resultados(resultados: List[Dict]) -> pd.DataFrame:
+def generar_tabla_resultados(resultados: List[Dict], es_manga: bool = False) -> pd.DataFrame:
     """Genera una tabla formateada con los resultados de la cotización"""
-    print("\n=== DEPURACIÓN TABLA RESULTADOS ===")
-    
-    for r in resultados:
-        r['desperdicio_total'] = r['desperdicio_tintas'] + r['desperdicio_porcentaje']
-        print(f"Escala: {r['escala']:,}")
-        print(f"Valor Unidad (sin formato): {r['valor_unidad']}")
-        print(f"Valor Unidad (formateado): ${float(r['valor_unidad']):.2f}")
-        print(f"Valor MM: ${float(r['valor_mm']):.3f}")
-        print(f"Desperdicio total: ${r['desperdicio_total']:,.2f}")
-        print(f"Desperdicio tintas: ${r['desperdicio_tintas']:,.2f}")
-        print(f"Desperdicio porcentaje: ${r['desperdicio_porcentaje']:,.2f}")
-        print("---")
-    
     return pd.DataFrame([
         {
             'Escala': f"{r['escala']:,}",
             'Valor Unidad': f"${float(r['valor_unidad']):.2f}",
-            'Valor MM': f"${float(r['valor_mm']):.3f}",
             'Metros': f"{r['metros']:.2f}",
             'Tiempo (h)': f"{r['tiempo_horas']:.2f}",
             'Montaje': f"${r['montaje']:,.2f}",
             'MO y Maq': f"${r['mo_y_maq']:,.2f}",
             'Tintas': f"${r['tintas']:,.2f}",
             'Papel/lam': f"${r['papel_lam']:,.2f}",
-            'Desperdicio': f"${r['desperdicio_total']:,.2f}"
+            'Desperdicio': f"${r['desperdicio_tintas'] + r['desperdicio_porcentaje']:,.2f}"
         }
         for r in resultados
     ])
@@ -233,7 +233,7 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
 - **Pistas**: {datos_entrada.pistas}
 - **Número de Tintas**: {num_tintas}
 - **Área de Etiqueta**: {reporte_lito['area_etiqueta']['area']:.2f} mm²
-- **Dientes**: {dientes}
+- **Unidad (Z)**: {dientes}
 
 {debug_area}
 
@@ -252,7 +252,7 @@ def generar_identificador(tipo_producto: str, material_code: str, ancho: float, 
     TIPO MATERIAL ANCHO_x_AVANCE TINTAS [ACABADO] [RX/MX_ETIQUETAS] CLIENTE REFERENCIA CONSECUTIVO"""
     # 1. Tipo de producto
     es_manga = "MANGA" in tipo_producto.upper()
-    tipo = "ET"  # Por defecto es ET
+    tipo = "MT" if es_manga else "ET"  # Usar MT para mangas, ET para etiquetas
     
     # 2. Código de material ya viene como parámetro
     material_code = material_code.split('-')[0].strip()
@@ -299,9 +299,9 @@ def calcular_valor_plancha_separado(valor_plancha_dict: Dict) -> float:
         detalles = valor_plancha_dict['detalles']
         if 'precio_sin_constante' in detalles:
             # Calcular el valor base
-            valor_base = detalles['precio_sin_constante'] / 0.75
-            # Redondear al múltiplo de 1000 más cercano hacia arriba
-            return math.ceil(valor_base / 1000) * 1000
+            valor_base = detalles['precio_sin_constante'] / 0.7
+            # Redondear al múltiplo de 10000 más cercano hacia arriba
+            return math.ceil(valor_base / 10000) * 10000
     return 0
 
 def crear_datos_cotizacion(cliente: str, referencia: str, codigo_unico: str, material: str,
@@ -355,6 +355,30 @@ def main():
     )
     es_manga = "MANGA" in tipo_producto_seleccionado[1].upper()
     
+    # Filtrar materiales según el tipo de producto
+    materiales_filtrados = [
+        m for m in materiales 
+        if es_manga and any(code in m.code.upper() for code in ['PVC', 'PETG'])
+        or not es_manga
+    ]
+    
+    # Material en una fila completa
+    material_seleccionado = st.selectbox(
+        "Material",
+        options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre, m.adhesivo_tipo) for m in materiales_filtrados],
+        format_func=lambda x: x[2]  # Mostrar solo el nombre del material
+    )
+    
+    # Acabado en una fila completa (solo para etiquetas)
+    if not es_manga:
+        acabado_seleccionado = st.selectbox(
+            "Acabado",
+            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})", a.nombre) for a in acabados],
+            format_func=lambda x: x[2]  # Mostrar solo el nombre del acabado
+        )
+    else:
+        acabado_seleccionado = (10, "SA - Sin acabado ($0.00)", "Sin acabado")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -363,36 +387,22 @@ def main():
         avance = st.number_input("Avance/Largo (mm)", min_value=0.1, value=100.0, step=0.1)
         pistas = st.number_input("Número de pistas", min_value=1, value=1, step=1)
         
-        # Mover materiales aquí
-        materiales_filtrados = [
-            m for m in materiales 
-            if es_manga and any(code in m.code.upper() for code in ['PVC', 'PETG'])
-            or not es_manga
-        ]
-        
-        material_seleccionado = st.selectbox(
-            "Material",
-            options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre, m.adhesivo_tipo) for m in materiales_filtrados],
-            format_func=lambda x: x[2]
-        )
-        
     with col2:
         num_tintas = st.number_input("Número de tintas", min_value=0, value=4, step=1)
         planchas_por_separado = st.radio("¿Planchas por separado?", 
                                     options=["Sí", "No"], 
                                     index=1,
                                     horizontal=True)
-        troquel_existe = st.radio("¿Existe troquel?", 
-                                  options=["Sí", "No"], 
-                                  index=0,
-                                  horizontal=True)
         
-        # Mover acabados aquí
-        acabado_seleccionado = (10, "SA - Sin acabado ($0.00)", "Sin acabado") if es_manga else st.selectbox(
-            "Acabado",
-            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})", a.nombre) for a in acabados],
-            format_func=lambda x: x[2]
-        )
+        # Solo mostrar la pregunta del troquel si NO es manga
+        if not es_manga:
+            troquel_existe = st.radio("¿Existe troquel?", 
+                                    options=["Sí", "No"], 
+                                    index=0,
+                                    horizontal=True)
+        else:
+            # Para mangas, el valor dependerá del tipo de grafado
+            troquel_existe = "No"  # Valor por defecto
 
     with col3:
         # Agregar selección de grafado para mangas
@@ -404,11 +414,13 @@ def main():
                     "Sin grafado",
                     "Vertical Total",
                     "Horizontal Total",
-                    "Horizontal + Vertical Total"
+                    "Horizontal Total + Vertical"
                 ]
             )
         
-        num_rollos = st.number_input("Número de etiquetas por rollo", min_value=1, value=1000, step=100)
+        # Cambiar el label según el tipo de producto
+        label_rollos = "Número de mangas por rollo" if es_manga else "Número de etiquetas por rollo"
+        num_rollos = st.number_input(label_rollos, min_value=1, value=1000, step=100)
 
     # Sección de escalas
     st.header("Escalas de Producción")
@@ -461,14 +473,14 @@ def main():
         try:
             # Configuración inicial
             datos_lito = DatosLitografia(
-                ancho=ancho * 2 + 20 if es_manga else ancho,  # Multiplicar por 2 y sumar 20 solo para mangas
+                ancho=ancho * FACTOR_ANCHO_MANGAS + INCREMENTO_ANCHO_MANGAS if es_manga else ancho,
                 avance=avance,
                 pistas=pistas,
                 planchas_por_separado=planchas_por_separado == "Sí",
                 incluye_troquel=True,
                 troquel_existe=troquel_existe == "Sí",
-                gap=0 if es_manga else 3.0,
-                gap_avance=0 if es_manga else 2.6
+                gap=GAP_PISTAS_MANGAS if es_manga else GAP_PISTAS_ETIQUETAS,
+                gap_avance=GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS
             )
             
             # Crear calculadora de litografía
@@ -485,13 +497,33 @@ def main():
             console_capture.stop()
             
             # Verificar condiciones especiales para el troquel en mangas
-            if es_manga and tipo_grafado == "Horizontal + Vertical Total":
-                mejor_opcion = reporte_lito.get('desperdicio', {}).get('mejor_opcion', {})
-                if mejor_opcion and mejor_opcion.get('desperdicio', 0) > 2:
-                    # Forzar troquel_existe a False si el desperdicio es mayor a 2mm
-                    datos_lito.troquel_existe = False
-                    # Regenerar el reporte con el nuevo valor de troquel
-                    reporte_lito = calculadora.generar_reporte_completo(datos_lito, num_tintas, es_manga)
+            if es_manga:
+                # Asegurarnos de que el tipo de grafado se pasa correctamente
+                datos_lito.tipo_grafado = tipo_grafado
+                print(f"\n=== DEBUG MANGA ===")
+                print(f"Tipo de grafado seleccionado: {tipo_grafado}")
+                
+                # Calcular valor del troquel según el tipo de grafado
+                reporte_troquel = calculadora.calcular_valor_troquel(
+                    datos=datos_lito,
+                    repeticiones=reporte_lito['desperdicio']['mejor_opcion'].get("repeticiones", 1),
+                    troquel_existe=False,  # Para mangas no importa si existe
+                    valor_mm=100
+                )
+                
+                print(f"Valor troquel calculado: ${reporte_troquel.get('valor', 0):,.2f}")
+                print(f"Factor división usado: {reporte_troquel.get('detalles', {}).get('factor_division')}")
+                
+                # Actualizar el reporte con el nuevo valor de troquel
+                reporte_lito['valor_troquel'] = reporte_troquel
+            else:
+                # Lógica existente para etiquetas
+                if datos_lito.incluye_troquel:
+                    reporte_lito['valor_troquel'] = calculadora.calcular_valor_troquel(
+                        datos=datos_lito,
+                        repeticiones=reporte_lito['desperdicio']['mejor_opcion'].get("repeticiones", 1),
+                        troquel_existe=datos_lito.troquel_existe
+                    )
             
             # Guardar logs de litografía
             logs_litografia = console_capture.get_logs()
@@ -516,8 +548,11 @@ def main():
                 ancho=datos_lito.ancho,
                 avance=datos_lito.avance,
                 avance_total=datos_lito.avance,
-                desperdicio=mejor_opcion['desperdicio'],
-                area_etiqueta=reporte_lito['area_etiqueta']['area'] if isinstance(reporte_lito['area_etiqueta'], dict) else 0
+                desperdicio=mejor_opcion['desperdicio'],  # Solo el desperdicio por dientes
+                area_etiqueta=reporte_lito['area_etiqueta']['area'] if isinstance(reporte_lito['area_etiqueta'], dict) else 0,
+                velocidad_maquina=VELOCIDAD_MAQUINA_MANGAS_7_TINTAS if es_manga and num_tintas == 7 else VELOCIDAD_MAQUINA_NORMAL,
+                porcentaje_desperdicio=DESPERDICIO_MANGAS if es_manga else DESPERDICIO_ETIQUETAS,
+                rentabilidad=RENTABILIDAD_MANGAS if es_manga else RENTABILIDAD_ETIQUETAS
             )
             
             # Obtener valores
@@ -551,7 +586,7 @@ def main():
             if resultados:
                 # Mostrar tabla de resultados
                 st.subheader("Tabla de Resultados")
-                df = generar_tabla_resultados(resultados)
+                df = generar_tabla_resultados(resultados, es_manga)
                 st.dataframe(df, hide_index=True, use_container_width=True)
 
                 # Generar identificador una sola vez y reutilizarlo
@@ -608,9 +643,18 @@ def main():
                     if es_manga:
                         st.markdown("#### Información de Manga")
                         st.write(f"**Tipo de Grafado:** {tipo_grafado}")
-                        if tipo_grafado == "Horizontal + Vertical Total":
+                        
+                        # Mostrar información sobre velocidad especial para mangas con 7 tintas
+                        if num_tintas == 7:
+                            st.write("📌 **Nota:** Se aplica velocidad especial de 7 m/min para mangas con 7 tintas.")
+                        
+                        if tipo_grafado == "Horizontal Total + Vertical":
                             mejor_opcion = reporte_lito.get('desperdicio', {}).get('mejor_opcion', {})
-                            st.write(f"**Desperdicio:** {mejor_opcion.get('desperdicio', 0):.2f} mm")
+                            desperdicio_valor = mejor_opcion.get('desperdicio', 0)
+                            st.write(f"**Desperdicio:** {desperdicio_valor:.2f} mm")
+                            # Mostrar información sobre el tratamiento especial cuando desperdicio > 2mm
+                            if desperdicio_valor > 2:
+                                st.write("📌 **Nota:** Se aplica factor de troquel especial debido a que el desperdicio es mayor a 2mm.")
                 
                 with col_info2:
                     st.markdown("#### Detalles de Producción")
@@ -618,19 +662,38 @@ def main():
                     if not es_manga:
                         st.write(f"**Acabado:** {acabado_seleccionado[2]}")
                     st.write(f"**Número de Tintas:** {num_tintas}")
+                    
+                    # Mostrar velocidad de máquina
+                    velocidad = VELOCIDAD_MAQUINA_MANGAS_7_TINTAS if es_manga and num_tintas == 7 else VELOCIDAD_MAQUINA_NORMAL
+                    st.write(f"**Velocidad de Máquina:** {velocidad} m/min")
+                    
                     st.write(f"**Planchas por Separado:** {planchas_por_separado}")
                     if planchas_por_separado == "Sí":
                         st.write(f"**Valor Plancha:** ${valor_plancha_separado:,.2f}")
-                    st.write(f"**Troquel Existe:** {troquel_existe}")
-                    if troquel_existe == "Sí":
-                        valor_troquel_final = reporte_lito.get('valor_troquel', {}).get('valor', 0)
-                        st.write(f"**Valor Troquel:** ${valor_troquel_final:,.2f}")
+                    
+                    # Mostrar información sobre troquel solo para etiquetas o casos especiales de mangas
+                    mostrar_troquel = not es_manga or (es_manga and tipo_grafado == "Horizontal Total + Vertical" and 
+                                                       mejor_opcion.get('desperdicio', 0) > 2)
+                    if mostrar_troquel:
+                        st.write(f"**Troquel Existe:** {troquel_existe}")
+                        if troquel_existe == "Sí":
+                            valor_troquel_final = reporte_lito.get('valor_troquel', {}).get('valor', 0)
+                            st.write(f"**Valor Troquel:** ${valor_troquel_final:,.2f}")
                 
                 # Mostrar detalles del desperdicio
                 st.markdown("#### Detalles de Desperdicio")
-                st.write(f"**Desperdicio Total:** {mejor_opcion['desperdicio']:.2f} mm")
+                desperdicio_total = mejor_opcion['desperdicio'] + (0 if es_manga else 2.6)  # Sumar GAP_AVANCE para etiquetas
+                
+                if es_manga:
+                    st.write(f"**Desperdicio Total:** {desperdicio_total:.2f} mm")
+                else:
+                    # Para etiquetas, mostrar desglose del desperdicio
+                    st.write(f"**Desperdicio calculado:** {mejor_opcion['desperdicio']:.2f} mm")
+                    st.write(f"**GAP al avance:** 2.6 mm")
+                    st.write(f"**Desperdicio Total:** {desperdicio_total:.2f} mm")
+                
                 if 'dientes' in mejor_opcion:
-                    st.write(f"**Dientes:** {mejor_opcion['dientes']}")
+                    st.write(f"**Unidad (Z):** {mejor_opcion['dientes']}")
 
                 # Generar PDF
                 pdf_gen = CotizacionPDF()

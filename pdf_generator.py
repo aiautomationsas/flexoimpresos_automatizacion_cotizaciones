@@ -13,11 +13,11 @@ class CotizacionPDF:
 
     def _ajustar_valor_plancha(self, valor: float) -> float:
         """
-        Aplica la fórmula =REDONDEAR.MAS(valor/0.75;-3) al valor de la plancha
+        Aplica la fórmula =REDONDEAR.MAS(valor/0.7;-4) al valor de la plancha
         """
-        valor_ajustado = valor / 0.75
-        # Redondear hacia arriba al siguiente múltiplo de 1000
-        return math.ceil(valor_ajustado / 1000) * 1000
+        valor_ajustado = valor / 0.7
+        # Redondear hacia arriba al siguiente múltiplo de 10000
+        return math.ceil(valor_ajustado / 10000) * 10000
 
     def generar_pdf(self, datos_cotizacion, path_salida):
         """
@@ -37,8 +37,9 @@ class CotizacionPDF:
 
         # Preparar el logo
         logo = Image("assests/logo_flexoimpresos.png")
-        logo.drawHeight = 1.5 * inch
-        logo.drawWidth = 2 * inch
+        # El logo original es 422x501 píxeles, mantener proporción pero ajustar a un ancho razonable
+        logo.drawWidth = 2 * inch  # Volver a 2 pulgadas de ancho
+        logo.drawHeight = (501/422) * logo.drawWidth  # Mantener exactamente la proporción original
 
         # Encabezado
         header_data = [
@@ -49,10 +50,10 @@ class CotizacionPDF:
             ['', 'Tel: (604) 604 0404']
         ]
         
-        header_table = Table(header_data, colWidths=[2.5*inch, 3.5*inch])
+        header_table = Table(header_data, colWidths=[2.5*inch, 3.5*inch])  # Volver a las dimensiones originales
         header_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (0,-1), 'CENTER'),  # Centrar logo
-            ('ALIGN', (1,0), (1,-1), 'LEFT'),    # Alinear texto a la izquierda
+            ('ALIGN', (1,0), (1,-1), 'CENTER'),   # Alinear texto aL centro
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), # Alineación vertical al medio
             ('FONTNAME', (1,0), (1,-1), 'Helvetica-Bold'),
             ('FONTSIZE', (1,0), (1,-1), 10),
@@ -60,13 +61,20 @@ class CotizacionPDF:
         ]))
         elements.append(header_table)
         elements.append(Spacer(1, 20))
-
-        # Identificador (ahora separado del encabezado)
-        elements.append(Paragraph('Identificador', self.styles['Normal']))
         elements.append(Spacer(1, 10))
 
         # Fecha y cliente
-        fecha = datetime.now().strftime("%d/%m/%Y")
+        meses = {
+            1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+            5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+            9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+        }
+        fecha_actual = datetime.now()
+        mes = meses[fecha_actual.month]
+        dia = fecha_actual.day
+        año = fecha_actual.year
+        fecha = f"{mes} {dia} de {año}"
+        
         elements.append(Paragraph(f"Medellín, {fecha}", self.styles['Normal']))
         elements.append(Spacer(1, 10))
         elements.append(Paragraph(f"Señores:", self.styles['Normal']))
@@ -74,9 +82,9 @@ class CotizacionPDF:
         elements.append(Spacer(1, 20))
 
         # Asunto y detalles
-        elements.append(Paragraph(f"Asunto: Cotización {datos_cotizacion['referencia']}", self.styles['Normal']))
+        elements.append(Paragraph(f"Cotización {datos_cotizacion['referencia']}", self.styles['Normal']))
         elements.append(Spacer(1, 10))
-        elements.append(Paragraph(f"Identificador: {datos_cotizacion['identificador']}", self.styles['Normal']))
+        elements.append(Paragraph(f"Referencia: {datos_cotizacion['identificador']}", self.styles['Normal']))
         elements.append(Paragraph(f"Material: {datos_cotizacion['material']}", self.styles['Normal']))
         
         # Solo mostrar el adhesivo si es diferente a "No aplica"
@@ -101,8 +109,8 @@ class CotizacionPDF:
             elements.append(Paragraph(f"Grafado: {datos_cotizacion['tipo_grafado']}", self.styles['Normal']))
         
         # Si no se incluyen planchas, mostrar "Planchas por separado" con el valor original
-        if datos_cotizacion['valor_plancha_separado'] and not datos_cotizacion.get('es_manga'):
-            elements.append(Paragraph(f"Planchas por separado: ${datos_cotizacion['valor_plancha_separado']:,.0f}", self.styles['Normal']))
+        if datos_cotizacion['valor_plancha_separado']:
+            elements.append(Paragraph(f"Costo Preprensa: ${datos_cotizacion['valor_plancha_separado']:,.0f}", self.styles['Normal']))
         
         elements.append(Spacer(1, 20))
 
@@ -138,7 +146,7 @@ class CotizacionPDF:
         elements.append(Paragraph("• Nuevos: 20 días calendario a partir de la aprobación del sherpa", self.styles['Normal']))
         
         elements.append(Spacer(1, 10))
-        elements.append(Paragraph("Política de Cobranza:", self.styles['Heading2']))
+        elements.append(Paragraph("Política de Cartera:", self.styles['Heading2']))
         elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
         elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
         
