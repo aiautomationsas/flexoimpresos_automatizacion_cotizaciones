@@ -382,13 +382,26 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        ancho = st.number_input("Ancho (mm)", min_value=0.1, max_value=335.0, value=100.0, step=0.1,
-                               help="El ancho no puede exceder 335mm")
-        avance = st.number_input("Avance/Largo (mm)", min_value=0.1, value=100.0, step=0.1)
+        ancho = st.number_input("Ancho (mm)", 
+                               min_value=10.0, 
+                               max_value=335.0, 
+                               value=100.0, 
+                               step=10.0,
+                               help="El ancho no puede exceder 335mm. Los valores deben ser múltiplos de 10mm.")
+        avance = st.number_input("Avance/Largo (mm)", 
+                               min_value=10.0, 
+                               value=100.0, 
+                               step=10.0,
+                               help="Los valores deben ser múltiplos de 10mm.")
         pistas = st.number_input("Número de pistas", min_value=1, value=1, step=1)
         
     with col2:
-        num_tintas = st.number_input("Número de tintas", min_value=0, value=4, step=1)
+        num_tintas = st.number_input("Número de tintas", 
+                                   min_value=0, 
+                                   max_value=7, 
+                                   value=4, 
+                                   step=1,
+                                   help="Máximo 7 tintas")
         planchas_por_separado = st.radio("¿Planchas por separado?", 
                                     options=["Sí", "No"], 
                                     index=1,

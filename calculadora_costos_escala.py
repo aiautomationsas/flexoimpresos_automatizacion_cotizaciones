@@ -148,7 +148,7 @@ Cálculo:
     def calcular_mo_y_maq(self, tiempo_horas: float, num_tintas: int, datos: DatosEscala, es_manga: bool = False) -> float:
         """
         Calcula MO y Maq según la fórmula:
-        
+
         Para etiquetas:
         if Tintas > 0:
             if t(h) < 1:
