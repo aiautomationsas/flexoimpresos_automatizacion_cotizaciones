@@ -480,6 +480,56 @@ def main():
                 format_func=lambda x: x[1]
             ) if referencias else None
 
+    # Sección de ajustes avanzados con un expander
+    with st.expander("Ajustes Avanzados"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Rentabilidad
+            rentabilidad_default = RENTABILIDAD_MANGAS if es_manga else RENTABILIDAD_ETIQUETAS
+            rentabilidad_ajustada = st.number_input(
+                "Rentabilidad (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=rentabilidad_default,
+                step=1.0,
+                help="Porcentaje de rentabilidad a aplicar en el cálculo"
+            )
+            
+            # Precio de material
+            # Mostrar el valor actual como referencia
+            valor_material_actual = extraer_valor_precio(material_seleccionado[1])
+            st.text(f"Valor material actual: ${valor_material_actual:.2f}")
+            ajustar_material = st.checkbox("Ajustar precio de material")
+            valor_material_ajustado = st.number_input(
+                "Valor material",
+                min_value=0.0,
+                value=valor_material_actual,
+                step=0.01,
+                disabled=not ajustar_material
+            )
+        
+        with col2:
+            # Precio de troquel
+            ajustar_troquel = st.checkbox("Ajustar precio de troquel")
+            precio_troquel = st.number_input(
+                "Valor troquel",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                disabled=not ajustar_troquel
+            )
+            
+            # Precio de planchas
+            ajustar_planchas = st.checkbox("Ajustar precio de planchas")
+            precio_planchas = st.number_input(
+                "Valor planchas",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                disabled=not ajustar_planchas
+            )
+
     # Validación de ancho total antes de calcular
     calculadora_lito = CalculadoraLitografia()
     f3, mensaje_ancho = calculadora_lito.calcular_ancho_total(num_tintas, pistas, ancho)
@@ -608,6 +658,25 @@ def main():
             
             # Calcular costos
             calculadora = CalculadoraCostosEscala()
+            
+            # Ajustar datos con los valores personalizados
+            if 'rentabilidad_ajustada' in locals():
+                datos_escala.rentabilidad = rentabilidad_ajustada
+
+            # Ajustar valores de material, troquel y planchas
+            if 'ajustar_material' in locals() and ajustar_material:
+                valor_material = valor_material_ajustado
+
+            # Valor troquel
+            valor_troquel = precio_troquel if 'ajustar_troquel' in locals() and ajustar_troquel else obtener_valor_troquel(reporte_lito)
+
+            # Valor plancha
+            if 'ajustar_planchas' in locals() and ajustar_planchas:
+                valor_plancha = precio_planchas
+                valor_plancha_para_calculo = valor_plancha
+            else:
+                valor_plancha, valor_plancha_dict = obtener_valor_plancha(reporte_lito)
+                valor_plancha_para_calculo = 0 if planchas_por_separado == "Sí" else valor_plancha
             
             resultados = calculadora.calcular_costos_por_escala(
                 datos=datos_escala,
