@@ -3,6 +3,10 @@ from typing import Optional, Dict, List, Tuple
 import math
 from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
 from calculadora_base import CalculadoraBase
+from constants import (
+    GAP_PISTAS_ETIQUETAS, GAP_AVANCE_ETIQUETAS, ANCHO_MAXIMO_LITOGRAFIA,
+    VALOR_MM_PLANCHA, INCREMENTO_ANCHO_SIN_TINTAS, INCREMENTO_ANCHO_TINTAS
+)
 
 class DatosLitografia:
     """
@@ -14,8 +18,8 @@ class DatosLitografia:
     """
     def __init__(self, ancho: float, avance: float, pistas: int = 1,
                  planchas_por_separado: bool = True, incluye_troquel: bool = True,
-                 troquel_existe: bool = False, gap: float = 3.0, 
-                 gap_avance: float = 2.6, ancho_maximo: float = 335.0,
+                 troquel_existe: bool = False, gap: float = GAP_PISTAS_ETIQUETAS, 
+                 gap_avance: float = GAP_AVANCE_ETIQUETAS, ancho_maximo: float = ANCHO_MAXIMO_LITOGRAFIA,
                  tipo_grafado: Optional[str] = None):
         """
         Inicializa un objeto DatosLitografia con los parámetros especificados.
@@ -52,8 +56,8 @@ class CalculadoraLitografia(CalculadoraBase):
     """
     
     # Constantes específicas de litografía
-    VALOR_MM_PLANCHA = 1.5  # Valor por mm de plancha
-    ANCHO_MAXIMO = 335.0    # Ancho máximo permitido en mm
+    VALOR_MM_PLANCHA = VALOR_MM_PLANCHA  # Valor por mm de plancha
+    ANCHO_MAXIMO = ANCHO_MAXIMO_LITOGRAFIA  # Ancho máximo permitido en mm
     
     def __init__(self):
         """Inicializa la calculadora de litografía."""
@@ -67,7 +71,7 @@ class CalculadoraLitografia(CalculadoraBase):
         if self._calculadora_desperdicios is None:
             self._calculadora_desperdicios = CalculadoraDesperdicio(
                 ancho_maquina=self.ANCHO_MAXIMO,
-                gap_mm=2.6  # Este gap solo se usa para etiquetas
+                gap_mm=GAP_AVANCE_ETIQUETAS  # Este gap solo se usa para etiquetas
             )
         return self._calculadora_desperdicios
 
@@ -77,7 +81,7 @@ class CalculadoraLitografia(CalculadoraBase):
         """
         return CalculadoraDesperdicio(
             ancho_maquina=self.ANCHO_MAXIMO,
-            gap_mm=2.6,  # Este gap solo se usa para etiquetas
+            gap_mm=GAP_AVANCE_ETIQUETAS,  # Este gap solo se usa para etiquetas
             es_manga=es_manga
         )
 
@@ -105,7 +109,7 @@ class CalculadoraLitografia(CalculadoraBase):
         base = pistas * d3 - C3
         
         # Incremento según número de tintas
-        incremento = 10 if num_tintas == 0 else 20
+        incremento = INCREMENTO_ANCHO_SIN_TINTAS if num_tintas == 0 else INCREMENTO_ANCHO_TINTAS
         
         # Calcular resultado
         resultado = base + incremento

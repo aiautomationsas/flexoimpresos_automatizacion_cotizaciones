@@ -2,8 +2,15 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple
 import math
 import pandas as pd
-from calculadora_desperdicios import CalculadoraDesperdicio
 from calculadora_base import CalculadoraBase
+from constants import (
+    VELOCIDAD_MAQUINA_NORMAL, MO_MONTAJE, MO_IMPRESION, MO_TROQUELADO,
+    VALOR_GR_TINTA, RENTABILIDAD_ETIQUETAS, DESPERDICIO_ETIQUETAS,
+    ANCHO_MAXIMO_MAQUINA, GAP_PISTAS_ETIQUETAS, MM_COLOR, GAP_FIJO,
+    INCREMENTO_ANCHO_SIN_TINTAS, INCREMENTO_ANCHO_TINTAS, 
+    GAP_AVANCE_ETIQUETAS, GAP_AVANCE_MANGAS, MO_SELLADO, MO_CORTE,
+    FACTOR_TINTA_AREA, CANTIDAD_TINTA_ESTANDAR, INCREMENTO_ANCHO_MANGAS
+)
 
 @dataclass
 class DatosEscala:
@@ -20,14 +27,14 @@ class DatosEscala:
     avance: float  # Avance en mm
     avance_total: float  # Avance total incluyendo gaps
     desperdicio: float
-    velocidad_maquina: float = 20.0  # Valor fijo
-    mo_montaje: float = 5000.0  # Valor fijo
-    mo_impresion: float = 50000.0  # Valor fijo
-    mo_troquelado: float = 50000.0  # Valor fijo
-    valor_gr_tinta: float = 30.0  # Valor fijo
-    rentabilidad: float = 40.0  # Valor por defecto para etiquetas
+    velocidad_maquina: float = VELOCIDAD_MAQUINA_NORMAL  # Valor fijo desde constants.py
+    mo_montaje: float = MO_MONTAJE  # Valor fijo desde constants.py
+    mo_impresion: float = MO_IMPRESION  # Valor fijo desde constants.py
+    mo_troquelado: float = MO_TROQUELADO  # Valor fijo desde constants.py
+    valor_gr_tinta: float = VALOR_GR_TINTA  # Valor fijo desde constants.py
+    rentabilidad: float = RENTABILIDAD_ETIQUETAS  # Valor por defecto para etiquetas desde constants.py
     area_etiqueta: float = 0.0  # Se calcula o se recibe
-    porcentaje_desperdicio: float = 10.0  # Porcentaje de desperdicio por defecto
+    porcentaje_desperdicio: float = DESPERDICIO_ETIQUETAS  # Porcentaje de desperdicio por defecto desde constants.py
     valor_metro: float = 0.0  # Valor del metro de material
 
     def set_area_etiqueta(self, area: float):
@@ -43,7 +50,7 @@ class CalculadoraCostosEscala(CalculadoraBase):
     mano de obra, desperdicios, y otros factores relevantes.
     """
     
-    def __init__(self, ancho_maximo: float = 325):
+    def __init__(self, ancho_maximo: float = ANCHO_MAXIMO_MAQUINA):
         """
         Inicializa la calculadora de costos por escala.
         
@@ -52,12 +59,12 @@ class CalculadoraCostosEscala(CalculadoraBase):
         """
         super().__init__()
         self.ANCHO_MAXIMO = ancho_maximo
-        self.GAP = 3  # GAP entre pistas
+        self.GAP = GAP_PISTAS_ETIQUETAS  # GAP entre pistas desde constants.py
         
         # Constantes para cálculos
         self.C3 = self.GAP  # GAP fijo para cálculos
-        self.MM_COLOR = 30000  # MM de color para cálculo de desperdicio
-        self.GAP_FIJO = 50  # R3 es 50 tanto para mangas como etiquetas
+        self.MM_COLOR = MM_COLOR  # MM de color para cálculo de desperdicio desde constants.py
+        self.GAP_FIJO = GAP_FIJO  # R3 es 50 tanto para mangas como etiquetas desde constants.py
         
     def _calcular_q3(self, num_tintas: int, ancho: float, pistas: int, es_manga: bool = False) -> Dict:
         """
@@ -82,7 +89,7 @@ class CalculadoraCostosEscala(CalculadoraBase):
         """
         d3 = ancho + self.C3
         base = pistas * d3 - self.C3
-        incremento = 10 if num_tintas == 0 else 20
+        incremento = INCREMENTO_ANCHO_SIN_TINTAS if num_tintas == 0 else INCREMENTO_ANCHO_TINTAS
         resultado = base + incremento
         # Redondear hacia arriba al siguiente múltiplo de 10
         ancho_redondeado = math.ceil(resultado / 10) * 10
@@ -108,7 +115,7 @@ class CalculadoraCostosEscala(CalculadoraBase):
         - Desperdicio_unidad = desperdicio por los dientes del troquel
         """
         # GAP solo para etiquetas
-        gap = 2.6 if not es_manga else 0
+        gap = GAP_AVANCE_ETIQUETAS if not es_manga else GAP_AVANCE_MANGAS
         
         # Avance total incluye el GAP
         avance_total = datos.avance + gap
@@ -167,8 +174,6 @@ Cálculo:
             return base_mo if tiempo_horas < 1 else base_mo * tiempo_horas
         
         # Cálculo para mangas (mantener lógica existente)
-        MO_SELLADO = 50000
-        MO_CORTE = 50000
         base_mo = datos.mo_impresion if num_tintas > 0 else datos.mo_troquelado
         total_mo = base_mo + MO_SELLADO + MO_CORTE
         return total_mo if tiempo_horas < 1 else total_mo * tiempo_horas
@@ -181,20 +186,30 @@ Cálculo:
         Donde R11 es el costo por etiqueta calculado como:
         R11 = 0.00000800 * num_tintas * area_etiqueta
         """
+        # Prevenir errores con área de etiqueta no definida o cero
+        if area_etiqueta is None or area_etiqueta <= 0:
+            print(f"\n--- ERROR EN CÁLCULO DE TINTAS ---")
+            print(f"Área de etiqueta no válida: {area_etiqueta}")
+            return 0
+            
         # Calcular R11
-        R11 = 0.00000800 * num_tintas * area_etiqueta
+        R11 = FACTOR_TINTA_AREA * num_tintas * area_etiqueta
         
         # Costo que varía con la escala
         costo_variable = R11 * escala
         
         # Costo fijo por número de tintas
-        costo_fijo = 100 * num_tintas * datos.valor_gr_tinta
+        costo_fijo = CANTIDAD_TINTA_ESTANDAR * num_tintas * datos.valor_gr_tinta
         
         print(f"\n--- Verificación del Cálculo de Tintas ---")
+        print(f"Área de etiqueta: {area_etiqueta:.2f} mm²")
+        print(f"Factor tinta área: {FACTOR_TINTA_AREA:.8f}")
+        print(f"Número de tintas: {num_tintas}")
         print(f"R11 (costo por etiqueta): ${R11:.8f}")
         print(f"Escala: {escala}")
         print(f"Costo variable (R11 * escala): ${costo_variable:.2f}")
-        print(f"Costo fijo (100 * num_tintas * valor_gr_tinta): ${costo_fijo:.2f}")
+        print(f"Valor gr tinta: ${datos.valor_gr_tinta:.2f}")
+        print(f"Costo fijo ({CANTIDAD_TINTA_ESTANDAR} * {num_tintas} * {datos.valor_gr_tinta}): ${costo_fijo:.2f}")
         print(f"Costo total: ${costo_variable + costo_fijo:.2f}")
         
         return costo_variable + costo_fijo
@@ -211,6 +226,17 @@ Cálculo:
             valor_material: Valor del material por mm²
             valor_acabado: Valor del acabado por mm²
         """
+        # Prevenir errores con área de etiqueta no definida o cero
+        if area_etiqueta is None or area_etiqueta <= 0:
+            print(f"\n--- ERROR EN CÁLCULO DE PAPEL/LAM ---")
+            print(f"Área de etiqueta no válida: {area_etiqueta}")
+            return 0
+            
+        # Prevenir valores negativos o nulos en los valores de material y acabado
+        if valor_material <= 0:
+            print(f"\n--- ADVERTENCIA EN CÁLCULO DE PAPEL/LAM ---")
+            print(f"Valor material no válido: {valor_material}")
+        
         # Cálculo detallado
         costo_material = (area_etiqueta * valor_material) / 1000000
         costo_acabado = (area_etiqueta * valor_acabado) / 1000000
@@ -371,52 +397,90 @@ Cálculo:
             traceback.print_exc()
             return 0
         
-    def calcular_desperdicio_tintas(self, datos: DatosEscala, num_tintas: int, valor_material: float, es_manga: bool = False) -> float:
-        """
-        Calcula el desperdicio de tintas según la fórmula:
-        S7 × S3 × O7
-        donde:
-        - S7 = MM_COLOR * num_tintas
-        - S3 = GAP_FIJO + Q3
-        - O7 = valor_material / 1000000
-        """
-        if num_tintas <= 0:
-            return 0
-            
+    def calcular_desperdicio_tintas(self, dados: DatosEscala, num_tintas: int, valor_material: float, es_manga: bool = False) -> Dict:
+        # Validaciones iniciales
+        if num_tintas <= 0 or valor_material <= 0:
+            return {
+                'desperdicio_tintas': 0,
+                'detalles': {}
+            }
+
+        # Constantes
+        MM_COLOR = 30000  # mm por color
+        GAP_FIJO = 50  # R3 es 50 tanto para mangas como etiquetas
+
+        print("\n========== CÁLCULO DETALLADO DE DESPERDICIO DE TINTAS ==========")
+        print(f"1. Constante MM_COLOR = {MM_COLOR}")
+
         # Calcular mm totales
-        mm_totales = self.MM_COLOR * num_tintas
+        mm_totales = MM_COLOR * num_tintas
+        print(f"2. MM Totales (S7) = MM_COLOR * num_tintas = {MM_COLOR} * {num_tintas} = {mm_totales}")
+
+        # Cálculo específico para mangas
+        if es_manga:
+            # Aplicar el ajuste de ancho para mangas
+            B3 = (dados.ancho * 2) + INCREMENTO_ANCHO_MANGAS
+            C3 = 0  # No hay gap entre pistas para mangas
+            print(f"3. Cálculo de ancho para mangas:")
+            print(f"   - Ancho original: {dados.ancho} mm")
+            print(f"   - Incremento de ancho: {INCREMENTO_ANCHO_MANGAS} mm")
+            print(f"   - B3 calculado: ({dados.ancho} * 2) + {INCREMENTO_ANCHO_MANGAS} = {B3} mm")
+        else:
+            # Lógica para etiquetas
+            B3 = dados.ancho
+            # Para etiquetas: C3 = 0 si pistas = 1, C3 = 3 si pistas > 1
+            C3 = 0 if dados.pistas == 1 else self.GAP
+
+        # Calcular D3 (ancho + GAP)
+        D3 = B3 + C3
         
-        # Calcular Q3 usando el método auxiliar
-        resultado_q3 = self._calcular_q3(
-            num_tintas=num_tintas,
-            ancho=datos.ancho,
-            pistas=datos.pistas,
-            es_manga=es_manga
-        )
-        
-        # Extraer Q3 del resultado
-        q3 = resultado_q3['q3']
-        c3 = resultado_q3['c3']
-        d3 = resultado_q3['d3']
-        
-        # Calcular S3 = GAP_FIJO + Q3
-        s3 = self.GAP_FIJO + q3
-        
-        # Calcular desperdicio
-        desperdicio_tintas = mm_totales * s3 * (valor_material / 1000000)
-        
-        print(f"\n--- Verificación del Cálculo de Desperdicio Tintas ---")
-        print(f"MM Totales (S7): {mm_totales}")
-        print(f"Valor Material (O7): {valor_material}")
-        print(f"C3 (GAP): {c3}")
-        print(f"D3 (ancho + GAP): {d3}")
-        print(f"E3 (pistas): {datos.pistas}")
-        print(f"Q3: {q3}")
-        print(f"R3 (GAP_FIJO): {self.GAP_FIJO}")
-        print(f"S3 (GAP_FIJO + Q3): {s3}")
-        print(f"Desperdicio tintas: ${desperdicio_tintas:.2f}")
-        
-        return desperdicio_tintas
+        # Calcular E3 (pistas)
+        E3 = dados.pistas
+
+        # Calcular Q3
+        Q3 = (D3 * E3) + C3
+
+        print(f"4. Cálculo de Q3:")
+        print(f"   - C3 (GAP): {C3} mm")
+        print(f"   - B3 (ancho): {B3} mm")
+        print(f"   - D3 (ancho + GAP): {D3} mm")
+        print(f"   - E3 (pistas): {E3}")
+        print(f"   - Q3 = (D3 * pistas + C3) = ({D3} * {E3} + {C3}) = {Q3} mm")
+
+        # Calcular S3
+        S3 = GAP_FIJO + Q3
+        print(f"5. GAP_FIJO (R3) = {GAP_FIJO} mm")
+        print(f"6. S3 = GAP_FIJO + Q3 = {GAP_FIJO} + {Q3} = {S3} mm")
+
+        # Calcular factor de conversión
+        print(f"7. Valor material: ${valor_material} por mm²")
+        factor = valor_material / 1000000
+        print(f"8. Factor de conversión (O7) = valor_material / 1000000 = {valor_material} / 1000000 = {factor:.8f}")
+
+        # Calcular desperdicio de tintas
+        desperdicio_tintas = mm_totales * S3 * factor
+        print(f"9. Cálculo final:")
+        print(f"   Desperdicio tintas = S7 * S3 * O7")
+        print(f"   Desperdicio tintas = MM_Totales * S3 * Factor")
+        print(f"   Desperdicio tintas = {mm_totales} * {S3} * {factor:.8f} = ${desperdicio_tintas:.2f}")
+
+        # Retornar diccionario con más detalles
+        return {
+            'desperdicio_tintas': desperdicio_tintas,
+            'detalles': {
+                'mm_totales': mm_totales,
+                'q3': Q3,
+                'c3': C3,
+                'd3': D3,
+                's3': S3,
+                'factor': factor,
+                'formula': 'desperdicio_tintas = mm_totales * s3 * factor',
+                'ancho_original': dados.ancho,
+                'ancho_ajustado': B3,
+                'pistas': E3,
+                'es_manga': es_manga
+            }
+        }
         
     def calcular_costos_por_escala(
         self, 
@@ -434,6 +498,7 @@ Cálculo:
         """
         try:
             resultados = []
+            # Usar el porcentaje de desperdicio adecuado según el tipo de producto
             porcentaje_desperdicio = datos.porcentaje_desperdicio / 100
             
             # Debug inicial
@@ -447,6 +512,11 @@ Cálculo:
             print(f"- Valor acabado: ${valor_acabado:.6f}/mm²")
             print(f"- Es manga: {es_manga}")
             print(f"- Porcentaje desperdicio: {porcentaje_desperdicio * 100}%")
+            print(f"- Área etiqueta: {datos.area_etiqueta:.2f} mm²")
+            
+            # Validar área de etiqueta
+            if datos.area_etiqueta <= 0:
+                print("ADVERTENCIA: El área de etiqueta es cero o negativa. Esto afectará los cálculos.")
             
             # 3. Calcular costos para cada escala
             for escala in datos.escalas:
@@ -467,33 +537,42 @@ Cálculo:
                 mo_y_maq = self.calcular_mo_y_maq(tiempo_horas, num_tintas, datos, es_manga)
                 print(f"MO y Maq: ${mo_y_maq:.2f}")
                 
+                # Verificar área de etiqueta antes de calcular tintas
+                print(f"Área etiqueta para cálculo de tintas: {datos.area_etiqueta:.2f} mm²")
                 tintas = self.calcular_tintas(escala, num_tintas, datos.area_etiqueta, datos)
                 print(f"Tintas: ${tintas:.2f}")
                 
+                # Verificar área de etiqueta antes de calcular papel_lam
+                print(f"Área etiqueta para cálculo de papel_lam: {datos.area_etiqueta:.2f} mm²")
                 papel_lam = self.calcular_papel_lam(escala, datos.area_etiqueta, valor_material, valor_acabado)
                 print(f"Papel/lam: ${papel_lam:.2f}")
                 
                 # 3.4 Calcular desperdicios
+                # Desperdicio por porcentaje del papel/laminado usando constantes
                 desperdicio_porcentaje = papel_lam * porcentaje_desperdicio
-                print(f"Desperdicio porcentaje: ${desperdicio_porcentaje:.2f}")
+                print(f"Desperdicio porcentaje ({porcentaje_desperdicio * 100}%): ${desperdicio_porcentaje:.2f}")
 
+                # Desperdicio de tintas
                 if num_tintas > 0:
-                    desperdicio_tintas = self.calcular_desperdicio_tintas(
-                        datos=datos,
+                    resultado_desperdicio = self.calcular_desperdicio_tintas(
+                        dados=datos,
                         num_tintas=num_tintas,
                         valor_material=valor_material,
                         es_manga=es_manga
                     )
+                    # Extrae solo el valor numérico del diccionario
+                    desperdicio_tintas = resultado_desperdicio['desperdicio_tintas']
+                    desperdicio_tintas_detalles = resultado_desperdicio['detalles']
                 else:
                     desperdicio_tintas = 0
-                    print(f"Desperdicio tintas: ${desperdicio_tintas:.2f} (no hay tintas)")
-                
-                # Desperdicio total
-                desperdicio = desperdicio_porcentaje + desperdicio_tintas
-                print(f"Desperdicio total: ${desperdicio:.2f}")
+                    desperdicio_tintas_detalles = {}
+
+                # Ahora ambos son valores numéricos para la suma
+                desperdicio_total = desperdicio_porcentaje + desperdicio_tintas
+                print(f"Desperdicio total: ${desperdicio_total:.2f} = ${desperdicio_porcentaje:.2f} + ${desperdicio_tintas:.2f}")
                 
                 # 3.5 Calcular suma de costos variables
-                suma_costos = montaje + mo_y_maq + tintas + papel_lam + desperdicio
+                suma_costos = montaje + mo_y_maq + tintas + papel_lam + desperdicio_total
                 print(f"Suma de costos variables: ${suma_costos:.2f}")
                 
                 # 3.6 Calcular valor por unidad
@@ -512,12 +591,13 @@ Cálculo:
                     'mo_y_maq': mo_y_maq,
                     'tintas': tintas,
                     'papel_lam': papel_lam,
-                    'desperdicio': datos.desperdicio,  # Agregar el desperdicio original (por dientes)
+                    'desperdicio': datos.desperdicio,  # Desperdicio original (por dientes)
                     'desperdicio_tintas': desperdicio_tintas,
                     'desperdicio_porcentaje': desperdicio_porcentaje,
+                    'desperdicio_total': desperdicio_total,  # Suma total del desperdicio
                     'num_tintas': num_tintas,
                     'ancho': datos.ancho,
-                    'avance': datos.avance,  # Agregar el avance a los resultados
+                    'avance': datos.avance,
                     'porcentaje_desperdicio': porcentaje_desperdicio
                 })
             

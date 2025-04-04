@@ -2,17 +2,21 @@
 Clase base para cálculos comunes entre CalculadoraLitografia y CalculadoraCostosEscala.
 """
 from typing import Dict
+from constants import (
+    GAP_PISTAS_ETIQUETAS, GAP_PISTAS_MANGAS, GAP_FIJO, 
+    AVANCE_FIJO, MM_COLOR
+)
 
 class CalculadoraBase:
     """
     Clase base que contiene los cálculos comunes para Q3, S3 y variables relacionadas.
     """
     
-    # Constantes compartidas
-    GAP = 3  # GAP entre pistas
-    GAP_FIJO = 50  # R3 es 50 tanto para mangas como etiquetas
-    AVANCE_FIJO = 30  # Avance fijo para cálculos
-    MM_COLOR = 30000  # MM de color para cálculo de desperdicio
+    # Constantes compartidas, ahora importadas desde constants.py
+    GAP = GAP_PISTAS_ETIQUETAS  # GAP entre pistas
+    GAP_FIJO = GAP_FIJO  # R3 es 50 tanto para mangas como etiquetas
+    AVANCE_FIJO = AVANCE_FIJO  # Avance fijo para cálculos
+    MM_COLOR = MM_COLOR  # MM de color para cálculo de desperdicio
     
     def calcular_q3(self, ancho: float, pistas: int, es_manga: bool = False) -> Dict:
         """
@@ -34,7 +38,7 @@ class CalculadoraBase:
                 - q3: Valor de Q3 (ancho total ajustado)
         """
         # Determinar C3 según tipo y pistas
-        c3 = 0 if es_manga or pistas <= 1 else self.GAP
+        c3 = GAP_PISTAS_MANGAS if es_manga or pistas <= 1 else self.GAP
         
         # Calcular D3 = ancho + C3
         d3 = ancho + c3

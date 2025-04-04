@@ -12,20 +12,15 @@ from pdf_generator import CotizacionPDF
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 import math
-
-# Constantes para cálculos y configuración
-RENTABILIDAD_MANGAS = 45.0  # Porcentaje de rentabilidad para mangas
-RENTABILIDAD_ETIQUETAS = 40.0  # Porcentaje de rentabilidad para etiquetas
-DESPERDICIO_MANGAS = 30.0  # Porcentaje de desperdicio para mangas
-DESPERDICIO_ETIQUETAS = 10.0  # Porcentaje de desperdicio para etiquetas
-VELOCIDAD_MAQUINA_NORMAL = 20.0  # Velocidad normal de la máquina en m/min
-VELOCIDAD_MAQUINA_MANGAS_7_TINTAS = 7.0  # Velocidad especial para mangas con 7 tintas
-GAP_AVANCE_ETIQUETAS = 2.6  # GAP al avance para etiquetas en mm
-GAP_AVANCE_MANGAS = 0  # GAP al avance para mangas en mm
-GAP_PISTAS_ETIQUETAS = 3.0  # GAP entre pistas para etiquetas en mm
-GAP_PISTAS_MANGAS = 0  # GAP entre pistas para mangas en mm
-FACTOR_ANCHO_MANGAS = 2  # Factor de multiplicación para el ancho en mangas
-INCREMENTO_ANCHO_MANGAS = 20  # Incremento en mm para el ancho en mangas
+from constants import (
+    RENTABILIDAD_MANGAS, RENTABILIDAD_ETIQUETAS,
+    DESPERDICIO_MANGAS, DESPERDICIO_ETIQUETAS,
+    VELOCIDAD_MAQUINA_NORMAL, VELOCIDAD_MAQUINA_MANGAS_7_TINTAS,
+    GAP_AVANCE_ETIQUETAS, GAP_AVANCE_MANGAS,
+    GAP_PISTAS_ETIQUETAS, GAP_PISTAS_MANGAS,
+    FACTOR_ANCHO_MANGAS, INCREMENTO_ANCHO_MANGAS,
+    ANCHO_MAXIMO_LITOGRAFIA
+)
 
 # Configuración de página
 st.set_page_config(
@@ -90,12 +85,28 @@ console_capture = StreamlitCapture()
 def extraer_valor_precio(texto: str) -> float:
     """Extrae el valor numérico de un string con formato 'nombre ($valor)'"""
     try:
+        # Buscar el patrón ($X.XX) donde X son dígitos
         inicio = texto.find('($') + 2
-        fin = texto.find(')')
+        fin = texto.find(')', inicio)
+        
         if inicio > 1 and fin > inicio:
-            return float(texto[inicio:fin].strip())
+            # Extraer el valor y quitar posibles espacios, comas, etc.
+            valor_texto = texto[inicio:fin].strip()
+            # Eliminar comas que puedan existir en el formato numérico
+            valor_texto = valor_texto.replace(',', '')
+            # Convertir a float
+            return float(valor_texto)
+        
+        # Si no encontramos el patrón esperado, intentar buscar solo números
+        import re
+        numeros = re.findall(r'(\d+\.\d+)', texto)
+        if numeros:
+            return float(numeros[0])
+            
+        print(f"No se pudo extraer valor de: '{texto}'")
         return 0.0
-    except:
+    except Exception as e:
+        print(f"Error extrayendo valor de '{texto}': {str(e)}")
         return 0.0
 
 def procesar_escalas(escalas_text: str) -> Optional[List[int]]:
@@ -128,7 +139,7 @@ def generar_tabla_resultados(resultados: List[Dict], es_manga: bool = False) -> 
             'MO y Maq': f"${r['mo_y_maq']:,.2f}",
             'Tintas': f"${r['tintas']:,.2f}",
             'Papel/lam': f"${r['papel_lam']:,.2f}",
-            'Desperdicio': f"${r['desperdicio_tintas'] + r['desperdicio_porcentaje']:,.2f}"
+            'Desperdicio': f"${r.get('desperdicio_total', 0):,.2f}"
         }
         for r in resultados
     ])
@@ -141,7 +152,7 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
                            es_manga: bool = False) -> str:
     """Genera un informe técnico detallado"""
     dientes = reporte_lito['desperdicio']['mejor_opcion'].get('dientes', 'N/A')
-    gap_avance = datos_entrada.desperdicio + (0 if es_manga else 2.6)  # Gap avance solo para etiquetas
+    gap_avance = datos_entrada.desperdicio + (GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS)  # GAP al avance según el tipo
     
     # Obtener el valor del troquel del diccionario
     valor_troquel = reporte_troquel.get('valor', 0) if isinstance(reporte_troquel, dict) else 0
@@ -156,7 +167,7 @@ def generar_informe_tecnico(datos_entrada: DatosEscala, resultados: List[Dict], 
         if es_manga:
             q3_info = f"""
 - **Cálculo de Q3 (Manga)**:
-  - C3 (GAP) = 0 (siempre para mangas)
+  - C3 (GAP) = {GAP_PISTAS_MANGAS} (siempre para mangas)
   - B3 (ancho) = {detalles.get('b3', 'N/A')} mm
   - D3 (ancho + C3) = {detalles.get('d3', 'N/A')} mm
   - E3 (pistas) = {detalles.get('e3', 'N/A')}
@@ -384,10 +395,10 @@ def main():
     with col1:
         ancho = st.number_input("Ancho (mm)", 
                                min_value=10.0, 
-                               max_value=335.0, 
+                               max_value=ANCHO_MAXIMO_LITOGRAFIA, 
                                value=100.0, 
                                step=10.0,
-                               help="El ancho no puede exceder 335mm. Los valores deben ser múltiplos de 10mm.")
+                               help=f"El ancho no puede exceder {ANCHO_MAXIMO_LITOGRAFIA}mm. Los valores deben ser múltiplos de 10mm.")
         avance = st.number_input("Avance/Largo (mm)", 
                                min_value=10.0, 
                                value=100.0, 
@@ -493,7 +504,8 @@ def main():
                 incluye_troquel=True,
                 troquel_existe=troquel_existe == "Sí",
                 gap=GAP_PISTAS_MANGAS if es_manga else GAP_PISTAS_ETIQUETAS,
-                gap_avance=GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS
+                gap_avance=GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS,
+                ancho_maximo=ANCHO_MAXIMO_LITOGRAFIA
             )
             
             # Crear calculadora de litografía
@@ -554,27 +566,39 @@ def main():
             
             mejor_opcion = reporte_lito['desperdicio']['mejor_opcion']
             
-            # Configuración de datos para cálculo
-            datos = DatosEscala(
+            # Configurar datos de escala
+            datos_escala = DatosEscala(
                 escalas=escalas,
-                pistas=datos_lito.pistas,
-                ancho=datos_lito.ancho,
-                avance=datos_lito.avance,
-                avance_total=datos_lito.avance,
-                desperdicio=mejor_opcion['desperdicio'],  # Solo el desperdicio por dientes
-                area_etiqueta=reporte_lito['area_etiqueta']['area'] if isinstance(reporte_lito['area_etiqueta'], dict) else 0,
+                pistas=pistas,
+                ancho=ancho,
+                avance=avance,
+                avance_total=avance + (GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS),
+                desperdicio=mejor_opcion['desperdicio'],
                 velocidad_maquina=VELOCIDAD_MAQUINA_MANGAS_7_TINTAS if es_manga and num_tintas == 7 else VELOCIDAD_MAQUINA_NORMAL,
-                porcentaje_desperdicio=DESPERDICIO_MANGAS if es_manga else DESPERDICIO_ETIQUETAS,
-                rentabilidad=RENTABILIDAD_MANGAS if es_manga else RENTABILIDAD_ETIQUETAS
+                rentabilidad=RENTABILIDAD_MANGAS if es_manga else RENTABILIDAD_ETIQUETAS,
+                porcentaje_desperdicio=DESPERDICIO_MANGAS if es_manga else DESPERDICIO_ETIQUETAS
             )
+            
+            # Establecer el área de etiqueta
+            area_etiqueta = reporte_lito['area_etiqueta']['area'] if isinstance(reporte_lito['area_etiqueta'], dict) else 0
+            datos_escala.set_area_etiqueta(area_etiqueta)
             
             # Obtener valores
             valor_etiqueta = reporte_lito.get('valor_tinta', 0)
             valor_plancha, valor_plancha_dict = obtener_valor_plancha(reporte_lito)
             valor_troquel = obtener_valor_troquel(reporte_lito)
             
+            # Extraer valores correctos para material y acabado
             valor_material = extraer_valor_precio(material_seleccionado[1])
             valor_acabado = 0 if es_manga else extraer_valor_precio(acabado_seleccionado[1])
+            
+            # Imprimir información de debug para valores de material y acabado
+            print(f"\n=== DEBUG VALORES DE MATERIAL Y ACABADO ===")
+            print(f"Material seleccionado: {material_seleccionado[1]}")
+            print(f"Valor material extraído: ${valor_material:.2f}")
+            print(f"Acabado seleccionado: {acabado_seleccionado[1] if not es_manga else 'N/A (manga)'}")
+            print(f"Valor acabado extraído: ${valor_acabado:.2f}")
+            print(f"Área etiqueta: {area_etiqueta:.2f} mm²")
             
             # Cálculo de plancha separada
             valor_plancha_separado = None
@@ -586,7 +610,7 @@ def main():
             calculadora = CalculadoraCostosEscala()
             
             resultados = calculadora.calcular_costos_por_escala(
-                datos=datos,
+                datos=datos_escala,
                 num_tintas=num_tintas,
                 valor_etiqueta=valor_etiqueta,
                 valor_plancha=valor_plancha_para_calculo,
@@ -599,8 +623,8 @@ def main():
             if resultados:
                 # Mostrar tabla de resultados
                 st.subheader("Tabla de Resultados")
-                df = generar_tabla_resultados(resultados, es_manga)
-                st.dataframe(df, hide_index=True, use_container_width=True)
+                tabla_resultados = generar_tabla_resultados(resultados, es_manga)
+                st.dataframe(tabla_resultados, hide_index=True, use_container_width=True)
 
                 # Generar identificador una sola vez y reutilizarlo
                 acabado_code = "" if es_manga or acabado_seleccionado[0] == 10 else acabado_seleccionado[1]
@@ -695,14 +719,14 @@ def main():
                 
                 # Mostrar detalles del desperdicio
                 st.markdown("#### Detalles de Desperdicio")
-                desperdicio_total = mejor_opcion['desperdicio'] + (0 if es_manga else 2.6)  # Sumar GAP_AVANCE para etiquetas
+                desperdicio_total = mejor_opcion['desperdicio'] + (GAP_AVANCE_ETIQUETAS if not es_manga else 0)  # Sumar GAP_AVANCE para etiquetas
                 
                 if es_manga:
                     st.write(f"**Desperdicio Total:** {desperdicio_total:.2f} mm")
                 else:
                     # Para etiquetas, mostrar desglose del desperdicio
                     st.write(f"**Desperdicio calculado:** {mejor_opcion['desperdicio']:.2f} mm")
-                    st.write(f"**GAP al avance:** 2.6 mm")
+                    st.write(f"**GAP al avance:** {GAP_AVANCE_ETIQUETAS:.2f} mm")
                     st.write(f"**Desperdicio Total:** {desperdicio_total:.2f} mm")
                 
                 if 'dientes' in mejor_opcion:
@@ -738,7 +762,65 @@ def main():
                             file_name=f"cotizacion_{datos_cotizacion['consecutivo']}.pdf",
                             mime="application/pdf"
                         )
+
+            # Después de calcular y mostrar la tabla de resultados
+            st.table(tabla_resultados)
             
+            # Agregar sección de depuración para mostrar los logs del cálculo de desperdicios
+            with st.expander("Ver Detalles del Cálculo de Desperdicios"):
+                st.subheader("Depuración del Cálculo de Desperdicios")
+                
+                # Mostrar información para cada escala
+                for i, r in enumerate(resultados):
+                    st.markdown(f"### Escala: {r['escala']:,}")
+                    
+                    # Información de desperdicio
+                    st.markdown("#### Información de Desperdicios")
+                    st.write(f"**Desperdicio de Tintas:** ${r.get('desperdicio_tintas', 0):,.2f}")
+                    st.write(f"**Desperdicio Porcentaje ({r.get('porcentaje_desperdicio', 0)*100:.0f}%):** ${r.get('desperdicio_porcentaje', 0):,.2f}")
+                    st.write(f"**Desperdicio Total:** ${r.get('desperdicio_total', 0):,.2f}")
+                    
+                    # Información de cálculo de tintas
+                    st.markdown("#### Valores Utilizados en Cálculo")
+                    st.write(f"**Área de Etiqueta:** {datos_escala.area_etiqueta:.2f} mm²")
+                    st.write(f"**Valor Material:** ${valor_material:.6f}/mm²")
+                    st.write(f"**Número de Tintas:** {num_tintas}")
+                    st.write(f"**Papel/lam:** ${r.get('papel_lam', 0):,.2f}")
+                    
+                    # Detalles de la fórmula
+                    st.markdown("#### Fórmula del Desperdicio de Tintas")
+                    st.write("Desperdicio_tintas = MM_COLOR * num_tintas * (GAP_FIJO + Q3) * (valor_material / 1000000)")
+                    st.write(f"Donde:")
+                    st.write(f"- MM_COLOR = 30000")
+                    st.write(f"- num_tintas = {num_tintas}")
+                    st.write(f"- GAP_FIJO = 50 mm")
+                    st.write(f"- Q3 = Ancho ajustado según pistas")
+                    st.write(f"- valor_material = ${valor_material:.6f}/mm²")
+                
+                # Capturar y mostrar todos los logs generados durante el cálculo
+                logs = console_capture.get_logs()
+                if logs:
+                    st.markdown("### Logs Completos del Cálculo")
+                    for log_type, log_content in logs:
+                        if "DESPERDICIO" in log_content or "desperdicio" in log_content:
+                            st.text_area(f"Log de Desperdicios ({log_type})", log_content, height=300)
+                
+                # Mostrar explicación de la fórmula
+                st.markdown("### Explicación de la Fórmula de Desperdicios")
+                st.markdown("""
+                El desperdicio total se compone de dos partes:
+                
+                1. **Desperdicio de Tintas**: Es el desperdicio generado por el uso de tintas, calculado como:
+                   * MM_COLOR * num_tintas * (GAP_FIJO + Q3) * (valor_material / 1000000)
+                   * Donde MM_COLOR es una constante (30000), y Q3 es el ancho ajustado según las pistas.
+                
+                2. **Desperdicio Porcentual**: Es un porcentaje del costo del papel/laminado:
+                   * papel_lam * porcentaje_desperdicio
+                   * Donde porcentaje_desperdicio es 10% para etiquetas y 30% para mangas.
+                
+                El **Desperdicio Total** es la suma de estos dos componentes.
+                """)
+
         except Exception as e:
             st.error(f"Error en el cálculo: {str(e)}")
             import traceback
