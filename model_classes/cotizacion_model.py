@@ -1,5 +1,6 @@
+from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Union, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
 from datetime import datetime
@@ -104,33 +105,20 @@ class ResultadoCotizacion:
         return self.resultados_escalas[0] if self.resultados_escalas else None
 
 @dataclass
-class Cotizacion:
-    id: Optional[int] = None
-    nombre_cliente: str = ''
-    descripcion: str = ''
-    tintas: str = ''
-    material_id: Optional[int] = None
-    acabado_id: Optional[int] = None
-    comercial_id: Optional[int] = None
-    updated_at: Optional[datetime] = None
-    planchas_x_separado: bool = False
-    existe_troquel: bool = False
-    avance_mm: float = 0.0
-    descripcion_tecnica: Optional[str] = None
-    numero_pistas: int = 0
-    referencia_cliente_id: Optional[int] = None
-    creado_en: Optional[datetime] = None
-    actualizado_en: Optional[datetime] = None
-    numero_cotizacion: Optional[str] = None
-    colores_tinta: Optional[int] = None
-    unidades_por_rollo: Optional[int] = None
-    estado: str = 'Pendiente'
-    avance: float = 0.0
-    tipo_producto_id: Optional[int] = None
-    escalas: List['Escala'] = field(default_factory=list)
-    etiquetas_por_rollo: Optional[int] = None
-    es_recotizacion: bool = False
-    precio_escala: List[int] = field(default_factory=list)
+class TipoGrafado:
+    """Representa un tipo de grafado en el sistema."""
+    id: int
+    nombre: str
+    descripcion: Optional[str] = None
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'TipoGrafado':
+        """Crea una instancia de TipoGrafado desde un diccionario."""
+        return TipoGrafado(
+            id=data['id'],
+            nombre=data['nombre'],
+            descripcion=data.get('descripcion')
+        )
 
 @dataclass
 class Material:
@@ -171,30 +159,11 @@ class Cliente:
 
 @dataclass
 class Comercial:
-    id: Optional[UUID] = None
+    id: Optional[str] = None
     nombre: str = ''
     updated_at: Optional[datetime] = None
-
-@dataclass
-class Escala:
-    id: Optional[int] = None
-    cotizacion_id: Optional[int] = None
-    cantidad_maxima: int = 0
-    precio: float = 0.0
-    updated_at: Optional[datetime] = None
-
-@dataclass
-class ReferenciaCliente:
-    cliente_id: int
-    id: Optional[int] = None
-    descripcion: Optional[str] = None
-    creado_en: Optional[datetime] = None
-    actualizado_en: Optional[datetime] = None
-    tipo_producto_id: Optional[int] = None
-    id_comercial: Optional[int] = None
-    comercial_nombre: Optional[str] = None
-    comercial_email: Optional[str] = None
-    comercial_telefono: Optional[str] = None
+    email: Optional[str] = None
+    celular: Optional[int] = None
 
 @dataclass
 class TipoProducto:
@@ -202,4 +171,217 @@ class TipoProducto:
     nombre: str = ''
     descripcion: Optional[str] = None
     creado_en: Optional[datetime] = None
-    actualizado_en: Optional[datetime] = None 
+    actualizado_en: Optional[datetime] = None
+
+@dataclass
+class PrecioEscala:
+    """Representa un precio específico para una escala"""
+    id: Optional[int] = None
+    escala_id: Optional[int] = None
+    precio: float = 0.0
+    tipo_precio: str = 'normal'
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+@dataclass
+class Escala:
+    """Representa una escala de cotización con sus cálculos y precios asociados"""
+    id: Optional[int] = None
+    cotizacion_id: Optional[int] = None
+    escala: int = 0
+    valor_unidad: float = 0.0
+    metros: float = 0.0
+    tiempo_horas: float = 0.0
+    montaje: float = 0.0
+    mo_y_maq: float = 0.0
+    tintas: float = 0.0
+    papel_lam: float = 0.0
+    desperdicio_total: float = 0.0
+    updated_at: Optional[datetime] = None
+    precios: List[PrecioEscala] = field(default_factory=list)
+
+    def agregar_precio(self, precio: float, tipo: str = 'normal') -> None:
+        """Agrega un nuevo precio a la escala"""
+        nuevo_precio = PrecioEscala(
+            escala_id=self.id,
+            precio=precio,
+            tipo_precio=tipo
+        )
+        self.precios.append(nuevo_precio)
+
+    def obtener_precio(self, tipo: str = 'normal') -> Optional[float]:
+        """Obtiene el precio más reciente de un tipo específico"""
+        precios_tipo = [p for p in self.precios if p.tipo_precio == tipo]
+        if not precios_tipo:
+            return None
+        return max(precios_tipo, key=lambda x: x.created_at or datetime.min).precio
+
+    @property
+    def precio_normal(self) -> float:
+        """Obtiene el precio normal más reciente"""
+        return self.obtener_precio('normal') or self.valor_unidad
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convierte la escala a un diccionario"""
+        return {
+            'id': self.id,
+            'cotizacion_id': self.cotizacion_id,
+            'escala': self.escala,
+            'valor_unidad': self.valor_unidad,
+            'metros': self.metros,
+            'tiempo_horas': self.tiempo_horas,
+            'montaje': self.montaje,
+            'mo_y_maq': self.mo_y_maq,
+            'tintas': self.tintas,
+            'papel_lam': self.papel_lam,
+            'desperdicio_total': self.desperdicio_total,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'Escala':
+        """Crea una escala desde un diccionario"""
+        return Escala(
+            id=data.get('id'),
+            cotizacion_id=data.get('cotizacion_id'),
+            escala=data.get('escala'),
+            valor_unidad=data.get('valor_unidad'),
+            metros=data.get('metros'),
+            tiempo_horas=data.get('tiempo_horas'),
+            montaje=data.get('montaje'),
+            mo_y_maq=data.get('mo_y_maq'),
+            tintas=data.get('tintas'),
+            papel_lam=data.get('papel_lam'),
+            desperdicio_total=data.get('desperdicio_total'),
+            updated_at=datetime.fromisoformat(data['updated_at']) if data.get('updated_at') else None
+        )
+
+@dataclass
+class ReferenciaCliente:
+    """Modelo de referencia de cliente que incluye relaciones con cliente y comercial"""
+    cliente_id: int
+    id: Optional[int] = None
+    descripcion: Optional[str] = None
+    creado_en: Optional[datetime] = None
+    actualizado_en: Optional[datetime] = None
+    id_comercial: Optional[str] = None
+    tiene_cotizacion: Optional[bool] = False
+    # Relaciones
+    cliente: Optional[Cliente] = None
+    comercial: Optional[Comercial] = None
+
+@dataclass
+class Cotizacion:
+    """Modelo de cotización que obtiene datos de cliente y comercial a través de la tabla referencias_cliente"""
+    id: Optional[int] = None
+    referencia_cliente_id: Optional[int] = None  # Relación principal con referencias_cliente
+    material_id: Optional[int] = None
+    acabado_id: Optional[int] = None
+    num_tintas: Optional[int] = None
+    num_paquetes_rollos: Optional[int] = None
+    numero_cotizacion: Optional[int] = None
+    es_manga: bool = False
+    tipo_grafado_id: Optional[int] = None
+    tipo_grafado: Optional[TipoGrafado] = None
+    valor_troquel: Optional[Decimal] = None
+    valor_plancha_separado: Optional[Decimal] = None
+    actualizado_en: Optional[datetime] = None
+    planchas_x_separado: bool = False
+    numero_pistas: int = 0
+    tipo_producto_id: Optional[int] = None
+    es_recotizacion: bool = False
+    modificado_por: Optional[str] = None
+    existe_troquel: bool = False
+    ancho: float = 0.0
+    avance: float = 0.0
+    escala_id: Optional[int] = None
+    fecha_creacion: Optional[datetime] = None
+    ultima_modificacion_inputs: Optional[datetime] = None
+    identificador: Optional[str] = None
+    estado_id: int = 1
+    colores_tinta: Optional[str] = None
+    escalas: List[Escala] = field(default_factory=list)
+    # Relaciones
+    referencia_cliente: Optional[ReferenciaCliente] = None
+    material: Optional[Material] = None
+    acabado: Optional[Acabado] = None
+    tipo_producto: Optional[TipoProducto] = None
+
+    @property
+    def cliente(self) -> Optional[Cliente]:
+        """Obtiene el cliente a través de la referencia"""
+        if self.referencia_cliente and hasattr(self.referencia_cliente, 'cliente'):
+            return self.referencia_cliente.cliente
+        return None
+
+    @property
+    def comercial(self) -> Optional[Comercial]:
+        """Obtiene el comercial a través de la referencia"""
+        if self.referencia_cliente and hasattr(self.referencia_cliente, 'comercial'):
+            return self.referencia_cliente.comercial
+        return None
+
+    def __init__(
+        self,
+        id=None,
+        referencia_cliente_id=None,
+        material_id=None,
+        acabado_id=None,
+        num_tintas=None,
+        num_paquetes_rollos=None,
+        numero_cotizacion=None,
+        es_manga=False,
+        tipo_grafado_id=None,
+        valor_troquel=None,
+        valor_plancha_separado=None,
+        estado_id=1,
+        planchas_x_separado=False,
+        existe_troquel=False,
+        numero_pistas=None,
+        tipo_producto_id=None,
+        es_recotizacion=False,
+        ancho=None,
+        avance=None,
+        fecha_creacion=None,
+        escalas=None,
+        identificador=None,
+        modificado_por=None,
+        ultima_modificacion_inputs=None,
+        colores_tinta=None,
+        # Relaciones
+        referencia_cliente=None,
+        material=None,
+        acabado=None,
+        tipo_producto=None
+    ):
+        self.id = id
+        self.referencia_cliente_id = referencia_cliente_id
+        self.material_id = material_id
+        self.acabado_id = acabado_id
+        self.num_tintas = num_tintas
+        self.num_paquetes_rollos = num_paquetes_rollos
+        self.numero_cotizacion = numero_cotizacion
+        self.es_manga = es_manga
+        self.tipo_grafado_id = tipo_grafado_id
+        self.valor_troquel = Decimal(str(valor_troquel)) if valor_troquel is not None else None
+        self.valor_plancha_separado = Decimal(str(valor_plancha_separado)) if valor_plancha_separado is not None else None
+        self.estado_id = estado_id
+        self.planchas_x_separado = planchas_x_separado
+        self.existe_troquel = existe_troquel
+        self.numero_pistas = numero_pistas
+        self.tipo_producto_id = tipo_producto_id
+        self.es_recotizacion = es_recotizacion
+        self.ancho = ancho
+        self.avance = avance
+        self.fecha_creacion = fecha_creacion
+        self.escalas = escalas if escalas is not None else []
+        self.identificador = identificador
+        self.modificado_por = modificado_por
+        self.ultima_modificacion_inputs = ultima_modificacion_inputs
+        self.colores_tinta = colores_tinta
+        # Relaciones
+        self.referencia_cliente = referencia_cliente
+        self.material = material
+        self.acabado = acabado
+        self.tipo_producto = tipo_producto
+       

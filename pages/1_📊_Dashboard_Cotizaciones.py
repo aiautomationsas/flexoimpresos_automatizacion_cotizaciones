@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from db_manager import DBManager
 import os
 import json
+from supabase import create_client
 
 # Configuración de la página
 st.set_page_config(
@@ -134,7 +135,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Inicializar el DBManager
-db = DBManager()
+if 'supabase' not in st.session_state:
+    supabase_url = st.secrets["SUPABASE_URL"]
+    supabase_key = st.secrets["SUPABASE_KEY"]
+    st.session_state.supabase = create_client(supabase_url, supabase_key)
+
+db = DBManager(st.session_state.supabase)
 
 # Mapeo de estados
 ESTADOS = {
