@@ -126,6 +126,10 @@ st.markdown("""
         padding-left: 0.5rem; /* Space between radio and label */
         line-height: 1.1em; /* Align text with larger radio */
     }
+    /* Ensure button text is white when using primaryColor */
+    .stButton>button {
+        color: white !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
