@@ -419,8 +419,9 @@ def mostrar_actualizar_cotizacion():
         st.rerun()
         return
         
-    if st.session_state.usuario_rol != 'comercial':
-        st.error("Acceso denegado. Se requiere el rol de 'comercial'.")
+    # Permitir acceso a 'comercial' y 'administrador'
+    if st.session_state.usuario_rol not in ['comercial', 'administrador']:
+        st.error(f"Acceso denegado. Se requiere el rol de 'comercial' o 'administrador'. Rol detectado: {st.session_state.usuario_rol}")
         return
     # --- FIN: Verificación de Rol --- 
     
@@ -540,7 +541,7 @@ def mostrar_actualizar_cotizacion():
         
         # Botón original para editar inputs (mantener separado)
         if cotizacion_seleccionada_num:
-            if st.button("Editar Inputs de la Cotización", key="btn_editar_inputs_seleccionada"):
+            if st.button("Editar Cotización", key="btn_editar_inputs_seleccionada"):
                 try:
                     cotizacion_data = df[df['numero_cotizacion'] == cotizacion_seleccionada_num].iloc[0]
                     cotizacion_id = int(cotizacion_data['id'])
@@ -712,15 +713,6 @@ def main():
             st.session_state.paso_actual = 'actualizar_cotizacion'
             st.rerun()
     
-    with cols[3]: # Movido a la cuarta columna
-        # Obtener el valor de modo_edicion del session_state
-        modo_edicion = st.session_state.modo_edicion
-        if (st.session_state.cotizacion_calculada or 
-            (modo_edicion and st.session_state.cotizacion_model)) and \
-            st.button("Ver cotización", type="primary", key="btn_ver_cotizacion"):
-            st.session_state.paso_actual = 'cotizacion'
-            st.rerun()
-    
     # Mostrar página según el paso actual
     if st.session_state.paso_actual == 'calculadora':
         mostrar_calculadora()
@@ -748,6 +740,9 @@ def mostrar_calculadora():
             if perfil:
                 st.session_state.usuario_verificado = True
                 st.session_state.usuario_rol = perfil.get('rol_nombre')
+                # --- DEBUGGING: Imprimir el rol exacto almacenado ---
+                print(f"DEBUG: Rol almacenado en session_state: '{st.session_state.usuario_rol}'") 
+                # --- FIN DEBUGGING ---
                 st.session_state.perfil_usuario = perfil # Guardar perfil completo
             else:
                 st.error("No se pudo verificar el perfil del usuario.")
@@ -756,9 +751,9 @@ def mostrar_calculadora():
             st.error(f"Error al verificar perfil: {str(e)}")
             return
 
-    # Verificar si el rol es 'comercial'
-    if st.session_state.usuario_rol != 'comercial':
-        st.error("Acceso denegado. Se requiere el rol de 'comercial'.")
+    # Verificar si el rol es 'comercial' o 'administrador'
+    if st.session_state.usuario_rol not in ['comercial', 'administrador']:
+        st.error("Acceso denegado. Se requiere el rol de 'comercial' o 'administrador'.")
         st.warning(f"Rol detectado: {st.session_state.usuario_rol}")
         return # Detener ejecución si el rol no es correcto
     # --- FIN: Verificación de Rol --- 
@@ -994,42 +989,90 @@ def mostrar_calculadora():
                 ) if clientes else None
         
         with col2:
-            # Mostrar el comercial logueado (ahora perfil)
-            if modo_edicion:
-                # En modo edición, obtener el perfil asociado a la referencia
-                # --- CAMBIO: Usar id_usuario en lugar de id_comercial ---
-                perfil_id_ref = referencia.id_usuario
-                # -----------------------------------------------------
-                perfil_comercial_ref = db.get_perfil(perfil_id_ref) if perfil_id_ref else None
-                if perfil_comercial_ref:
-                    # --- CAMBIO: Guardar info completa del perfil --- 
-                    comercial_seleccionado = (
-                        perfil_comercial_ref.get('id'), 
-                        perfil_comercial_ref.get('nombre'),
-                        perfil_comercial_ref.get('email'), # Asumiendo que get_perfil devuelve email
-                        perfil_comercial_ref.get('celular') # Asumiendo que get_perfil devuelve celular
-                    )
-                    st.write(f"**Comercial:** {comercial_seleccionado[1]}") # Mostrar nombre
-                else:
-                    comercial_seleccionado = None
-                    st.write("**Comercial:** No especificado")
-            else:
-                # Obtener los datos del perfil del comercial logueado (ya guardado en st.session_state.perfil_usuario)
+            # --- NUEVA LÓGICA PARA SELECCIÓN/ASIGNACIÓN DE COMERCIAL ---
+            usuario_rol = st.session_state.usuario_rol
+            db = st.session_state.db # Asegurar que db esté inicializado
+
+            # Asegurar que comercial_seleccionado_id esté inicializado
+            if 'comercial_seleccionado_id' not in st.session_state:
+                st.session_state.comercial_seleccionado_id = None
+
+            # --- DEBUGGING EXTRA --- 
+            print(f"DEBUG (col2): Verificando rol para mostrar selectbox.")
+            print(f"DEBUG (col2): st.session_state.usuario_rol = '{usuario_rol}' (Tipo: {type(usuario_rol)})")
+            print(f"DEBUG (col2): Resultado de (usuario_rol.strip() == 'administrador'): {usuario_rol.strip() == 'administrador' if usuario_rol else 'N/A'}")
+            # --- FIN DEBUGGING EXTRA ---
+
+            # --- Modificado: Usar .strip() para la comparación ---
+            if usuario_rol and usuario_rol.strip() == 'administrador':
+                try:
+                    # Asumiendo que db.get_perfiles_by_role existe y devuelve [{id: uuid, nombre: str}, ...]
+                    lista_comerciales = db.get_perfiles_by_role('comercial')
+                    if not lista_comerciales:
+                        st.error("No se encontraron usuarios con rol 'comercial'. Debe existir al menos un comercial para poder crear cotizaciones.")
+                        st.session_state.comercial_seleccionado_id = None
+                        # Detener el flujo aquí
+                        st.stop()
+                    else:
+                        # Solo incluir comerciales en la lista de opciones
+                        opciones_comercial = [(c.get('id'), c.get('nombre', 'Sin Nombre')) for c in lista_comerciales]
+                        
+                        # Determinar ID por defecto
+                        default_comercial_id = None
+                        if modo_edicion and referencia and hasattr(referencia, 'id_usuario'):
+                            default_comercial_id = referencia.id_usuario
+                        elif st.session_state.comercial_seleccionado_id:
+                            default_comercial_id = st.session_state.comercial_seleccionado_id
+                        else:
+                            # Si no hay comercial seleccionado, usar el primero de la lista
+                            default_comercial_id = opciones_comercial[0][0] if opciones_comercial else None
+
+                        # Encontrar índice del default_comercial_id en las opciones
+                        default_index = 0
+                        if default_comercial_id:
+                            try:
+                                default_index = [i for i, (id, _) in enumerate(opciones_comercial) if id == default_comercial_id][0]
+                            except IndexError:
+                                st.warning(f"Comercial asignado (ID: {default_comercial_id}) no encontrado. Seleccione uno.")
+                                default_index = 0 # Default al primero si no se encuentra
+
+                        selected_comercial_tuple = st.selectbox(
+                            "Asignar Comercial",
+                            options=opciones_comercial,
+                            format_func=lambda x: x[1], # Mostrar nombre
+                            index=default_index,
+                            key="selectbox_comercial_asignado"
+                        )
+                        # Guardar solo el ID seleccionado en el estado
+                        st.session_state.comercial_seleccionado_id = selected_comercial_tuple[0] if selected_comercial_tuple else None
+
+                except AttributeError:
+                     st.error("Función 'get_perfiles_by_role' no encontrada en DBManager. No se puede listar comerciales.")
+                     # Fallback: asignar al admin logueado
+                     perfil_admin = st.session_state.get('perfil_usuario')
+                     st.session_state.comercial_seleccionado_id = perfil_admin.get('id') if perfil_admin else None
+                     st.write(f"**Comercial Asignado:** {perfil_admin.get('nombre', 'Admin')} (Fallback)")                     
+                except Exception as e:
+                    st.error(f"Error al cargar/seleccionar comerciales: {e}")
+                    # Fallback: asignar al admin logueado
+                    perfil_admin = st.session_state.get('perfil_usuario')
+                    st.session_state.comercial_seleccionado_id = perfil_admin.get('id') if perfil_admin else None
+                    st.write(f"**Comercial Asignado:** {perfil_admin.get('nombre', 'Admin')} (Fallback)")
+
+            # --- Modificado: Usar .strip() para la comparación ---
+            elif usuario_rol and usuario_rol.strip() == 'comercial':
                 perfil_actual = st.session_state.get('perfil_usuario')
                 if perfil_actual:
-                    # --- CAMBIO: Guardar info completa del perfil --- 
-                    comercial_seleccionado = (
-                        perfil_actual.get('id'), 
-                        perfil_actual.get('nombre'),
-                        perfil_actual.get('email'), # Asumiendo que el perfil guardado tiene email
-                        perfil_actual.get('celular') # Asumiendo que el perfil guardado tiene celular
-                    )
-                    # Mostrar el nombre como texto fijo
-                    st.text_input("Comercial", value=comercial_seleccionado[1], disabled=True) # Mostrar nombre
+                    st.text_input("Comercial", value=perfil_actual.get('nombre', 'Error'), disabled=True)
+                    # Asignar automáticamente el ID del comercial logueado
+                    st.session_state.comercial_seleccionado_id = perfil_actual.get('id')
                 else:
-                    # Esto no debería ocurrir si la verificación inicial pasó
-                    comercial_seleccionado = None
-                    st.error("No se pudieron cargar los datos del comercial actual")
+                    st.error("No se pudo cargar el perfil del comercial.")
+                    st.session_state.comercial_seleccionado_id = None # Marcar como inválido
+            else:
+                st.error(f"Rol de usuario no reconocido para asignar comercial: {usuario_rol}")
+                st.session_state.comercial_seleccionado_id = None # Marcar como inválido
+            # --- FIN NUEVA LÓGICA ---
 
         with col3:
             if modo_edicion:
@@ -1422,9 +1465,15 @@ def mostrar_calculadora():
                 st.error("Por favor seleccione un cliente")
                 return
                 
-            if not comercial_seleccionado:
+            # --- CORRECCIÓN: Validar st.session_state.comercial_seleccionado_id --- 
+            if not st.session_state.get('comercial_seleccionado_id'):
                 st.error("Por favor seleccione un comercial")
+                # Imprimir estado para depuración
+                print(f"DEBUG (Calcular): comercial_seleccionado_id es None o vacío.")
+                print(f"DEBUG (Calcular): Rol actual: {st.session_state.get('usuario_rol')}")
+                print(f"DEBUG (Calcular): Perfil actual: {st.session_state.get('perfil_usuario')}")
                 return
+            # --- FIN CORRECCIÓN ---
                 
             if not modo_edicion and (not 'referencia_descripcion' in st.session_state or not st.session_state.referencia_descripcion):
                 st.error("Por favor ingrese una descripción para la referencia")
@@ -1676,15 +1725,13 @@ def mostrar_calculadora():
                     
                 print("\n=== DEBUG DATOS COMERCIAL AL CREAR COTIZACIÓN ===")
                 print(f"Comercial seleccionado: {comercial_seleccionado}")
-                print(f"Nombre: {comercial_seleccionado[1] if comercial_seleccionado else None}")
-                print(f"Email: {comercial_seleccionado[2] if comercial_seleccionado else None}")
-                print(f"Teléfono: {comercial_seleccionado[3] if comercial_seleccionado else None}")
+                print(f"ID del comercial (session_state): {st.session_state.comercial_seleccionado_id}")
                 print("=================================")
                 
                 # Crear modelo de cotización y guardarlo en el estado
                 print("\n=== DEBUG COMERCIAL SELECCIONADO ===")
                 print(f"Comercial seleccionado: {comercial_seleccionado}")
-                comercial_id = comercial_seleccionado[0] if comercial_seleccionado else None
+                comercial_id = st.session_state.comercial_seleccionado_id
                 print(f"ID del comercial a usar: {comercial_id}")
                 print("=================================\n")
                 
@@ -1845,7 +1892,7 @@ def mostrar_cotizacion():
     
     # Acciones de la cotización
     st.subheader("Acciones")
-    col1, col2, col3, col4 = st.columns(4) # Añadir una columna más para el nuevo botón
+    col1, col2, col3, col4 = st.columns(4) # Changed back to 4 columns
     
     with col1:
         # Botón para guardar cotización
@@ -2100,34 +2147,16 @@ def mostrar_cotizacion():
             if st.session_state.get('materiales_pdf_data') is not None:
                 cotizacion_id = st.session_state.get('cotizacion_id') or getattr(st.session_state.get('cotizacion_model'), 'id', 'sin_id')
                 st.download_button(
-                    label="Descargar Información Materiales (PDF)",
+                    label="Descarga Informe Técnico", # Renamed label
                     data=st.session_state.materiales_pdf_data,
                     file_name=f"materiales_{cotizacion_id}.pdf",
                     mime="application/pdf",
-                    key="btn_materiales_pdf"
+                    key="btn_materiales_pdf" # Keeping the key for consistency unless asked otherwise
                 )
 
-    with col3:
-        # Botón para descargar Informe Técnico (.md)
-        if st.session_state.cotizacion_guardada and "informe_tecnico" in st.session_state:
-            informe_tecnico_data = st.session_state.informe_tecnico
-            if informe_tecnico_data and not informe_tecnico_data.startswith("Error"):
-                cotizacion_id_inf = st.session_state.get('cotizacion_id', 'sin_id')
-                st.download_button(
-                    label="Descargar Informe Técnico (.md)",
-                    data=informe_tecnico_data.encode('utf-8'), # Codificar a bytes
-                    file_name=f"informe_tecnico_{cotizacion_id_inf}.md",
-                    mime="text/markdown",
-                    type="secondary" # Usar tipo secundario para diferenciarlo
-                )
-            else:
-                st.warning("Informe técnico no disponible o contiene errores.")
-        elif st.session_state.cotizacion_guardada:
-             st.warning("Informe técnico aún no generado.") # Mensaje si la cotización está guardada pero el informe no
-
-    with col4: # Usar la nueva cuarta columna
-        # Botón para nueva cotización
-        if st.button("Calcular Nueva Cotización", type="primary"):
+    with col3: # Moved the "Descarga Informe Tecnico" button here
+        # Botón para nueva cotización (this button should always be available here)
+        if st.button("Calcular Nueva Cotización", type="primary", key="nueva_cotizacion_general"):
             # Guardar variables de autenticación
             auth_vars = {
                 'authentication_status': st.session_state.get('authentication_status'),
@@ -2151,32 +2180,7 @@ def mostrar_cotizacion():
             st.session_state.paso_actual = 'calculadora'
             st.rerun()
                     
-        # Botón para calcular una nueva cotización después de guardar
-        if st.session_state.cotizacion_guardada:
-            if st.button("Calcular Nueva Cotización", key="nueva_cotizacion_post_guardado", type="primary"):
-                # Guardar variables de autenticación y mensajes
-                auth_vars = {
-                    'authentication_status': st.session_state.get('authentication_status'),
-                    'username': st.session_state.get('username'),
-                    'name': st.session_state.get('name'),
-                    'role': st.session_state.get('role'),
-                    'user_id': st.session_state.get('user_id'),
-                    'auth_manager': st.session_state.get('auth_manager'),
-                    'supabase': st.session_state.get('supabase'),
-                    'messages': st.session_state.get('messages', [])
-                }
-                
-                # Limpiar session state
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                
-                # Restaurar variables de autenticación y mensajes
-                for key, value in auth_vars.items():
-                    if value is not None:
-                        st.session_state[key] = value
-                
-                st.session_state.paso_actual = 'calculadora'
-                st.rerun()
+        # Removed the redundant button call previously inside 'if st.session_state.cotizacion_guardada:'
 
 def crear_o_actualizar_cotizacion_model(
     cliente_id, 
@@ -2358,19 +2362,21 @@ def guardar_cotizacion(cotizacion, db):
             # Crear nueva referencia
             print("Creando nueva referencia...")
             
-            # --- Obtener user_id directamente de session_state --- 
-            current_user_id = st.session_state.get('user_id')
-            if not current_user_id:
-                 # Manejar error: no se puede crear referencia sin ID de comercial
-                 return (False, "Error crítico: No se encontró el ID del usuario en la sesión.")
+            # --- CORRECCIÓN: Obtener ID del comercial seleccionado de session_state --- 
+            comercial_seleccionado_id = st.session_state.get('comercial_seleccionado_id')
+            if not comercial_seleccionado_id:
+                 # Manejar error: no se puede crear referencia sin ID de comercial seleccionado
+                 # Este error no debería ocurrir si la validación en 'Calcular' funcionó, pero es una salvaguarda
+                 return (False, "Error crítico: No se encontró el ID del comercial seleccionado en la sesión.")
             
-            print(f"DEBUG: ID del usuario actual para id_usuario: {current_user_id}") # Cambiado id_comercial a id_usuario
+            print(f"DEBUG (Guardar): ID del comercial seleccionado para id_usuario: {comercial_seleccionado_id}")
             
             nueva_referencia = ReferenciaCliente(
                 cliente_id=cotizacion.cliente_id,
                 descripcion=cotizacion.descripcion,
-                id_usuario=current_user_id # Corrected keyword argument to id_usuario
+                id_usuario=comercial_seleccionado_id # Usar el ID del comercial seleccionado
             )
+            # --- FIN CORRECCIÓN ---
             
             try:
                 referencia_guardada = db.crear_referencia(nueva_referencia)

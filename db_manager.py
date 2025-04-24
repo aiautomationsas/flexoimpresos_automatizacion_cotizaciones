@@ -839,8 +839,56 @@ class DBManager:
         except Exception as e:
             print(f"Error general en get_perfil (RPC): {e}")
             traceback.print_exc()
-            print("=== FIN GET_PERFIL (RPC - con error general) ===\n")
+            print("=== FIN GET_PERFIL (RPC - con error general) ===\\n")
             return None
+
+    def get_perfiles_by_role(self, role_name: str) -> List[Dict]:
+        """Obtiene los perfiles (id, nombre) asociados a un rol específico."""
+        try:
+            print(f"\n=== INICIO GET_PERFILES_BY_ROLE para rol: {role_name} ===")
+            print(f"Intentando ejecutar RPC 'get_perfiles_by_role' con parámetro: {role_name}")
+            
+            # Obtener el token JWT actual para debugging
+            auth = self.supabase.auth.get_session()
+            print(f"Estado de autenticación: {'Autenticado' if auth else 'No autenticado'}")
+            if auth:
+                print(f"Role claim en JWT: {auth.user.role if auth.user else 'No role claim'}")
+            
+            response = self.supabase.rpc(
+                'get_perfiles_by_role',
+                {'p_rol_nombre': role_name}
+            ).execute()
+
+            # Log detallado de la respuesta
+            print(f"Respuesta RPC completa: {response}")
+            print(f"Tipo de response: {type(response)}")
+            print(f"Atributos de response: {dir(response)}")
+            if hasattr(response, 'error'):
+                print(f"Error en response: {response.error}")
+            print(f"Tipo de response.data: {type(response.data)}")
+            print(f"Contenido de response.data: {response.data}")
+
+            if response.data:
+                print(f"Perfiles encontrados para rol '{role_name}': {len(response.data)}")
+                print("=== FIN GET_PERFILES_BY_ROLE (con datos) ===\n")
+                # Asegurarse de que la respuesta sea una lista de diccionarios
+                if isinstance(response.data, list) and all(isinstance(item, dict) for item in response.data):
+                    return response.data
+                else:
+                    print(f"ERROR: Formato inesperado en response.data: {type(response.data)}")
+                    return []
+            else:
+                # Podría ser que no haya usuarios con ese rol, lo cual no es un error
+                print(f"No se encontraron perfiles para el rol '{role_name}'.")
+                print("=== FIN GET_PERFILES_BY_ROLE (sin datos) ===\n")
+                return []
+
+        except Exception as e:
+            print(f"Error general en get_perfiles_by_role: {e}")
+            print(f"Traceback completo:")
+            traceback.print_exc()
+            print("=== FIN GET_PERFILES_BY_ROLE (con error) ===\n")
+            return []
 
     def get_comercial_default(self) -> Optional[str]:
         """Obtiene el ID del comercial por defecto (primero de la lista).
