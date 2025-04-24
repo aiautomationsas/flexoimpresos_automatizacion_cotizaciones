@@ -1,6 +1,6 @@
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable, PageBreak, Flowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from datetime import datetime
@@ -17,7 +17,7 @@ class CotizacionPDF:
             parent=self.styles['Normal'],
             fontSize=10,
             leading=12,
-            alignment=1,  # Centrado
+            alignment=0,  # Izquierda
             spaceAfter=6
         )
 
@@ -119,7 +119,6 @@ class CotizacionPDF:
         except Exception as e:
             print(f"Error al cargar el logo: {str(e)}")
             # Crear un placeholder para el logo en caso de error
-            from reportlab.platypus import Flowable
             class EmptyImage(Flowable):
                 def __init__(self, width, height):
                     Flowable.__init__(self)
@@ -129,28 +128,28 @@ class CotizacionPDF:
                     pass
             logo = EmptyImage(2*inch, (501/422)*2*inch)
 
-        # Obtener el consecutivo de forma segura
+        # Obtener el consecutivo (numero_cotizacion) de forma segura
         consecutivo = 0
         try:
-            # Intentar usar el ID de la cotización primero, y si no está disponible, usar el consecutivo
-            if datos_cotizacion.get("id") is not None:
-                consecutivo = int(datos_cotizacion.get("id"))
-            elif datos_cotizacion.get("consecutivo") is not None:
-                consecutivo = int(datos_cotizacion.get("consecutivo"))
+            # Usar el valor de 'consecutivo' que viene de 'numero_cotizacion' en la BD
+            num_cotizacion = datos_cotizacion.get("consecutivo")
+            if num_cotizacion is not None:
+                consecutivo = int(num_cotizacion)
+            else:
+                print("ADVERTENCIA: No se encontró 'consecutivo' (numero_cotizacion) en datos_cotizacion. Usando 0.")
         except (ValueError, TypeError):
-            print(f"Error al convertir consecutivo: {datos_cotizacion.get('consecutivo')}")
-            print(f"Error al convertir ID: {datos_cotizacion.get('id')}")
+            print(f"Error al convertir consecutivo (numero_cotizacion): {datos_cotizacion.get('consecutivo')}. Usando 0.")
 
         # Encabezado
         header_data = [
             [logo, 'FLEXO IMPRESOS S.A.S.', ''],
-            ['', 'NIT: 901.297.493-1', ''],
-            ['', 'Calle 79 Sur # 47 G 21', 'COTIZACION'],
-            ['', 'La Estrella - Antioquia', f'CT{consecutivo:08d}']
+            ['', 'NIT: 900.528.680-0', ''],
+            ['', 'CALLE 28 A 65 A 9', 'COTIZACION'],
+            ['', 'MEDELLIN - ANTIOQUIA', f'CT{consecutivo:08d}']
         ]
         
         # Agregar el teléfono al final
-        header_data.append(['', 'Tel: (604) 604 0404', ''])
+        header_data.append(['', 'Tel: (604) 444-9661', ''])
         
         header_table = Table(header_data, colWidths=[2.5*inch, 3*inch, 1.5*inch])
         
@@ -205,40 +204,22 @@ class CotizacionPDF:
         elements.append(Paragraph(f"Señores:", self.styles['Normal']))
         elements.append(Paragraph(datos_cotizacion['nombre_cliente'], self.styles['Normal']))
         
-        # Obtener datos del cliente de la estructura correcta
-        if 'cliente' in datos_cotizacion:
-            cliente = datos_cotizacion['cliente']
-            if cliente.get('persona_contacto'):
-                elements.append(Paragraph(f"Atención: {cliente['persona_contacto']}", self.styles['Normal']))
-            if cliente.get('correo_electronico'):
-                elements.append(Paragraph(f"Email: {cliente['correo_electronico']}", self.styles['Normal']))
-            if cliente.get('telefono'):
-                elements.append(Paragraph(f"Tel: {cliente['telefono']}", self.styles['Normal']))
+
         
         elements.append(Spacer(1, 20))
 
-        # Asunto y detalles
-        elements.append(Spacer(1, 10))
-        
-        # Add the "Asunto" line
-        elements.append(Paragraph(f"Asunto: Cotización {datos_cotizacion['descripcion']}", self.styles['Normal']))
-        
         # Add the identifier on a new line if it exists
         identificador = datos_cotizacion.get('identificador', '')
         if identificador:
-            elements.append(Paragraph(f"Identificador: {identificador}", self.styles['Normal']))
+            elements.append(Paragraph(f"Referencia: {identificador}", self.styles['Normal']))
         
-        elements.append(Paragraph(f"Referencia: {datos_cotizacion['descripcion']}", self.styles['Normal']))
         elements.append(Paragraph(f"Material: {datos_cotizacion['material']['nombre']}", self.styles['Normal']))
         
-        # Solo mostrar el adhesivo si es diferente a "No aplica"
+        # Mostrar siempre el adhesivo, usando 'No aplica' como default
         adhesivo = datos_cotizacion.get('adhesivo_tipo', 'No aplica')
-        if adhesivo != "No aplica":
-            # Asegurarse de que adhesivo no sea None antes de usar upper()
-            if adhesivo is not None:
-                elements.append(Paragraph(f"Adhesivo: {adhesivo.upper()}", self.styles['Normal']))
-            else:
-                elements.append(Paragraph(f"Adhesivo: No especificado", self.styles['Normal']))
+        # Formatear para mostrar: usar mayúsculas solo si no es 'No aplica'
+        adhesivo_display = adhesivo.upper() if adhesivo != 'No aplica' else adhesivo
+        elements.append(Paragraph(f"Adhesivo: {adhesivo_display}", self.styles['Normal']))
         
         # Solo mostrar acabado si no es manga
         if not datos_cotizacion.get('es_manga'):
@@ -383,7 +364,9 @@ class CotizacionPDF:
             elements.append(Paragraph(f"Error al generar la tabla de resultados", getSampleStyleSheet()['Normal']))
 
         # Políticas y condiciones
-        elements.append(Paragraph("Forma de Pago: 50% ANTICIPO 50% ENTREGA", self.styles['Normal']))
+        # Usar la forma de pago dinámica obtenida de los datos
+        forma_pago = datos_cotizacion.get('forma_pago_desc', '50% ANTICIPO 50% ENTREGA') # Valor por defecto si no se encuentra
+        elements.append(Paragraph(f"Forma de Pago: {forma_pago}", self.styles['Normal']))
         elements.append(Paragraph("I.V.A (no incluido): 19%", self.styles['Normal']))
         elements.append(Paragraph("% de Tolerancia: 10% + ó - de acuerdo a la cantidad pedida", self.styles['Normal']))
         elements.append(Spacer(1, 20))
@@ -415,16 +398,225 @@ class CotizacionPDF:
             else:
                 elements.append(Paragraph("COMERCIAL NO ESPECIFICADO", self.firma_style))
             
-            if comercial.get('correo'):
-                elements.append(Paragraph(f"Email: {comercial['correo']}", self.firma_style))
+            if comercial.get('email'):
+                elements.append(Paragraph(f"Email: {comercial['email']}", self.firma_style))
             if comercial.get('celular'):
                 elements.append(Paragraph(f"Cel: {comercial['celular']}", self.firma_style))
             
             print("\n=== DEBUG DATOS COMERCIAL EN PDF ===")
             print(f"Nombre: {comercial.get('nombre')}")
-            print(f"Email: {comercial.get('correo')}")
+            print(f"Email: {comercial.get('email')}")
             print(f"Teléfono: {comercial.get('celular')}")
             print("=================================\n")
 
         # Generar PDF
-        doc.build(elements) 
+        doc.build(elements)
+
+class MaterialesPDF:
+    def __init__(self):
+        self.doc = SimpleDocTemplate("temp.pdf", pagesize=letter)
+        self.styles = getSampleStyleSheet()
+        self.elements = []
+        self.title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=self.styles['Title'],
+            fontSize=14,
+            spaceAfter=20,
+            alignment=1  # Center alignment
+        )
+        self.subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=self.styles['Heading2'],
+            fontSize=12,
+            spaceAfter=10,
+            spaceBefore=15
+        )
+        self.normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            spaceAfter=5
+        )
+
+    def generar_pdf(self, datos_materiales, output_path):
+        try:
+            # Validate input data
+            if not isinstance(datos_materiales, dict):
+                print(f"Error: datos_materiales must be a dictionary. Received {type(datos_materiales)}")
+                return False
+            
+            # Clear previous elements
+            self.elements = []
+
+            # Handle string inputs for material and acabado
+            material = datos_materiales.get('material', {})
+            acabado = datos_materiales.get('acabado', {})
+            
+            # If material or acabado are strings, convert to dictionary
+            if isinstance(material, str):
+                material = {'nombre': material}
+            if isinstance(acabado, str):
+                acabado = {'nombre': acabado}
+            
+            # Ensure material and acabado are dictionaries
+            if not isinstance(material, dict):
+                material = {}
+            if not isinstance(acabado, dict):
+                acabado = {}
+
+            # Título principal
+            self.elements.append(Paragraph("INFORME TÉCNICO DE COTIZACIÓN", self.title_style))
+            self.elements.append(Spacer(1, 10))
+
+            # 1. Identificación
+            self.elements.append(Paragraph("1. Identificación", self.subtitle_style))
+            identificador = datos_materiales.get('identificador', 'N/A')
+            consecutivo = datos_materiales.get('consecutivo', 'N/A')
+            nombre_cliente = datos_materiales.get('nombre_cliente', 'N/A')
+            referencia = datos_materiales.get('descripcion', 'N/A')
+            comercial = datos_materiales.get('comercial', {})
+            nombre_comercial = comercial.get('nombre', 'N/A')
+            
+            self.elements.append(Paragraph(f"• Identificador: {identificador}", self.normal_style))
+            self.elements.append(Paragraph(f"• Cliente: {nombre_cliente}", self.normal_style))
+            self.elements.append(Paragraph(f"• Referencia: {referencia}", self.normal_style))
+            self.elements.append(Paragraph(f"• Comercial: {nombre_comercial}", self.normal_style))
+
+            # 4. Parámetros de Impresión
+            self.elements.append(Paragraph("2. Parámetros de Impresión", self.subtitle_style))
+            ancho = datos_materiales.get('ancho', 0)
+            avance = datos_materiales.get('avance', 0)
+            num_tintas = datos_materiales.get('num_tintas', 'N/A')
+            numero_pistas = datos_materiales.get('numero_pistas', 0)
+            
+            # Additional parameters from markdown report
+            gap_avance = datos_materiales.get('gap_avance', 7.95)  # Default value from markdown
+            area_etiqueta = datos_materiales.get('area_etiqueta', ancho * avance)  # Calculate if not provided
+            unidad_z = datos_materiales.get('unidad_z', 102.0)  # Default value from markdown
+            
+            self.elements.append(Paragraph(f"• Ancho: {ancho} mm", self.normal_style))
+            self.elements.append(Paragraph(f"• Avance: {avance} mm", self.normal_style))
+            self.elements.append(Paragraph(f"• Gap al avance: {gap_avance} mm", self.normal_style))
+            self.elements.append(Paragraph(f"• Pistas: {numero_pistas}", self.normal_style))
+            self.elements.append(Paragraph(f"• Número de Tintas: {num_tintas}", self.normal_style))
+            self.elements.append(Paragraph(f"• Área de Etiqueta: {area_etiqueta:.2f} mm²", self.normal_style))
+            self.elements.append(Paragraph(f"• Unidad (Z): {unidad_z}", self.normal_style))
+
+            # 5. Información de Materiales
+            self.elements.append(Paragraph("3. Información de Materiales", self.subtitle_style))
+            # Mostrar detalles de material y acabado
+            nombre_material = material.get('nombre', 'N/A')
+            nombre_acabado = acabado.get('nombre', 'N/A')
+            self.elements.append(Paragraph(f"• Material: {nombre_material}", self.normal_style))
+            self.elements.append(Paragraph(f"• Acabado: {nombre_acabado}", self.normal_style))
+            # Flags
+            planchas_x_sep = datos_materiales.get('planchas_x_separado', False)
+            existe_troq = datos_materiales.get('existe_troquel', False)
+            self.elements.append(Paragraph(f"• Planchas por separado: {'Sí' if planchas_x_sep else 'No'}", self.normal_style))
+            self.elements.append(Paragraph(f"• Troquel existe: {'Sí' if existe_troq else 'No'}", self.normal_style))
+            # Costos detallados
+            costo_mat = datos_materiales.get('valor_material', 0)
+            costo_acb = datos_materiales.get('valor_acabado', 0)
+            costo_troq = datos_materiales.get('valor_troquel', 0)
+            self.elements.append(Paragraph(f"• Costo Material: ${costo_mat:,.2f}/mm²", self.normal_style))
+            self.elements.append(Paragraph(f"• Costo Acabado: ${costo_acb:,.2f}/mm²", self.normal_style))
+            self.elements.append(Paragraph(f"• Costo Troquel: ${costo_troq:,.2f}", self.normal_style))
+            # 6. Tabla de Escalas
+            self.elements.append(Spacer(1, 15))
+            self.elements.append(Paragraph("4. Tabla de Escalas", self.subtitle_style))
+            # Construir cabecera de tabla
+            table_data = [[
+                "Escala", "Valor Unidad", "Metros", "Tiempo (h)",
+                "Montaje", "MO y Maq", "Tintas", "Papel/lam", "Desperdicio"
+            ]]
+            # Llenar filas con cada resultado
+            for r in datos_materiales.get('resultados', []):
+                table_data.append([
+                    f"{r.get('escala','')} ",
+                    f"${float(r.get('valor_unidad',0)):.2f}",
+                    f"{r.get('metros',0):.2f}",
+                    f"{r.get('tiempo_horas',0):.2f}",
+                    f"${r.get('montaje',0):,.2f}",
+                    f"${r.get('mo_y_maq',0):,.2f}",
+                    f"{r.get('tintas',0)}", 
+                    f"${r.get('papel_lam',0):,.2f}",
+                    f"${r.get('desperdicio',0):,.2f}"
+                ])
+            # Crear tabla y aplicar estilo
+            from reportlab.platypus import Table, TableStyle
+            tabla = Table(table_data, repeatRows=1, colWidths=[60,60,60,60,60,60,50,60,60])
+            estilo = TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+                ('ALIGN', (0,0), (0,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ])
+            tabla.setStyle(estilo)
+            self.elements.append(tabla)
+            self.elements.append(Spacer(1, 20))
+
+            # Fecha y hora de generación
+            self.elements.append(Spacer(1, 20))
+            fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.elements.append(Paragraph(f"Generado el: {fecha_hora}", self.normal_style))
+
+            # Generar el PDF
+            print(f"Intentando generar PDF en: {output_path}")
+            print(f"Número de elementos: {len(self.elements)}")
+            
+            # Verify we have elements before building
+            if not self.elements:
+                print("ERROR: No hay elementos para generar el PDF")
+                return False
+            
+            self.doc = SimpleDocTemplate(output_path, pagesize=letter)
+            self.doc.build(self.elements)
+            
+            # Verify file was created and has content
+            import os
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"PDF generado exitosamente. Tamaño: {file_size} bytes")
+                return True
+            else:
+                print("ERROR: El archivo PDF no se generó correctamente")
+                return False
+        
+        except Exception as e:
+            print(f"Error detallado al generar PDF de materiales: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_calculos_from_datos(self, datos_materiales):
+        """
+        Extrae información de cálculos de los datos de materiales.
+        Maneja casos donde los cálculos pueden estar en diferentes formatos.
+        
+        Args:
+            datos_materiales (dict): Diccionario con información de la cotización
+        
+        Returns:
+            dict: Diccionario con información de cálculos, con valores predeterminados seguros
+        """
+        # Intentar obtener cálculos de diferentes fuentes
+        calculos = {}
+        
+        # Intentar obtener de resultados (primera escala)
+        if datos_materiales.get('resultados') and isinstance(datos_materiales['resultados'], list):
+            primera_escala = datos_materiales['resultados'][0] if datos_materiales['resultados'] else {}
+            calculos.update({
+                'desperdicio_total': primera_escala.get('desperdicio', 'N/A'),
+                'metros': primera_escala.get('metros', 'N/A'),
+                'tiempo_horas': primera_escala.get('tiempo_horas', 'N/A')
+            })
+        
+        # Intentar obtener de los datos directamente
+        calculos.update({
+            'ancho': datos_materiales.get('ancho', 'N/A'),
+            'avance': datos_materiales.get('avance', 'N/A'),
+            'numero_pistas': datos_materiales.get('numero_pistas', 'N/A')
+        })
+        
+        return calculos 

@@ -323,9 +323,16 @@ class CalculadoraLitografia(CalculadoraBase):
             }
 
     def calcular_valor_troquel(self, datos: DatosLitografia, repeticiones: int, 
-                            valor_mm: float = 100, troquel_existe: bool = False) -> Dict:
+                            valor_mm: float = 100, troquel_existe: bool = False, 
+                            tipo_grafado_id: Optional[int] = None) -> Dict:
         """
-        Calcula el valor del troquel según el tipo de producto y grafado.
+        Calcula el valor del troquel según el tipo de producto y grafado ID.
+        Para mangas:
+        - Si tipo_grafado_id es 4 (Horizontal Total + Vertical), factor_division = 1
+        - Para otros tipos de grafado, factor_division = 2
+        Para etiquetas:
+        - Si troquel_existe = True, factor_division = 2
+        - Si troquel_existe = False, factor_division = 1
         """
         try:
             # Constantes
@@ -334,7 +341,8 @@ class CalculadoraLitografia(CalculadoraBase):
             
             # Debug inicial
             print("\n=== INICIO CÁLCULO TROQUEL ===")
-            print(f"Tipo grafado recibido: {getattr(datos, 'tipo_grafado', 'No definido')}")
+            print(f"Tipo grafado ID recibido: {tipo_grafado_id}")
+            print(f"Es manga: {hasattr(datos, 'tipo_grafado')}")
             
             # Calcular valor base
             perimetro = (datos.ancho + datos.avance) * 2
@@ -345,9 +353,9 @@ class CalculadoraLitografia(CalculadoraBase):
             es_manga = hasattr(datos, 'tipo_grafado') and datos.tipo_grafado is not None
             
             if es_manga:
-                # Lógica específica para mangas
-                factor_division = 1 if datos.tipo_grafado == "Horizontal Total + Vertical" else 2
-                print(f"ES MANGA - Tipo grafado: {datos.tipo_grafado}")
+                # Lógica específica para mangas usando ID
+                factor_division = 1 if tipo_grafado_id == 4 else 2
+                print(f"ES MANGA - Tipo grafado ID: {tipo_grafado_id}")
                 print(f"Factor división seleccionado: {factor_division}")
             else:
                 # Lógica para etiquetas
@@ -361,7 +369,10 @@ class CalculadoraLitografia(CalculadoraBase):
             
             print(f"Valor base: ${valor_base:,.2f}")
             print(f"Valor calculado (max con mínimo): ${valor_calculado:,.2f}")
-            print(f"Valor final: ${valor_final:,.2f}")
+            print(f"FACTOR_BASE: ${FACTOR_BASE:,.2f}")
+            print(f"Suma antes de división: ${(FACTOR_BASE + valor_calculado):,.2f}")
+            print(f"Factor de división aplicado: {factor_division}")
+            print(f"Valor final después de división: ${valor_final:,.2f}")
             
             return {
                 'valor': valor_final,
@@ -373,7 +384,9 @@ class CalculadoraLitografia(CalculadoraBase):
                     'factor_base': FACTOR_BASE,
                     'factor_division': factor_division,
                     'es_manga': es_manga,
-                    'tipo_grafado': datos.tipo_grafado if es_manga else None
+                    'tipo_grafado_id': tipo_grafado_id if es_manga else None,
+                    'suma_antes_division': FACTOR_BASE + valor_calculado,
+                    'valor_final': valor_final
                 }
             }
         except Exception as e:

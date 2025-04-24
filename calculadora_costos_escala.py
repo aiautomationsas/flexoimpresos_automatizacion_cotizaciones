@@ -340,7 +340,7 @@ Cálculo:
             datos: Objeto DatosEscala con información de rentabilidad
             escala: Número de unidades a producir
             valor_plancha: Valor de las planchas (costo fijo)
-            valor_troquel: Valor del troquel (costo fijo)
+            valor_troquel: Valor del troquel (costo fijo, ya calculado con el factor de división correcto)
             
         Returns:
             float: Valor por unidad calculado
@@ -356,7 +356,7 @@ Cálculo:
             print(f"suma_costos: {suma_costos:.2f}")
             print(f"rentabilidad: {datos.rentabilidad:.2f}%")
             print(f"valor_plancha: {valor_plancha:.2f}")
-            print(f"valor_troquel: {valor_troquel:.2f}")
+            print(f"valor_troquel (pre-calculado): {valor_troquel:.2f}")
             print(f"escala: {escala:,}")
             
             # 2. Validar escala
@@ -372,7 +372,7 @@ Cálculo:
             costos_indirectos = suma_costos / factor_rentabilidad
             print(f"costos_indirectos: {suma_costos:.2f} / {factor_rentabilidad:.4f} = {costos_indirectos:.2f}")
             
-            # 5. Calcular costos fijos
+            # 5. Usar el valor del troquel directamente sin recalcular
             costos_fijos = valor_plancha + valor_troquel
             print(f"costos_fijos: {valor_plancha:.2f} + {valor_troquel:.2f} = {costos_fijos:.2f}")
             
