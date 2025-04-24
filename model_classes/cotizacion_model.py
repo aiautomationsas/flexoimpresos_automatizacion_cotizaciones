@@ -49,7 +49,7 @@ class ConfiguracionProduccion:
     escalas: List[int] = field(default_factory=lambda: [1000, 2000, 3000, 5000])
     planchas_por_separado: bool = False
     troquel_existe: bool = False
-    num_rollos: int = 1000
+    num_rollos: int = 100
     
     @property
     def porcentaje_desperdicio(self) -> float:
