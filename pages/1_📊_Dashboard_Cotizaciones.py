@@ -63,13 +63,14 @@ st.markdown("""
         
         /* Títulos */
         h1 {
-            color: white; /* White text for contrast */
+            color: #0F4C81; /* Primary Blue text */
             font-family: 'Helvetica Neue', sans-serif;
             font-weight: 700;
             padding: 1.5rem 0;
             text-align: center;
-            background-color: #0F4C81; /* Solid Reflex Blue */
-            border-radius: 10px;
+            /* background-color: #0F4C81; /* Removed Solid Reflex Blue */
+            /* border-radius: 10px; /* Removed */
+            border-bottom: 2px solid #0F4C81; /* Added bottom border */
             margin-bottom: 2rem;
         }
         
@@ -132,6 +133,10 @@ st.markdown("""
             padding: 1rem;
             border-radius: 10px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        /* Ensure button text is white when using primaryColor */
+       .stButton>button {
+            color: white !important; /* Override theme if needed */
         }
     </style>
 """, unsafe_allow_html=True)
