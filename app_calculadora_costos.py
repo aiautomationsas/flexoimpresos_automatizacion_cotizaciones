@@ -909,9 +909,17 @@ def mostrar_calculadora():
                 st.write("### Datos del Producto")
                 
                 # Obtener y mostrar tipo de producto
-                tipo_producto = db.get_tipo_producto(cotizacion_model.tipo_producto_id)
-                st.write(f"**Tipo de Producto:** {tipo_producto.nombre}")
+                # --- FIX: Check if tipo_producto_id exists before fetching --- 
+                tipo_producto = None
+                if cotizacion_model.tipo_producto_id:
+                    tipo_producto = db.get_tipo_producto(cotizacion_model.tipo_producto_id)
                 
+                if tipo_producto:
+                    st.write(f"**Tipo de Producto:** {tipo_producto.nombre}")
+                else:
+                    st.write(f"**Tipo de Producto:** (No especificado)") # Display placeholder if None
+                # --- END FIX ---
+
                 # Obtener y mostrar material
                 material = db.get_material(cotizacion_model.material_id)
                 st.write(f"**Material:** {material.code} - {material.nombre}")
@@ -949,7 +957,7 @@ def mostrar_calculadora():
                             index=0  # Optional: set a default index if needed
                         )
                     st.write(f"**{'Mangas' if es_manga else 'Etiquetas'} por rollo:** {cotizacion_model.num_paquetes_rollos}")
-                
+
                 # Mostrar escalas
                 if hasattr(cotizacion_model, 'escalas') and cotizacion_model.escalas:
                     st.write("### Escalas de Producción")
@@ -1127,7 +1135,7 @@ def mostrar_calculadora():
     planchas_por_separado_default = "No"
     troquel_existe_default = "No"
     tipo_grafado_default = "Sin grafado"
-    num_rollos_default = 1000
+    num_rollos_default = 100
     escalas_default = "1000, 2000, 3000, 5000"
     
     # +++ NUEVO: Inicializar tipo_grafado_id_default aquí +++
@@ -1234,8 +1242,8 @@ def mostrar_calculadora():
             # Material
     material_seleccionado = st.selectbox(
         "Material",
-        options=[(m.id, f"{m.code} - {m.nombre} (${m.valor:.2f})", m.nombre, m.adhesivo_tipo) for m in materiales_filtrados],
-            format_func=lambda x: x[1],  # Mostrar todo el texto
+        options=[(m.id, f"{m.code} - {m.nombre}", m.nombre, m.adhesivo_tipo, m.valor) for m in materiales_filtrados],
+            format_func=lambda x: x[1],  # Mostrar solo código y nombre
             index=[i for i, m in enumerate(materiales_filtrados) if m.id == material_id_default][0] if material_id_default in [m.id for m in materiales_filtrados] else 0
     )
     
@@ -1243,12 +1251,12 @@ def mostrar_calculadora():
     if not es_manga:
         acabado_seleccionado = st.selectbox(
             "Acabado",
-            options=[(a.id, f"{a.code} - {a.nombre} (${a.valor:.2f})", a.nombre) for a in acabados],
-                format_func=lambda x: x[1],  # Mostrar todo el texto
+            options=[(a.id, f"{a.code} - {a.nombre}", a.nombre, a.valor) for a in acabados],
+                format_func=lambda x: x[1],  # Mostrar solo código y nombre
                 index=[i for i, a in enumerate(acabados) if a.id == acabado_id_default][0] if acabado_id_default in [a.id for a in acabados] else 0
         )
     else:
-        acabado_seleccionado = (10, "SA - Sin acabado ($0.00)", "Sin acabado")
+        acabado_seleccionado = (10, "SA - Sin acabado", "Sin acabado", 0.0)
     
     # Selección de Forma de Pago
     if not formas_pago:
@@ -1331,6 +1339,24 @@ def mostrar_calculadora():
                     key="selectbox_tipo_grafado_manga" # +++ ADD UNIQUE KEY +++
                 )
                 # --- FIN NUEVA LÓGICA ---
+
+                # --- NUEVO: Mostrar input de Altura Grafado condicionalmente ---
+                if tipo_grafado_seleccionado and tipo_grafado_seleccionado.id in [3, 4]:
+                    # Obtener valor por defecto (desde el modelo si está en modo edición)
+                    altura_grafado_default = 0.0
+                    if modo_edicion and cotizacion_model and hasattr(cotizacion_model, 'altura_grafado'):
+                        altura_grafado_default = cotizacion_model.altura_grafado or 0.0
+                    
+                    st.number_input(
+                        "Altura Grafado (mm)", 
+                        min_value=0.0, 
+                        value=altura_grafado_default,
+                        step=0.1,
+                        format="%.2f",
+                        key="altura_grafado_input",
+                        help="Ingrese la altura del grafado en milímetros. Requerido para grafado Alto/Bajo Relieve."
+                    )
+                # --- FIN NUEVO ---
         
         # Cambiar el label según el tipo de producto
         label_rollos = "Número de mangas por rollo" if es_manga else "Número de etiquetas por rollo"
@@ -1372,7 +1398,7 @@ def mostrar_calculadora():
             )
 
             # Precio de material
-            valor_material_actual = extraer_valor_precio(material_seleccionado[1])
+            valor_material_actual = material_seleccionado[4]  # Acceder al valor directamente de la tupla
             st.text(f"Valor material actual: ${valor_material_actual:.2f}")
             
             # Mostrar checkbox de ajuste de material
@@ -1382,7 +1408,7 @@ def mostrar_calculadora():
                        key="ajustar_material_checkbox")
 
             # Mostrar input de valor material
-            valor_material_mostrar = (
+            valor_material_mostrar = float(
                 st.session_state.get('valor_material_input', valor_material_actual)
                 if not ajustar_material_checked
                 else st.session_state.get('valor_material_input', valor_material_actual)
@@ -1390,7 +1416,7 @@ def mostrar_calculadora():
             st.number_input(
                 "Valor material",
                 min_value=0.0,
-                value=valor_material_mostrar,
+                value=float(valor_material_mostrar),  # Convertir explícitamente a float
                 step=0.01,
                 disabled=not ajustar_material_checked,
                 key="valor_material_input"
@@ -1585,8 +1611,8 @@ def mostrar_calculadora():
             valor_troquel = obtener_valor_troquel(reporte_lito)
             
             # Extraer valores correctos para material y acabado
-            valor_material = extraer_valor_precio(material_seleccionado[1])
-            valor_acabado = 0 if es_manga else extraer_valor_precio(acabado_seleccionado[1])
+            valor_material = material_seleccionado[4]  # Acceder al valor directamente de la tupla
+            valor_acabado = acabado_seleccionado[3] if not es_manga else 0  # Acceder al valor directamente de la tupla
             
             # Imprimir información de debug para valores de material y acabado
             print(f"\n=== DEBUG VALORES DE MATERIAL Y ACABADO ===")
@@ -1719,7 +1745,8 @@ def mostrar_calculadora():
                     'numero_pistas': pistas, # Valor de entrada
                     'tipo_producto_id': tipo_producto_seleccionado[0], # ID del tipo de producto
                     'tipo_grafado_id': tipo_grafado_id, # ID del tipo de grafado (puede ser None)
-                    'unidad_z_dientes': dientes_seleccionados 
+                    'unidad_z_dientes': dientes_seleccionados,
+                    'altura_grafado': st.session_state.get('altura_grafado_input') # NUEVO: Pasar valor
                 }
                 st.session_state.datos_cotizacion = datos_para_guardar
                     
@@ -1727,13 +1754,6 @@ def mostrar_calculadora():
                 print(f"Comercial seleccionado: {comercial_seleccionado}")
                 print(f"ID del comercial (session_state): {st.session_state.comercial_seleccionado_id}")
                 print("=================================")
-                
-                # Crear modelo de cotización y guardarlo en el estado
-                print("\n=== DEBUG COMERCIAL SELECCIONADO ===")
-                print(f"Comercial seleccionado: {comercial_seleccionado}")
-                comercial_id = st.session_state.comercial_seleccionado_id
-                print(f"ID del comercial a usar: {comercial_id}")
-                print("=================================\n")
                 
                 # --- MODIFICACIÓN: Determinar cliente_id y referencia_id según modo_edicion ---
                 if modo_edicion and st.session_state.cotizacion_model:
@@ -1779,7 +1799,8 @@ def mostrar_calculadora():
                     comercial_id=comercial_id,
                     escalas_resultados=resultados,
                     cotizacion_existente=st.session_state.cotizacion_model if modo_edicion else None,
-                    forma_pago_id=st.session_state.forma_pago_id
+                    forma_pago_id=st.session_state.forma_pago_id,
+                    altura_grafado=st.session_state.get('altura_grafado_input') # NUEVO: Pasar valor
                 )
                 
                 # Marcar que se ha calculado la cotización
@@ -2205,7 +2226,8 @@ def crear_o_actualizar_cotizacion_model(
     comercial_id=None, 
     escalas_resultados=None,
     cotizacion_existente=None,
-    forma_pago_id: Optional[int] = None
+    forma_pago_id: Optional[int] = None,
+    altura_grafado: Optional[float] = None # NUEVO: Añadir parámetro
 ):
     """
     Crea o actualiza un modelo de cotización con los datos proporcionados.
@@ -2261,6 +2283,7 @@ def crear_o_actualizar_cotizacion_model(
         
         # Ensure the final assignment uses the value that includes the default
         cotizacion.forma_pago_id = forma_pago_id if forma_pago_id is not None else st.session_state.get('forma_pago_id', 1)
+        cotizacion.altura_grafado = altura_grafado # NUEVO: Asignar valor
         
         # Procesar escalas si existen
         if escalas_resultados:
@@ -2425,7 +2448,8 @@ def guardar_cotizacion(cotizacion, db):
             'fecha_creacion': datetime.now().isoformat(),
             'identificador': cotizacion.identificador,
             'colores_tinta': getattr(cotizacion, 'colores_tinta', None),
-            'forma_pago_id': cotizacion.forma_pago_id
+            'forma_pago_id': cotizacion.forma_pago_id,
+            'altura_grafado': cotizacion.altura_grafado # NUEVO: Añadir altura_grafado
         }
         
         # Si es una actualización, mantener el número de cotización existente

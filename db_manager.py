@@ -152,7 +152,7 @@ class DBManager:
                          'num_tintas', 'num_rollos', 'consecutivo', 'planchas_x_separado',
                          'numero_pistas', 'referencia_cliente_id', 'num_paquetes_rollos',
                          'tipo_producto_id', 'etiquetas_por_rollo', 'forma_pago_id']
-        campos_numericos = ['valor_troquel', 'valor_plancha_separado', 'avance']
+        campos_numericos = ['valor_troquel', 'valor_plancha_separado', 'avance', 'altura_grafado']
         campos_string = ['comercial_id']
         
         new_dict = {}
@@ -288,8 +288,14 @@ class DBManager:
             
             
             print("\\nDatos para la llamada RPC inicial:")
+            # Incluir altura_grafado si existe y no es None
+            if 'altura_grafado' in datos_cotizacion and datos_cotizacion['altura_grafado'] is not None:
+                print(f"  altura_grafado: {datos_cotizacion['altura_grafado']}")
+            
             for k, v in datos_cotizacion.items():
-                print(f"  {k}: {v}")
+                # Evitar imprimir altura_grafado dos veces si ya se imprimió arriba
+                if k != 'altura_grafado' or ('altura_grafado' in datos_cotizacion and datos_cotizacion['altura_grafado'] is None):
+                     print(f"  {k}: {v}")
             
             # 2. Llamar a la función RPC para crear la cotización (la BD asigna numero_cotizacion)
             try:
@@ -1561,7 +1567,8 @@ class DBManager:
                 'ancho': cotizacion.ancho,
                 'avance': cotizacion.avance,
                 'identificador': cotizacion.identificador,
-                'forma_pago_id': cotizacion.forma_pago_id
+                'forma_pago_id': cotizacion.forma_pago_id,
+                'altura_grafado': cotizacion.altura_grafado
             }
             
             # Si es una actualización
@@ -1762,6 +1769,10 @@ class DBManager:
                 avance=cotizacion_data.get('avance', 0.0),
                 fecha_creacion=cotizacion_data.get('fecha_creacion'),
                 identificador=cotizacion_data.get('identificador'),
+                estado_id=cotizacion_data.get('estado_id'),
+                id_motivo_rechazo=cotizacion_data.get('id_motivo_rechazo'),
+                es_recotizacion=cotizacion_data.get('es_recotizacion', False),
+                altura_grafado=cotizacion_data.get('altura_grafado'), # NUEVO: Añadir altura_grafado
                 # Relaciones
                 referencia_cliente=referencia,
                 material=material,
@@ -1965,6 +1976,7 @@ class DBManager:
                     estado_id=cotizacion_data.get('estado_id'),
                     id_motivo_rechazo=cotizacion_data.get('id_motivo_rechazo'),
                     es_recotizacion=cotizacion_data.get('es_recotizacion', False),
+                    altura_grafado=cotizacion_data.get('altura_grafado'), # NUEVO: Añadir altura_grafado
                     # Relaciones
                     referencia_cliente=referencia,
                     material=material,

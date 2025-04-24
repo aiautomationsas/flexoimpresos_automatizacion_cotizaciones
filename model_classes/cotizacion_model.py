@@ -327,6 +327,7 @@ class Cotizacion:
     id_motivo_rechazo: Optional[int] = None
     colores_tinta: Optional[str] = None
     forma_pago_id: Optional[int] = None
+    altura_grafado: Optional[float] = None
     escalas: List[Escala] = field(default_factory=list)
     # Relaciones
     referencia_cliente: Optional[ReferenciaCliente] = None
@@ -388,7 +389,10 @@ class Cotizacion:
         tipo_producto=None,
         forma_pago=None,
         # --- NUEVO: Añadir campo para perfil --- 
-        perfil_comercial_info=None 
+        perfil_comercial_info=None,
+        # --- FIN NUEVO ---
+        # --- NUEVO: Añadir altura_grafado ---
+        altura_grafado=None
         # --- FIN NUEVO ---
     ):
         self.id = id
@@ -426,6 +430,9 @@ class Cotizacion:
         self.forma_pago = forma_pago
         # --- NUEVO: Guardar perfil --- 
         self.perfil_comercial_info = perfil_comercial_info
+        # --- FIN NUEVO ---
+        # --- NUEVO: Guardar altura_grafado ---
+        self.altura_grafado = float(altura_grafado) if altura_grafado is not None else None
         # --- FIN NUEVO ---
 
     @property
