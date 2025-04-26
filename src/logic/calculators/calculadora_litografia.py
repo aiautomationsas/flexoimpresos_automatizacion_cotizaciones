@@ -336,13 +336,15 @@ class CalculadoraLitografia(CalculadoraBase):
         """
         try:
             # Constantes
-            FACTOR_BASE = 25 * 5000
+            FACTOR_BASE = 25 * 5000  # 125,000
             VALOR_MINIMO = 700000
             
             # Debug inicial
             print("\n=== INICIO CÁLCULO TROQUEL ===")
             print(f"Tipo grafado ID recibido: {tipo_grafado_id}")
             print(f"Es manga: {hasattr(datos, 'tipo_grafado')}")
+            print(f"Ancho: {datos.ancho}, Avance: {datos.avance}, Pistas: {datos.pistas}")
+            print(f"Repeticiones: {repeticiones}, Valor_mm: {valor_mm}")
             
             # Calcular valor base
             perimetro = (datos.ancho + datos.avance) * 2
@@ -367,6 +369,12 @@ class CalculadoraLitografia(CalculadoraBase):
             # Calcular valor final
             valor_final = (FACTOR_BASE + valor_calculado) / factor_division
             
+            # Asegurar que el valor final nunca sea cero
+            if valor_final <= 0:
+                print("ADVERTENCIA: Valor final <= 0, usando valor mínimo")
+                valor_final = VALOR_MINIMO
+            
+            print(f"Perimetro: {perimetro:,.2f} mm")
             print(f"Valor base: ${valor_base:,.2f}")
             print(f"Valor calculado (max con mínimo): ${valor_calculado:,.2f}")
             print(f"FACTOR_BASE: ${FACTOR_BASE:,.2f}")
@@ -391,10 +399,14 @@ class CalculadoraLitografia(CalculadoraBase):
             }
         except Exception as e:
             print(f"ERROR en cálculo troquel: {str(e)}")
+            # En caso de error, retornar el valor mínimo en lugar de None
             return {
                 'error': str(e),
-                'valor': None,
-                'detalles': None
+                'valor': VALOR_MINIMO,
+                'detalles': {
+                    'error': str(e),
+                    'valor_minimo_usado': VALOR_MINIMO
+                }
             }
 
     def calcular_area_etiqueta(self, datos: DatosLitografia, num_tintas: int, 

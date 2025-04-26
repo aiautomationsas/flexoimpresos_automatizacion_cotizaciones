@@ -528,7 +528,56 @@ class DBManager:
             traceback.print_exc()
             return False
 
+    def get_clientes_by_comercial(self, comercial_id: str) -> List[Cliente]:
+        """
+        Obtiene la lista de clientes asociados a un comercial específico.
+        
+        Args:
+            comercial_id (str): ID del comercial (UUID)
+            
+        Returns:
+            List[Cliente]: Lista de clientes asociados al comercial
+        """
+        def _operation():
+            try:
+                # Primero obtenemos las referencias de cliente asociadas al comercial
+                referencias = self.supabase.table('referencias_cliente')\
+                    .select('cliente_id')\
+                    .eq('id_usuario', comercial_id)\
+                    .execute()
 
+                if not referencias.data:
+                    return []
+
+                # Extraemos los IDs únicos de clientes
+                cliente_ids = list(set(ref['cliente_id'] for ref in referencias.data))
+
+                # Obtenemos los detalles de los clientes
+                clientes = self.supabase.table('clientes')\
+                    .select('*')\
+                    .in_('id', cliente_ids)\
+                    .execute()
+
+                return [Cliente(
+                    id=cliente['id'],
+                    nombre=cliente['nombre'],
+                    codigo=cliente.get('codigo'),
+                    persona_contacto=cliente.get('persona_contacto'),
+                    correo_electronico=cliente.get('correo_electronico'),
+                    telefono=cliente.get('telefono'),
+                    creado_en=datetime.fromisoformat(cliente['creado_en']) if cliente.get('creado_en') else None,
+                    actualizado_en=datetime.fromisoformat(cliente['actualizado_en']) if cliente.get('actualizado_en') else None
+                ) for cliente in clientes.data] if clientes.data else []
+
+            except Exception as e:
+                print(f"Error obteniendo clientes por comercial: {str(e)}")
+                traceback.print_exc()
+                return []
+
+        return self._retry_operation(
+            operation_name="get_clientes_by_comercial",
+            operation_func=_operation
+        )
 
     def get_materiales(self) -> List[Material]:
         """Obtiene todos los materiales disponibles usando RPC."""
@@ -652,6 +701,11 @@ class DBManager:
     def get_acabado(self, acabado_id: int) -> Optional[Acabado]:
         """Obtiene un acabado específico por su ID."""
         try:
+            # Validar que acabado_id no sea None y sea un entero válido
+            if acabado_id is None or not isinstance(acabado_id, int):
+                print(f"ID de acabado inválido: {acabado_id}")
+                return None
+                
             response = self.supabase.from_('acabados').select('*').eq('id', acabado_id).execute()
             
             if not response.data or len(response.data) == 0:
@@ -803,49 +857,16 @@ class DBManager:
             return None
 
     def get_perfil(self, user_id: str) -> Optional[Dict]:
-        """Obtiene el perfil de un usuario por su ID (UUID) usando RPC."""
-        print(f"\n=== INICIO GET_PERFIL (RPC) para user_id: {user_id} ===")
-        
-        if not self.supabase:
-            print("ERROR: self.supabase no está inicializado en get_perfil")
-            return None
-            
+        """Obtiene el perfil del usuario con su rol"""
         try:
-            print(f"Llamando a RPC 'get_user_profile_by_id' para ID: {user_id}")
-            response = self.supabase.rpc(
-                'get_user_profile_by_id', 
-                {'p_user_id': user_id} # Corrected parameter name to p_user_id
-            ).execute()
-            
-            print(f"Respuesta RPC execute(): {type(response)}")
-            if response is not None and hasattr(response, 'data'):
-                print(f"Contenido RPC response.data: {str(response.data)[:200]}...") 
-                # RPC devuelve una lista, esperamos un perfil o lista vacía
-                if response.data and isinstance(response.data, list) and len(response.data) > 0:
-                    # Extraer el primer (y único) diccionario de la lista
-                    perfil_data = response.data[0] 
-                    print(f"Perfil encontrado vía RPC: {perfil_data}")
-                    print("=== FIN GET_PERFIL (RPC - con datos) ===\n")
-                    return perfil_data
-                else:
-                    # La RPC se ejecutó pero no devolvió datos para ese ID
-                    print(f"No se encontró perfil para user_id: {user_id} (Respuesta RPC vacía)")
-                    print("=== FIN GET_PERFIL (RPC - sin datos) ===\n")
-                    return None
-            elif response is not None:
-                 print(f"Respuesta RPC no None, pero sin atributo data: {response}")
-                 print("=== FIN GET_PERFIL (RPC - sin .data) ===\n")
-                 return None
-            else:
-                # La llamada a execute() devolvió None
-                print("ERROR: La respuesta de execute() para RPC fue None.")
-                print("=== FIN GET_PERFIL (RPC - respuesta None) ===\n")
-                return None
-            
+            response = self.supabase.table('perfiles')\
+                .select('*')\
+                .eq('id', user_id)\
+                .single()\
+                .execute()
+            return response.data if response else None
         except Exception as e:
-            print(f"Error general en get_perfil (RPC): {e}")
-            traceback.print_exc()
-            print("=== FIN GET_PERFIL (RPC - con error general) ===\\n")
+            print(f"Error obteniendo perfil: {str(e)}")
             return None
 
     def get_perfiles_by_role(self, role_name: str) -> List[Dict]:
@@ -1156,7 +1177,52 @@ class DBManager:
             print(f"Error al obtener referencia del cliente (RPC): {e}")
             traceback.print_exc()
             return None
+    
 
+    def crear_referencia_y_cotizacion(self, datos_referencia: dict, datos_cotizacion: dict) -> Optional[Tuple[int, int]]:
+        """
+        Crea una nueva referencia y su cotización asociada en una transacción
+        Retorna: (referencia_id, cotizacion_id) o None si hay error
+        """
+        try:
+            # Iniciar transacción
+            # Nota: Supabase no soporta transacciones directamente, así que manejamos
+            # la lógica de rollback manualmente
+            
+            # 1. Crear la referencia
+            response_ref = self.supabase.table('referencias_cliente')\
+                .insert(datos_referencia)\
+                .execute()
+            
+            if not response_ref.data:
+                raise Exception("Error al crear la referencia")
+            
+            referencia_id = response_ref.data[0]['id']
+            
+            # 2. Actualizar datos_cotizacion con el ID de la referencia
+            datos_cotizacion['referencia_cliente_id'] = referencia_id
+            
+            # 3. Crear la cotización
+            response_cot = self.supabase.table('cotizaciones')\
+                .insert(datos_cotizacion)\
+                .execute()
+            
+            if not response_cot.data:
+                # Si falla la cotización, intentamos eliminar la referencia
+                self.supabase.table('referencias_cliente')\
+                    .delete()\
+                    .eq('id', referencia_id)\
+                    .execute()
+                raise Exception("Error al crear la cotización")
+            
+            cotizacion_id = response_cot.data[0]['id']
+            
+            return referencia_id, cotizacion_id
+            
+        except Exception as e:
+            print(f"Error en crear_referencia_y_cotizacion: {str(e)}")
+            return None
+    
     def crear_referencia(self, referencia: ReferenciaCliente) -> Optional[ReferenciaCliente]:
         """Crea una nueva referencia de cliente. 
         Cualquier comercial autenticado puede crear referencias para cualquier cliente."""
@@ -2280,3 +2346,15 @@ class DBManager:
             print(f"Error al obtener forma de pago: {e}")
             traceback.print_exc()
             return None
+
+    def get_referencias_by_cliente(self, cliente_id: int) -> List[ReferenciaCliente]:
+        """Obtiene las referencias de un cliente"""
+        try:
+            response = self.supabase.table('referencias_cliente')\
+                .select('*')\
+                .eq('cliente_id', cliente_id)\
+                .execute()
+            return [ReferenciaCliente(**ref) for ref in response.data]
+        except Exception as e:
+            print(f"Error obteniendo referencias: {str(e)}")
+            return []

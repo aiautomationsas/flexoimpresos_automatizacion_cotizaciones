@@ -1,0 +1,239 @@
+/* Variables globales de color */
+:root {
+    --color-primary: #0F4C81;      /* Reflex Blue */
+    --color-primary-dark: #0B3A65; /* Versión más oscura para hover */
+    --color-primary-light: #1A6AAF; /* Versión más clara para elementos secundarios */
+    --color-white: #FFFFFF;
+    --color-gray-light: #F8F9FA;
+    --color-gray: #6C757D;
+    --color-success: #28A745;
+    --color-warning: #FFC107;
+    --color-danger: #DC3545;
+    --color-text: #2C3E50;         /* Color principal para texto */
+    --color-text-light: #6C757D;   /* Color para texto secundario */
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Estilos generales */
+.stApp {
+    background-color: var(--color-white);
+}
+
+/* Títulos y encabezados */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--color-primary);
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.main-title {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+    padding: 1.5rem;
+    border-radius: 10px;
+    text-align: center;
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow-md);
+}
+
+/* Contenedores y secciones */
+.stMarkdown {
+    color: var(--color-text);
+}
+
+.section-container {
+    background-color: var(--color-white);
+    padding: 1.5rem;
+    border-radius: 8px;
+    border: 1px solid #E9ECEF;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Botones */
+.stButton > button {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+    border: none;
+    border-radius: 5px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.stButton > button:hover {
+    background-color: var(--color-primary-dark);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+}
+
+/* Botón secundario */
+.stButton.secondary > button {
+    background-color: var(--color-white);
+    color: var(--color-primary);
+    border: 2px solid var(--color-primary);
+}
+
+.stButton.secondary > button:hover {
+    background-color: var(--color-primary-light);
+    color: var(--color-white);
+}
+
+/* Inputs y Selectores */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input {
+    border-radius: 5px;
+    border: 1px solid #CED4DA;
+    padding: 0.5rem;
+}
+
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(15, 76, 129, 0.2);
+}
+
+/* Selectbox personalizado */
+.stSelectbox > div > div {
+    border-radius: 5px;
+}
+
+.stSelectbox > div > div:hover {
+    border-color: var(--color-primary);
+}
+
+/* Radio buttons */
+.stRadio > div {
+    border-radius: 5px;
+    padding: 0.5rem;
+}
+
+.stRadio > div > label > div {
+    background-color: var(--color-white);
+    border: 2px solid var(--color-primary);
+}
+
+.stRadio > div > label > div[data-baseweb="radio"] > div {
+    background-color: var(--color-primary);
+}
+
+/* Checkbox */
+.stCheckbox > div > label > div {
+    border-color: var(--color-primary);
+}
+
+.stCheckbox > div > label > div[data-baseweb="checkbox"] > div {
+    background-color: var(--color-primary);
+}
+
+/* Dataframes y tablas */
+.stDataFrame {
+    border: 1px solid #E9ECEF;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.stDataFrame thead tr th {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+    padding: 0.75rem;
+}
+
+.stDataFrame tbody tr:nth-child(even) {
+    background-color: var(--color-gray-light);
+}
+
+/* Mensajes de estado */
+.stSuccess {
+    background-color: rgba(40, 167, 69, 0.1);
+    border-left: 4px solid var(--color-success);
+    padding: 1rem;
+    border-radius: 4px;
+}
+
+.stWarning {
+    background-color: rgba(255, 193, 7, 0.1);
+    border-left: 4px solid var(--color-warning);
+    padding: 1rem;
+    border-radius: 4px;
+}
+
+.stError {
+    background-color: rgba(220, 53, 69, 0.1);
+    border-left: 4px solid var(--color-danger);
+    padding: 1rem;
+    border-radius: 4px;
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    background-color: var(--color-gray-light);
+    border-radius: 5px;
+    padding: 0.75rem;
+    color: var(--color-primary);
+    font-weight: 500;
+}
+
+.streamlit-expanderHeader:hover {
+    background-color: #E9ECEF;
+}
+
+/* Tooltips y ayuda */
+.stTooltipIcon {
+    color: var(--color-primary);
+}
+
+/* Paginación y navegación */
+.stPagination > div > ul > li > button {
+    color: var(--color-primary);
+}
+
+.stPagination > div > ul > li.active > button {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main-title {
+        padding: 1rem;
+        font-size: 1.5rem;
+    }
+
+    .section-container {
+        padding: 1rem;
+    }
+
+    .stButton > button {
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+}
+
+/* Mejoras de accesibilidad */
+:focus {
+    outline: 3px solid rgba(15, 76, 129, 0.5);
+    outline-offset: 2px;
+}
+
+/* Animaciones suaves */
+.stButton > button,
+.stSelectbox > div > div,
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input {
+    transition: all 0.2s ease-in-out;
+}
+
+/* Estilos para el modo oscuro si se implementa */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-primary: #1A6AAF;
+        --color-text: #E9ECEF;
+        --color-text-light: #CED4DA;
+    }
+}

@@ -11,16 +11,14 @@ class AuthManager:
         
     def initialize_session_state(self) -> None:
         """Initialize session state variables for authentication."""
-        if 'authentication_status' not in st.session_state:
-            st.session_state.authentication_status = None
-        if 'username' not in st.session_state:
-            st.session_state.username = None
-        if 'name' not in st.session_state:
-            st.session_state.name = None
-        if 'role' not in st.session_state:
-            st.session_state.role = None
+        if 'authenticated' not in st.session_state:
+            st.session_state.authenticated = False
+        if 'user' not in st.session_state:
+            st.session_state.user = None
         if 'user_id' not in st.session_state:
             st.session_state.user_id = None
+        if 'user_profile' not in st.session_state:
+            st.session_state.user_profile = None
         if 'login_form_submitted' not in st.session_state:
             st.session_state.login_form_submitted = False
 
@@ -39,38 +37,39 @@ class AuthManager:
             })
             
             if response.user:
-                # --- CAMBIO: Llamar a la nueva función RPC y usar la estructura de perfil ---
+                # Guardar el ID del usuario primero
+                user_id = response.user.id
+                st.session_state.user_id = user_id
+                
+                # Obtener el perfil del usuario
                 profile_response = self.supabase.rpc('get_current_user_profile').execute()
                 
-                if profile_response.data:
-                    # La función RPC ahora devuelve una lista con un diccionario
+                if profile_response.data and len(profile_response.data) > 0:
+                    # La función RPC devuelve una lista con un diccionario
                     profile = profile_response.data[0]
-                    st.session_state.authentication_status = True
-                    st.session_state.username = email
-                    st.session_state.name = profile.get('user_nombre', 'Usuario') # Usar nombre del perfil
-                    st.session_state.role = profile.get('user_rol', None) # Usar rol del perfil
-                    st.session_state.user_id = response.user.id
+                    
+                    # Actualizar el estado de la sesión
+                    st.session_state.authenticated = True
+                    st.session_state.user = email
+                    st.session_state.user_profile = profile  # Guardar el perfil completo
                     st.session_state.login_form_submitted = True
-                    print(f"Login exitoso: Usuario={st.session_state.name}, Rol={st.session_state.role}, ID={st.session_state.user_id}")
+                    
+                    print(f"Login exitoso: Usuario={email}, ID={user_id}")
                     return True, "Login successful"
                 else:
-                    # Si el login fue exitoso pero no se encontró perfil, es un error
-                    # Podría significar que el trigger para crear perfiles no funcionó
+                    # Si no se encuentra el perfil, limpiar la sesión
+                    self.logout()
                     print(f"Error: Login exitoso para {email}, pero no se encontró perfil asociado.")
-                    st.session_state.authentication_status = False
-                    st.session_state.login_form_submitted = True
-                    # Desautenticar al usuario ya que falta el perfil
-                    self.supabase.auth.sign_out()
                     return False, "Error interno: Perfil de usuario no encontrado."
             else:
-                st.session_state.authentication_status = False
+                st.session_state.authenticated = False
                 st.session_state.login_form_submitted = True
                 return False, "Credenciales inválidas"
                 
         except Exception as e:
             print(f"Error during login: {str(e)}")
             traceback.print_exc()
-            st.session_state.authentication_status = False
+            st.session_state.authenticated = False
             st.session_state.login_form_submitted = True
             return False, f"Error durante el login: {str(e)}"
 
@@ -78,11 +77,8 @@ class AuthManager:
         """Sign out the current user."""
         try:
             self.supabase.auth.sign_out()
-            st.session_state.authentication_status = None
-            st.session_state.username = None
-            st.session_state.name = None
-            st.session_state.role = None
-            st.session_state.user_id = None
+            st.session_state.authenticated = False
+            st.session_state.user = None
             st.session_state.login_form_submitted = False
         except Exception as e:
             print(f"Error during logout: {str(e)}")
@@ -90,18 +86,29 @@ class AuthManager:
 
     def check_auth_status(self) -> bool:
         """Check if user is authenticated."""
-        return st.session_state.get('authentication_status', False)
+        return st.session_state.get('authenticated', False)
 
     def get_current_user(self) -> Optional[Dict[str, Any]]:
         """Get current authenticated user details."""
         if self.check_auth_status():
             return {
                 'id': st.session_state.user_id,
-                'email': st.session_state.username,
-                'name': st.session_state.name,
-                'role': st.session_state.role
+                'email': st.session_state.user,
             }
         return None
+
+    def verify_user_role(self, user_id: str) -> Optional[Dict]:
+        """Verifica y obtiene el rol del usuario"""
+        try:
+            perfil = self.supabase.table('perfiles')\
+                .select('*')\
+                .eq('id', user_id)\
+                .single()\
+                .execute()
+            return perfil.data if perfil else None
+        except Exception as e:
+            print(f"Error verificando rol: {str(e)}")
+            return None
 
 def create_login_ui() -> None:
     """Create the login user interface."""
