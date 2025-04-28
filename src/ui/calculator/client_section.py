@@ -1,6 +1,6 @@
 import streamlit as st
 from typing import Optional
-from ...data.models.cliente import Cliente
+from src.data.models import Cliente
 
 # Ahora solo retorna el cliente seleccionado, no referencia
 

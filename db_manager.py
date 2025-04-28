@@ -611,6 +611,55 @@ class DBManager:
             print(f"Error al obtener código de material: {e}")
             return ""
 
+    def get_material_adhesivo_valor(self, material_id: int, adhesivo_id: int) -> Optional[float]:
+        """
+        Obtiene el valor de la tabla material_adhesivo basado en material_id y adhesivo_id.
+
+        Args:
+            material_id (int): ID del material.
+            adhesivo_id (int): ID del adhesivo.
+
+        Returns:
+            Optional[float]: El valor si se encuentra la combinación, None si no.
+        """
+        if material_id is None or adhesivo_id is None:
+            print("Error: material_id o adhesivo_id son None en get_material_adhesivo_valor")
+            return None
+
+        def _operation():
+            try:
+                # Corrected query builder chain without unnecessary backslashes
+                response = self.supabase.table('material_adhesivo') \
+                    .select('valor') \
+                    .eq('material_id', material_id) \
+                    .eq('adhesivo_id', adhesivo_id) \
+                    .limit(1) \
+                    .execute()
+
+                if response.data:
+                    valor = response.data[0].get('valor')
+                    # Convertir a float si es necesario (depende de cómo Supabase lo devuelva)
+                    return float(valor) if valor is not None else None
+                else:
+                    print(f"No se encontró valor para Material ID: {material_id}, Adhesivo ID: {adhesivo_id}")
+                    return None
+            except Exception as e:
+                print(f"Error al consultar material_adhesivo: {e}")
+                traceback.print_exc()
+                # Devolver None en caso de error para que la lógica que llama pueda manejarlo
+                return None
+
+        # Utilizar _retry_operation para manejar posibles errores de conexión
+        try:
+            return self._retry_operation(
+                f"obtener valor material_adhesivo (mat:{material_id}, adh:{adhesivo_id})",
+                _operation
+            )
+        except Exception as e:
+            # Loguear el error final si todos los reintentos fallan
+            print(f"Error final al obtener valor de material_adhesivo tras reintentos: {e}")
+            return None
+
     def get_acabados(self) -> List[Acabado]:
         """Obtiene todos los acabados disponibles usando RPC."""
         def _operation():

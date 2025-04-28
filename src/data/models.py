@@ -122,11 +122,6 @@ class TipoGrafado:
 class Material:
     id: Optional[int] = None
     nombre: str = ''
-    valor: float = 0.0
-    updated_at: Optional[datetime] = None
-    code: str = ''
-    id_adhesivos: Optional[int] = None
-    adhesivo_tipo: Optional[str] = None
 
 @dataclass
 class Adhesivo:
@@ -296,11 +291,30 @@ class FormaPago:
         )
 
 @dataclass
+class PoliticasEntrega:
+    """Represents delivery policies."""
+    id: int
+    descripcion: str
+    # Add other relevant fields
+
+@dataclass
+class MaterialAdhesivo:
+    """Represents the join table for material and adhesive with its value."""
+    id: Optional[int] = None
+    material_id: Optional[int] = None
+    adhesivo_id: Optional[int] = None
+    valor: float = 0.0
+    # Add other fields like created_at, updated_at if they exist in the table
+    # Add relationships if needed, e.g.:
+    # material: Optional[Material] = None
+    # adhesivo: Optional[Adhesivo] = None
+
+@dataclass
 class Cotizacion:
     """Modelo de cotización que obtiene datos de cliente y comercial a través de la tabla referencias_cliente"""
     id: Optional[int] = None
     referencia_cliente_id: Optional[int] = None  # Relación principal con referencias_cliente
-    material_id: Optional[int] = None
+    material_adhesivo_id: Optional[int] = None
     acabado_id: Optional[int] = None
     num_tintas: Optional[int] = None
     num_paquetes_rollos: Optional[int] = None
@@ -319,45 +333,33 @@ class Cotizacion:
     existe_troquel: bool = False
     ancho: float = 0.0
     avance: float = 0.0
-    escala_id: Optional[int] = None
     fecha_creacion: Optional[datetime] = None
     ultima_modificacion_inputs: Optional[datetime] = None
     identificador: Optional[str] = None
     estado_id: int = 1
+    id_usuario: Optional[UUID] = None
     id_motivo_rechazo: Optional[int] = None
     colores_tinta: Optional[str] = None
     forma_pago_id: Optional[int] = None
     altura_grafado: Optional[float] = None
+    politicas_entrega_id: Optional[int] = None
     escalas: List[Escala] = field(default_factory=list)
     # Relaciones
     referencia_cliente: Optional[ReferenciaCliente] = None
-    material: Optional[Material] = None
+    material_adhesivo: Optional[MaterialAdhesivo] = None
     acabado: Optional[Acabado] = None
     tipo_producto: Optional[TipoProducto] = None
     forma_pago: Optional[FormaPago] = None
+    politicas_entrega: Optional[PoliticasEntrega] = None
     # --- NUEVO: Campo para perfil --- 
     perfil_comercial_info: Optional[Dict] = None # Guardará {'id': UUID, 'nombre': str, ...}
     # --- FIN NUEVO ---
-
-    @property
-    def cliente(self) -> Optional[Cliente]:
-        """Obtiene el cliente a través de la referencia"""
-        if self.referencia_cliente and hasattr(self.referencia_cliente, 'cliente'):
-            return self.referencia_cliente.cliente
-        return None
-
-    @property
-    def perfil(self) -> Optional[Dict]:
-        """Obtiene el perfil a través de la referencia"""
-        if self.referencia_cliente and hasattr(self.referencia_cliente, 'perfil'):
-            return self.referencia_cliente.perfil
-        return None
 
     def __init__(
         self,
         id=None,
         referencia_cliente_id=None,
-        material_id=None,
+        material_adhesivo_id=None,
         acabado_id=None,
         num_tintas=None,
         num_paquetes_rollos=None,
@@ -367,6 +369,7 @@ class Cotizacion:
         valor_troquel=None,
         valor_plancha_separado=None,
         estado_id=1,
+        id_usuario=None,
         id_motivo_rechazo=None,
         planchas_x_separado=False,
         existe_troquel=False,
@@ -382,22 +385,22 @@ class Cotizacion:
         ultima_modificacion_inputs=None,
         colores_tinta=None,
         forma_pago_id=None,
+        politicas_entrega_id=None,
+        altura_grafado=None,
         # Relaciones
         referencia_cliente=None,
-        material=None,
+        material_adhesivo=None,
         acabado=None,
         tipo_producto=None,
         forma_pago=None,
+        politicas_entrega=None,
         # --- NUEVO: Añadir campo para perfil --- 
         perfil_comercial_info=None,
-        # --- FIN NUEVO ---
-        # --- NUEVO: Añadir altura_grafado ---
-        altura_grafado=None
         # --- FIN NUEVO ---
     ):
         self.id = id
         self.referencia_cliente_id = referencia_cliente_id
-        self.material_id = material_id
+        self.material_adhesivo_id = material_adhesivo_id
         self.acabado_id = acabado_id
         self.num_tintas = num_tintas
         self.num_paquetes_rollos = num_paquetes_rollos
@@ -407,6 +410,7 @@ class Cotizacion:
         self.valor_troquel = Decimal(str(valor_troquel)) if valor_troquel is not None else None
         self.valor_plancha_separado = Decimal(str(valor_plancha_separado)) if valor_plancha_separado is not None else None
         self.estado_id = estado_id
+        self.id_usuario = id_usuario
         self.id_motivo_rechazo = id_motivo_rechazo
         self.planchas_x_separado = planchas_x_separado
         self.existe_troquel = existe_troquel
@@ -422,17 +426,17 @@ class Cotizacion:
         self.ultima_modificacion_inputs = ultima_modificacion_inputs
         self.colores_tinta = colores_tinta
         self.forma_pago_id = forma_pago_id
+        self.politicas_entrega_id = politicas_entrega_id
+        self.altura_grafado = float(altura_grafado) if altura_grafado is not None else None
         # Relaciones
         self.referencia_cliente = referencia_cliente
-        self.material = material
+        self.material_adhesivo = material_adhesivo
         self.acabado = acabado
         self.tipo_producto = tipo_producto
         self.forma_pago = forma_pago
+        self.politicas_entrega = politicas_entrega
         # --- NUEVO: Guardar perfil --- 
         self.perfil_comercial_info = perfil_comercial_info
-        # --- FIN NUEVO ---
-        # --- NUEVO: Guardar altura_grafado ---
-        self.altura_grafado = float(altura_grafado) if altura_grafado is not None else None
         # --- FIN NUEVO ---
 
     @property

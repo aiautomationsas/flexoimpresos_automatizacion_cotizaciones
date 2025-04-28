@@ -93,7 +93,9 @@ class CalculadoraCostosEscala(CalculadoraBase):
         """Imprime información de debug sobre los datos de entrada"""
         print("\n=== DATOS DE ENTRADA PARA CÁLCULO DE COSTOS ===")
         print(f"Número de tintas: {num_tintas}")
-        print(f"Valor plancha: ${valor_plancha:.2f}")
+        # Handle None for valor_plancha
+        valor_plancha_str = f"${valor_plancha:.2f}" if valor_plancha is not None else "N/A (Calculado)"
+        print(f"Valor plancha: {valor_plancha_str}")
         print(f"Valor troquel: ${valor_troquel:.2f}")
         print(f"Valor material: ${valor_material:.2f}")
         print(f"Valor acabado: ${valor_acabado:.2f}")
@@ -790,11 +792,14 @@ Cálculo:
             s3 = self.GAP_FIJO + q3
 
             # Calcular valor de plancha y troquel si no se proporcionan
-            if valor_plancha == 0:
+            if valor_plancha is None:
                 valor_plancha = self.calcular_valor_plancha(datos, num_tintas, es_manga, q3, s3)
-            if valor_troquel == 0:
+            if valor_troquel is None:
                 # Pass tipo_grafado_id to the internal method call
                 valor_troquel = self.calcular_valor_troquel(datos, es_manga, tipo_grafado_id) # Pass the ID
+            # Ensure they are floats after potential calculation or if passed as 0 initially
+            valor_plancha = float(valor_plancha) if valor_plancha is not None else 0.0
+            valor_troquel = float(valor_troquel) if valor_troquel is not None else 0.0
 
             # Calcular área de etiqueta si no está establecida
             if datos.area_etiqueta <= 0:

@@ -1,6 +1,6 @@
 import streamlit as st
 from typing import Dict, Any, List, Optional
-from src.data.models.cliente import Cliente  # Asumiendo que Cliente está definido aquí
+from src.data.models import Cliente  # Corrected import: Directly from src.data.models module
 from src.data.database import DBManager  # Asumiendo que DBManager está definido aquí
 
 # --- Helper Functions for Input Sections ---
@@ -93,7 +93,8 @@ def _mostrar_material(datos: Dict[str, Any], es_manga: bool, materiales: List[An
     # No acceder a st.session_state.db aquí
 
     if es_manga:
-        materiales_filtrados = [m for m in materiales if m.id in [17, 18]] # IDs específicos para manga
+        # Updated IDs for manga materials (e.g., PVC, PETG)
+        materiales_filtrados = [m for m in materiales if m.id in [13, 14]] 
     else:
         materiales_filtrados = materiales # Todos los materiales para otros productos
 
@@ -121,6 +122,74 @@ def _mostrar_material(datos: Dict[str, Any], es_manga: bool, materiales: List[An
         datos['material_id'] = None
         st.session_state["material_id"] = None
         st.warning("Por favor seleccione un material.")
+
+
+def _mostrar_adhesivo(datos: Dict[str, Any], adhesivos: List[Any]):
+    """
+    Muestra el selector de adhesivo.
+
+    Args:
+        datos: Diccionario para almacenar los datos del formulario.
+        adhesivos: Lista completa de objetos de adhesivo.
+    """
+    st.subheader("Adhesivo")
+
+    if not adhesivos:
+        # If the DB call returned an empty list for this material, it means NO adhesives apply (not even 'Sin Adhesivo')
+        st.info("Este material no requiere/utiliza adhesivo.") # Changed warning to info
+        datos['adhesivo_id'] = None # Ensure it's None if no options
+        # Clear session state if it existed from a previous material
+        if "adhesivo_id" in st.session_state:
+            st.session_state["adhesivo_id"] = None
+        return
+
+    # Build options. Include "Seleccione..." ONLY if there's more than one actual adhesive option.
+    opciones_adhesivo = [(ad.id, ad.tipo) for ad in adhesivos]
+    include_select_option = len(opciones_adhesivo) > 1
+    display_options = [(None, "Seleccione...")] + opciones_adhesivo if include_select_option else opciones_adhesivo
+    
+    # Determine default selection/index
+    selected_adhesivo_id = st.session_state.get("adhesivo_id", None)
+    default_index = 0
+    if len(opciones_adhesivo) == 1:
+        # If only one adhesive is valid, default to it
+        selected_adhesivo_id = opciones_adhesivo[0][0]
+        st.session_state["adhesivo_id"] = selected_adhesivo_id # Pre-set state
+        default_index = 0 # Index within display_options (which only has the one option)
+    elif include_select_option:
+        # If multiple options, find the index of the previously selected one, default to "Seleccione..."
+        try:
+            default_index = next(i for i, (id, _) in enumerate(display_options) if id == selected_adhesivo_id)
+        except StopIteration:
+            default_index = 0 # Default to "Seleccione..."
+    
+    # Determine if the selectbox should be disabled (only one option)
+    is_disabled = len(opciones_adhesivo) == 1
+
+    selected_option = st.selectbox(
+        "Seleccione el Adhesivo",
+        options=display_options,
+        format_func=lambda opt: opt[1], # Mostrar el tipo/nombre
+        key="adhesivo_select",
+        index=default_index,
+        help="Seleccione el adhesivo compatible con el material.",
+        disabled=is_disabled
+    )
+
+    # Get the actual selected ID (might be None if "Seleccione..." was chosen)
+    actual_selected_id = selected_option[0] if not is_disabled else selected_adhesivo_id
+
+    datos['adhesivo_id'] = actual_selected_id
+    # Update session state only if the selection changed
+    if st.session_state.get("adhesivo_id") != actual_selected_id:
+        st.session_state["adhesivo_id"] = actual_selected_id
+        # Rerun might be needed if adhesive choice affects other calculations dynamically
+        # st.rerun() 
+
+    # Refined Validation Warning:
+    # Warn only if "Seleccione..." is the current selection AND there were multiple actual options to choose from.
+    if actual_selected_id is None and include_select_option:
+        st.warning("Debe seleccionar un adhesivo de la lista.")
 
 
 def _mostrar_acabados_y_empaque(datos: Dict[str, Any], es_manga: bool, tipos_grafado: List[Any], acabados: List[Any]):
@@ -321,6 +390,7 @@ def mostrar_formulario_producto(cliente: Optional[Cliente] = None) -> Dict[str, 
     - El tipo de producto ya fue seleccionado y está en st.session_state['tipo_producto_seleccionado'].
     - El rol del usuario está en st.session_state['usuario_rol'].
     - Una instancia de DBManager está en st.session_state.db.
+    - Los adhesivos están cargados en st.session_state.initial_data['adhesivos'] (o similar)
 
     Args:
         cliente: Cliente seleccionado (Opcional, actualmente no se usa directamente aquí).
@@ -365,7 +435,31 @@ def mostrar_formulario_producto(cliente: Optional[Cliente] = None) -> Dict[str, 
     _mostrar_dimensiones_y_tintas(datos_producto, es_manga)
     st.divider()
     _mostrar_material(datos_producto, es_manga, todos_materiales)
-    st.divider()
+    
+    # --- Obtener Adhesivos Compatibles (si aplica) ---
+    adhesivos_compatibles = []
+    selected_material_id = datos_producto.get('material_id') # Get selected material ID
+    
+    if not es_manga and selected_material_id is not None:
+        try:
+            print(f"--- DEBUG: Fetching compatible adhesives for material ID: {selected_material_id} ---")
+            adhesivos_compatibles = db.get_adhesivos_for_material(selected_material_id)
+            print(f"--- DEBUG: Compatible adhesives found: {len(adhesivos_compatibles)} ---")
+        except Exception as e:
+            st.error(f"Error al cargar adhesivos compatibles para el material seleccionado: {e}")
+            # Handle error appropriately, maybe return {} or show a persistent warning
+    
+    # --- Mostrar Adhesivo solo si NO es manga ---
+    if not es_manga:
+        st.divider() # Separador antes de adhesivo
+        _mostrar_adhesivo(datos_producto, adhesivos_compatibles) # <-- Pass filtered list
+    else:
+        # Asegurar que adhesivo_id sea None si es manga
+        datos_producto['adhesivo_id'] = None
+        if "adhesivo_id" in st.session_state:
+             del st.session_state["adhesivo_id"] # Limpiar estado si se cambió a manga
+
+    st.divider() # Separador después de material/adhesivo
     _mostrar_acabados_y_empaque(datos_producto, es_manga, todos_tipos_grafado, todos_acabados)
     st.divider()
     _mostrar_opciones_adicionales(datos_producto, es_manga) # Pasar es_manga aquí
@@ -382,6 +476,11 @@ def mostrar_formulario_producto(cliente: Optional[Cliente] = None) -> Dict[str, 
     if datos_producto.get('material_id') is None:
          st.warning("Por favor, seleccione un material.")
          # return {} # Descomentar si se requiere material obligatorio aquí
+
+    # --- Validar Adhesivo si es Etiqueta ---
+    if not es_manga and datos_producto.get('adhesivo_id') is None:
+         st.warning("Por favor, seleccione un adhesivo para la etiqueta.")
+         # return {} # Descomentar si se requiere adhesivo obligatorio aquí
 
     if datos_producto.get('forma_pago_id') is None and todas_formas_pago: # <-- Nueva validación
         st.warning("Por favor, seleccione una forma de pago.")

@@ -1,6 +1,10 @@
 from supabase import create_client, Client
 from typing import List, Optional, Dict, Any, Tuple
-from model_classes.cotizacion_model import Cotizacion, Material, Acabado, Cliente, Comercial, Escala, ReferenciaCliente, TipoProducto, PrecioEscala, TipoGrafado, EstadoCotizacion, MotivoRechazo, FormaPago
+from src.data.models import (
+    Cotizacion, Material, Acabado, Cliente, Comercial, Escala, ReferenciaCliente,
+    TipoProducto, PrecioEscala, TipoGrafado, EstadoCotizacion, MotivoRechazo,
+    FormaPago, Adhesivo, MaterialAdhesivo, PoliticasEntrega
+)
 import os
 import logging
 from dotenv import load_dotenv
@@ -2365,3 +2369,118 @@ class DBManager:
         except Exception as e:
             print(f"Error obteniendo referencias: {str(e)}")
             return []
+
+    # --- New Methods ---
+
+    def get_adhesivos(self) -> List[Adhesivo]:
+        """Obtiene todos los adhesivos disponibles."""
+        def _operation():
+            try:
+                # ADD DEBUG LOGGING HERE
+                print("--- DEBUG: Inside get_adhesivos._operation ---")
+                response = self.supabase.table('adhesivos').select('*').execute()
+                # ADD MORE DEBUG LOGGING HERE
+                print(f"--- DEBUG: Raw response from adhesivos: {response.data}")
+                if response.data:
+                    # Assuming Adhesivo model exists and matches table structure
+                    adhesivos_list = [Adhesivo(**data) for data in response.data]
+                    print(f"--- DEBUG: Parsed Adhesivos list: {adhesivos_list}") # Log the parsed list
+                    return adhesivos_list
+                print("--- DEBUG: No data found in adhesivos response.")
+                return []
+            except Exception as e:
+                print(f"--- DEBUG: Exception in get_adhesivos._operation: {e}") # Log exception
+                print(f"Error fetching adhesivos: {e}")
+                logging.error(f"Error fetching adhesivos: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = self._retry_operation("fetching adhesivos", _operation)
+        print(f"--- DEBUG: Final result from get_adhesivos (after retry): {result}") # Log final result
+        return result if result is not None else []
+
+    def get_material_adhesivo_valor(self, material_id: int, adhesivo_id: int) -> Optional[float]:
+        """
+        Obtiene el valor (precio) de la combinación específica de material y adhesivo.
+
+        Args:
+            material_id: ID del material.
+            adhesivo_id: ID del adhesivo.
+
+        Returns:
+            El valor como float si se encuentra, None en caso contrario o si hay error.
+        """
+        def _operation():
+            try:
+                print(f"Querying material_adhesivo for material_id={material_id}, adhesivo_id={adhesivo_id}")
+                # Corrected query chaining without backslashes
+                response = (self.supabase.table('material_adhesivo')
+                    .select('valor')
+                    .eq('material_id', material_id)
+                    .eq('adhesivo_id', adhesivo_id)
+                    .limit(1)
+                    .execute())
+
+                if response.data:
+                    valor = response.data[0].get('valor')
+                    print(f"Found valor: {valor}")
+                    # Ensure conversion to float handles potential DB types
+                    return float(valor) if valor is not None else None
+                else:
+                    print("No matching material_adhesivo found.")
+                    return None # No combination found
+            except Exception as e:
+                print(f"Error fetching material_adhesivo valor: {e}")
+                logging.error(f"Error fetching material_adhesivo valor for material={material_id}, adhesivo={adhesivo_id}: {e}", exc_info=True)
+                # Return None on error to allow retry or indicate failure
+                return None
+
+        # Retry the operation
+        result = self._retry_operation(f"fetching material_adhesivo valor ({material_id}/{adhesivo_id})", _operation)
+        # Return the result (float or None if not found/error after retries)
+        return result
+
+    def get_adhesivos_for_material(self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+
+        Args:
+            material_id: ID del material.
+
+        Returns:
+            Lista de objetos Adhesivo compatibles.
+        """
+        if material_id is None:
+            return []
+
+        def _operation():
+            try:
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') # Select all columns from the joined adhesivos table
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        if adhesivo_data:
+                            try:
+                                # REMOVED: Ensure 'Sin adhesivo' is not included in the selectable options for etiquetas
+                                # if adhesivo_data.get('tipo') != 'Sin adhesivo': 
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"Error creating Adhesivo object from data: {adhesivo_data}, Error: {te}")
+                
+                print(f"--- DEBUG: Found {len(adhesivos_compatibles)} compatible adhesivos for material {material_id}")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"Error fetching compatible adhesivos for material {material_id}: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        return result if result is not None else []
+
+    # --- End New Methods ---
