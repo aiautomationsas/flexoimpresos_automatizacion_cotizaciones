@@ -462,6 +462,47 @@ def mostrar_formulario_producto(cliente: Optional[Cliente] = None) -> Dict[str, 
     st.divider() # Separador después de material/adhesivo
     _mostrar_acabados_y_empaque(datos_producto, es_manga, todos_tipos_grafado, todos_acabados)
     st.divider()
+
+    # --- OBTENER material_adhesivo_id --- 
+    # Después de obtener material_id y adhesivo_id (si aplica)
+    material_id = datos_producto.get('material_id')
+    adhesivo_id = datos_producto.get('adhesivo_id') # Será None si es manga
+    datos_producto['material_adhesivo_id'] = None # Inicializar
+
+    if material_id is not None and adhesivo_id is not None:
+        try:
+            print(f"Buscando ID de material_adhesivo para material {material_id} y adhesivo {adhesivo_id}")
+            entry = db.get_material_adhesivo_entry(material_id, adhesivo_id)
+            if entry and 'id' in entry:
+                datos_producto['material_adhesivo_id'] = entry['id']
+                print(f"Encontrado material_adhesivo_id: {entry['id']}")
+            else:
+                print(f"Advertencia: No se encontró entrada en material_adhesivo para la combinación {material_id} / {adhesivo_id}")
+                # Mantener material_adhesivo_id como None, puede que se valide después
+        except Exception as e_lookup:
+            print(f"Error buscando material_adhesivo_id: {e_lookup}")
+            # Mantener como None y posiblemente mostrar error
+            st.warning("Error al determinar la combinación material-adhesivo.")
+    elif material_id is not None and es_manga: # Caso específico para manga (sin adhesivo)
+        # Asumiendo que hay una entrada para material + "sin adhesivo" ID
+        ID_SIN_ADHESIVO = 4 # Reconfirmar este ID
+        try:
+            print(f"Buscando ID de material_adhesivo para MANGA material {material_id} (Adhesivo={ID_SIN_ADHESIVO})")
+            entry = db.get_material_adhesivo_entry(material_id, ID_SIN_ADHESIVO)
+            if entry and 'id' in entry:
+                datos_producto['material_adhesivo_id'] = entry['id']
+                print(f"Encontrado material_adhesivo_id para manga: {entry['id']}")
+            else:
+                print(f"Advertencia: No se encontró entrada en material_adhesivo para MANGA {material_id} / Sin Adhesivo ({ID_SIN_ADHESIVO})")
+        except Exception as e_lookup_manga:
+            print(f"Error buscando material_adhesivo_id para manga: {e_lookup_manga}")
+            st.warning("Error al determinar la combinación material-adhesivo para manga.")
+            
+    # Eliminar las claves intermedias si ya no se necesitan fuera
+    # datos_producto.pop('material_id', None)
+    # datos_producto.pop('adhesivo_id', None)
+    # ----------------------------------
+
     _mostrar_opciones_adicionales(datos_producto, es_manga) # Pasar es_manga aquí
     st.divider() # <-- Nuevo divisor
     _mostrar_formas_pago(datos_producto, todas_formas_pago) # <-- Llamada a la nueva función

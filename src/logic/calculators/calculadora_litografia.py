@@ -324,7 +324,8 @@ class CalculadoraLitografia(CalculadoraBase):
 
     def calcular_valor_troquel(self, datos: DatosLitografia, repeticiones: int, 
                             valor_mm: float = 100, troquel_existe: bool = False, 
-                            tipo_grafado_id: Optional[int] = None) -> Dict:
+                            tipo_grafado_id: Optional[int] = None, 
+                            es_manga: bool = False) -> Dict:
         """
         Calcula el valor del troquel según el tipo de producto y grafado ID.
         Para mangas:
@@ -342,7 +343,7 @@ class CalculadoraLitografia(CalculadoraBase):
             # Debug inicial
             print("\n=== INICIO CÁLCULO TROQUEL ===")
             print(f"Tipo grafado ID recibido: {tipo_grafado_id}")
-            print(f"Es manga: {hasattr(datos, 'tipo_grafado')}")
+            print(f"Es manga: {es_manga}")
             print(f"Ancho: {datos.ancho}, Avance: {datos.avance}, Pistas: {datos.pistas}")
             print(f"Repeticiones: {repeticiones}, Valor_mm: {valor_mm}")
             
@@ -352,8 +353,6 @@ class CalculadoraLitografia(CalculadoraBase):
             valor_calculado = max(VALOR_MINIMO, valor_base)
             
             # Determinar si es manga y el factor de división
-            es_manga = hasattr(datos, 'tipo_grafado') and datos.tipo_grafado is not None
-            
             if es_manga:
                 # Lógica específica para mangas usando ID
                 # Si tipo_grafado_id es 4 (Horizontal Total + Vertical), factor_division = 1
@@ -589,7 +588,8 @@ class CalculadoraLitografia(CalculadoraBase):
                 resultado['valor_troquel'] = self.calcular_valor_troquel(
                     datos,
                     mejor_opcion.repeticiones,
-                    troquel_existe=datos.troquel_existe
+                    troquel_existe=datos.troquel_existe,
+                    es_manga=es_manga
                 )
             
             # Cálculo de área de etiqueta
@@ -728,7 +728,8 @@ class CalculadoraLitografia(CalculadoraBase):
                 calculo_troquel = self.calcular_valor_troquel(
                     datos=datos,
                     repeticiones=mejor_opcion.get("repeticiones"),
-                    troquel_existe=datos.troquel_existe
+                    troquel_existe=datos.troquel_existe,
+                    es_manga=es_manga
                 )
                 debug_info["calculos_intermedios"]["valor_troquel"] = {
                     "valor": calculo_troquel.get("valor"),

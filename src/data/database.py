@@ -1,22 +1,15 @@
 from supabase import create_client, Client
 from typing import List, Optional, Dict, Any, Tuple
 from src.data.models import (
-    Cotizacion, Material, Acabado, Cliente, Comercial, Escala, ReferenciaCliente,
+    Cotizacion, Material, Acabado, Cliente, Escala, ReferenciaCliente,
     TipoProducto, PrecioEscala, TipoGrafado, EstadoCotizacion, MotivoRechazo,
-    FormaPago, Adhesivo, MaterialAdhesivo, PoliticasEntrega
+    FormaPago, Adhesivo
 )
 import os
 import logging
-from dotenv import load_dotenv
 from datetime import datetime
 import streamlit as st
-import math
-import sqlite3
 import traceback
-import re
-import json
-import sys
-import io
 import postgrest
 import httpx
 import time
@@ -34,17 +27,15 @@ class DBManager:
         es_manga = "MANGA" in tipo_producto.upper()
         tipo = "MT" if es_manga else "ET"  # Usar MT para mangas, ET para etiquetas
         
-        # 2. Código de material ya viene como parámetro
-        if material_code and '-' in material_code:
-            material_code = material_code.split('-')[0].strip()
+
         
-        # 3. Formato ancho x avance
+
         dimensiones = f"{ancho:.0f}x{avance:.0f}"
         
-        # 4. Número de tintas
+     
         tintas = f"{num_tintas}T"
         
-        # 7. Cliente (nombre completo, eliminando texto entre paréntesis)
+
         cliente_limpio = cliente.split('(')[0].strip().upper() if cliente else ""
         
         # 8. Referencia (descripción completa, eliminando texto entre paréntesis)
@@ -189,92 +180,38 @@ class DBManager:
         
         return new_dict
 
-    def obtener_proximo_consecutivo(self, tipo_documento: str = "COTIZACION") -> Optional[int]:
-        """
-        Obtiene el próximo número consecutivo para un tipo de documento.
-        Para COTIZACION, usa la función RPC dedicada get_next_cotizacion_sequence_value.
-        
-        Args:
-            tipo_documento (str): Tipo de documento.
-        
-        Returns:
-            Optional[int]: El próximo número consecutivo o None si hay error.
-        """
-        try:
-            # Validar el tipo de documento
-            if not tipo_documento or not isinstance(tipo_documento, str):
-                raise ValueError("Tipo de documento inválido")
-            
-            print(f"\n=== OBTENIENDO CONSECUTIVO PARA {tipo_documento} ===")
-            
-            # Usar la nueva RPC específica para cotizaciones
-            if tipo_documento.upper() == "COTIZACION":
-                print("Usando RPC get_next_cotizacion_sequence_value...")
-                response = self.supabase.rpc('get_next_cotizacion_sequence_value').execute()
-            else:
-                # Mantener la lógica original para otros tipos de documento (si existen)
-                # O podrías crear RPCs específicas para ellos también
-                print(f"Usando RPC obtener_proximo_consecutivo para tipo: {tipo_documento}...")
-            response = self.supabase.rpc(
-                'obtener_proximo_consecutivo', 
-                {'p_tipo_documento': tipo_documento}
-            ).execute()
-            
-            # Procesar respuesta
-            if response is None or not hasattr(response, 'data'):
-                 print(f"Error: La respuesta de Supabase RPC fue inválida para {tipo_documento}.")
-                 return None
-
-            consecutivo = response.data
-            print(f"Consecutivo obtenido de RPC: {consecutivo}")
-            
-            # Validar que el consecutivo sea un número entero positivo o None
-            if consecutivo is not None and (not isinstance(consecutivo, int) or consecutivo <= 0):
-                print(f"Advertencia: Consecutivo inválido generado por RPC: {consecutivo}. Revisar función RPC.")
-                return None # Devolver None si la RPC da un valor inválido
-            elif consecutivo is None:
-                 print(f"Error: La función RPC no devolvió un consecutivo para {tipo_documento}.")
-                 return None
-            
-            print(f"=== CONSECUTIVO GENERADO: {consecutivo} ===\n")
-            return consecutivo
-        
-        except Exception as e:
-            # Registrar el error para depuración
-            error_msg = f"Error general al obtener consecutivo para {tipo_documento}: {str(e)}"
-            print(error_msg)
-            logging.error(error_msg)
-            # Devolver None en caso de error general
-            return None
-
-    def get_next_numero_cotizacion(self) -> int:
-        """Obtiene el siguiente número de cotización disponible."""
-        try:
-            # Llamamos directamente a la función RPC
-            response = self.supabase.rpc('get_next_cotizacion_sequence_value').execute()
-            
-            if not hasattr(response, 'data'):
-                print("Error: API response missing 'data' attribute in get_next_numero_cotizacion")
-                return None
-                
-            if response.data is not None:
-                return response.data
-            else:
-                print("Error: Función RPC retornó None")
-                return None
-            
-        except Exception as e:
-            print(f"Error general al obtener el siguiente número de cotización: {str(e)}")
-            return None
 
     def crear_cotizacion(self, datos_cotizacion):
         """Crea una nueva cotización."""
         def _operation():
             # 1. Preparar datos iniciales (sin identificador ni número de cotización predefinido)
-            print("\\nPreparando datos iniciales para la inserción...")
+            print("\\\\nPreparando datos iniciales para la inserción...")
             # Eliminar campos que asignará la BD o que se usarán después
+            datos_cotizacion.pop('id', None) # <-- AÑADIR ESTA LÍNEA
             datos_cotizacion.pop('identificador', None)
             datos_cotizacion.pop('numero_cotizacion', None)
+            # --- FIX: Remove datetime fields before sending to JSON/RPC ---
+            datos_cotizacion.pop('fecha_creacion', None)
+            datos_cotizacion.pop('ultima_modificacion_inputs', None)
+            datos_cotizacion.pop('actualizado_en', None) # Remove if it exists too
+            # --- Eliminar otros campos no necesarios para la RPC ---
+            datos_cotizacion.pop('id_usuario', None) # SQL usa auth.uid()
+            datos_cotizacion.pop('id_motivo_rechazo', None) # No aplica en creación
+            datos_cotizacion.pop('modificado_por', None) # No aplica en creación
+            datos_cotizacion.pop('colores_tinta', None) # Campo de modelo
+            datos_cotizacion.pop('politicas_entrega_id', None) # Ya no existe
+            datos_cotizacion.pop('material_adhesivo', None) # Objeto relacional
+            datos_cotizacion.pop('politicas_entrega', None) # Objeto relacional
+            datos_cotizacion.pop('estado_id', None) # SQL lo asigna a 1
+            datos_cotizacion.pop('cliente', None) # Eliminar objetos relacionales si existen
+            datos_cotizacion.pop('referencia_cliente', None)
+            datos_cotizacion.pop('material', None)
+            datos_cotizacion.pop('acabado', None)
+            datos_cotizacion.pop('tipo_producto', None)
+            datos_cotizacion.pop('forma_pago', None)
+            datos_cotizacion.pop('perfil_comercial_info', None)
+            datos_cotizacion.pop('tipo_grafado', None)
+            # ---------------------------------------------------------
 
             # Convertir valores Decimal a float para JSON si es necesario
             for key in ['valor_troquel', 'valor_plancha_separado']:
@@ -337,14 +274,30 @@ class DBManager:
             # 3. Obtener datos necesarios para generar el identificador (ya que no estaban en cotizacion_creada_data)
             print("\\nObteniendo datos adicionales para generar el identificador final...")
             try:
-                tipo_producto = "MANGA" if datos_cotizacion.get('es_manga') else "ETIQUETA"
-                material_code = self.get_material_code(datos_cotizacion.get('material_id'))
-                acabado_code = self.get_acabado_code(datos_cotizacion.get('acabado_id')) if not datos_cotizacion.get('es_manga') else ""
+                # Obtener IDs finales desde la respuesta de la RPC
+                material_adhesivo_id_final = cotizacion_creada_data.get('material_adhesivo_id')
+                acabado_id_final = cotizacion_creada_data.get('acabado_id')
+                referencia_id_final = cotizacion_creada_data.get('referencia_cliente_id')
+                tipo_producto_id_final = cotizacion_creada_data.get('tipo_producto_id') # Asumiendo que lo devuelve la RPC
+                es_manga_final = cotizacion_creada_data.get('es_manga', False) # Asumiendo que lo devuelve la RPC
+
+                # Determinar tipo de producto
+                # TODO: Obtener nombre de tipo_producto basado en tipo_producto_id_final si es necesario
+                tipo_producto_nombre = "MANGA" if es_manga_final else "ETIQUETA" 
+
+                # --- Obtener el código del material directamente desde material_adhesivo --- 
+                # material_id_final = self.get_material_id_from_material_adhesivo(material_adhesivo_id_final) if material_adhesivo_id_final else None
+                # material_code = self.get_material_code(material_id_final) if material_id_final else ""
+                material_code = self.get_material_adhesivo_code(material_adhesivo_id_final) if material_adhesivo_id_final else ""
+                # --------------------------------------------------------------------------
                 
-                referencia = self.get_referencia_cliente(datos_cotizacion.get('referencia_cliente_id'))
+                # Obtener código de acabado (solo si no es manga)
+                acabado_code = self.get_acabado_code(acabado_id_final) if not es_manga_final and acabado_id_final else ""
+                
+                # Obtener referencia y cliente usando el ID final
+                referencia = self.get_referencia_cliente(referencia_id_final) if referencia_id_final else None
                 if not referencia:
-                    # Esto no debería pasar si la inserción fue exitosa, pero por seguridad
-                    raise ValueError(f"No se encontró la referencia {datos_cotizacion.get('referencia_cliente_id')} después de crear cotización")
+                    raise ValueError(f"No se encontró la referencia {referencia_id_final} después de crear cotización")
                 
                 cliente = referencia.cliente
                 if not cliente:
@@ -362,17 +315,24 @@ class DBManager:
             print(f"\\nGenerando identificador con número final {numero_cotizacion_final}...")
             identificador_final = ""
             try:
+                # Obtener otros datos necesarios del diccionario original o de la respuesta RPC
+                ancho = datos_cotizacion.get('ancho', cotizacion_creada_data.get('ancho', 0))
+                avance = datos_cotizacion.get('avance', cotizacion_creada_data.get('avance', 0))
+                num_pistas = datos_cotizacion.get('numero_pistas', cotizacion_creada_data.get('numero_pistas', 1))
+                num_tintas = datos_cotizacion.get('num_tintas', cotizacion_creada_data.get('num_tintas', 0))
+                num_paquetes_rollos = datos_cotizacion.get('num_paquetes_rollos', cotizacion_creada_data.get('num_paquetes_rollos', 0))
+
                 identificador_final = self._generar_identificador(
-                    tipo_producto=tipo_producto,
-                    material_code=material_code,
-                    ancho=datos_cotizacion.get('ancho', 0),
-                    avance=datos_cotizacion.get('avance', 0),
-                    num_pistas=datos_cotizacion.get('numero_pistas', 1),
-                    num_tintas=datos_cotizacion.get('num_tintas', 0),
-                    acabado_code=acabado_code,
-                    num_paquetes_rollos=datos_cotizacion.get('num_paquetes_rollos', 0),
-                    cliente=cliente_nombre,
-                    referencia=referencia_descripcion,
+                    tipo_producto=tipo_producto_nombre,
+                    material_code=material_code, # Usar código correcto
+                    ancho=ancho,
+                    avance=avance,
+                    num_pistas=num_pistas,
+                    num_tintas=num_tintas,
+                    acabado_code=acabado_code, # Usar código correcto
+                    num_paquetes_rollos=num_paquetes_rollos,
+                    cliente=cliente_nombre, # Usar nombre correcto
+                    referencia=referencia_descripcion, # Usar descripción correcta
                     numero_cotizacion=numero_cotizacion_final # Usar el número final de la BD
                 )
                 print(f"Identificador final generado: {identificador_final}")
@@ -380,7 +340,10 @@ class DBManager:
                 print(f"Error generando identificador final: {e}")
                 # Decidir qué hacer: continuar sin identificador o fallar?
                 # Por ahora, continuamos pero registramos el error. El campo será "" o el valor por defecto.
-                st.warning(f"No se pudo generar el identificador para la cotización {cotizacion_id}. Error: {e}")
+                # Loguear la advertencia en lugar de usar st.warning directamente en backend
+                logging.warning(f"No se pudo generar el identificador para la cotización {cotizacion_id}. Error: {e}", exc_info=True)
+                # Considerar lanzar una excepción específica si la generación del ID es crítica
+                # raise IdentificadorGenerationError(f"Fallo al generar identificador: {e}") from e
 
 
             # 5. Actualizar la cotización con el identificador generado
@@ -2484,3 +2447,256 @@ class DBManager:
         return result if result is not None else []
 
     # --- End New Methods ---
+
+    def get_referencia_cliente_by_details(self, cliente_id: int, descripcion: str, comercial_id: str) -> Optional[ReferenciaCliente]:
+        """Busca una referencia específica por cliente, descripción y comercial."""
+        def _operation():
+            try:
+                print(f"Buscando referencia: cliente_id={cliente_id}, descripcion='{descripcion}', comercial_id={comercial_id}")
+                response = self.supabase.from_('referencias_cliente') \
+                    .select('*, cliente:clientes(*), perfil:perfiles(*)') \
+                    .eq('cliente_id', cliente_id) \
+                    .eq('descripcion', descripcion) \
+                    .eq('id_usuario', comercial_id) \
+                    .maybe_single() \
+                    .execute()
+
+                if response.data:
+                    print(f"Referencia encontrada: {response.data['id']}")
+                    # Reconstruir el objeto ReferenciaCliente
+                    ref_data = response.data
+                    cliente_data = ref_data.pop('cliente', None)
+                    perfil_data = ref_data.pop('perfil', None)
+                    
+                    ref_obj = ReferenciaCliente(**ref_data)
+                    if cliente_data:
+                        ref_obj.cliente = Cliente(**cliente_data)
+                    if perfil_data:
+                        ref_obj.perfil = perfil_data # Asumiendo que perfil es un Dict
+                        
+                    return ref_obj
+                else:
+                    print("Referencia no encontrada con esos detalles.")
+                    return None
+            except Exception as e:
+                print(f"Error buscando referencia por detalles: {e}")
+                traceback.print_exc()
+                return None # Indicar error
+
+        try:
+            # Nota: No usamos _retry_operation aquí porque un None es un resultado válido (no encontrado)
+            # Si hay un error de conexión, Supabase debería lanzarlo y ser capturado por el llamador
+            return _operation()
+        except Exception as e:
+            # Captura errores inesperados en _operation
+            print(f"Excepción final buscando referencia por detalles: {e}")
+            return None
+
+    # --- NUEVO MÉTODO ---
+    def get_material_adhesivo_entry(self, material_id: int, adhesivo_id: int) -> Optional[Dict]:
+        """
+        Obtiene la fila completa de la tabla material_adhesivo para una combinación específica.
+
+        Args:
+            material_id: ID del material.
+            adhesivo_id: ID del adhesivo.
+
+        Returns:
+            Un diccionario representando la fila encontrada (incluyendo su 'id') o None si no se encuentra o hay error.
+        """
+        def _operation():
+            if material_id is None or adhesivo_id is None:
+                print("Error: material_id y adhesivo_id son requeridos para get_material_adhesivo_entry")
+                return None
+            try:
+                print(f"Querying material_adhesivo for entry: material_id={material_id}, adhesivo_id={adhesivo_id}")
+                response = (self.supabase.table('material_adhesivo')
+                    .select('*') # Seleccionar todas las columnas, incluyendo el 'id' de esta tabla
+                    .eq('material_id', material_id)
+                    .eq('adhesivo_id', adhesivo_id)
+                    .limit(1)
+                    .execute())
+
+                if response.data:
+                    entry = response.data[0]
+                    print(f"Found material_adhesivo entry: {entry}")
+                    return entry
+                else:
+                    print("No matching material_adhesivo entry found.")
+                    return None # No combination found
+            except Exception as e:
+                print(f"Error fetching material_adhesivo entry: {e}")
+                logging.error(f"Error fetching material_adhesivo entry for material={material_id}, adhesivo={adhesivo_id}: {e}", exc_info=True)
+                return None # Return None on error to allow retry or indicate failure
+
+        # Retry the operation
+        result = self._retry_operation(f"fetching material_adhesivo entry ({material_id}/{adhesivo_id})", _operation)
+        return result
+    # --- FIN NUEVO MÉTODO ---
+
+    def get_adhesivos_for_material(self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+
+        Args:
+            material_id: ID del material.
+
+        Returns:
+            Lista de objetos Adhesivo compatibles.
+        """
+        if material_id is None:
+            return []
+
+        def _operation():
+            try:
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') # Select all columns from the joined adhesivos table
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        if adhesivo_data:
+                            try:
+                                # REMOVED: Ensure 'Sin adhesivo' is not included in the selectable options for etiquetas
+                                # if adhesivo_data.get('tipo') != 'Sin adhesivo': 
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"Error creating Adhesivo object from data: {adhesivo_data}, Error: {te}")
+                
+                print(f"--- DEBUG: Found {len(adhesivos_compatibles)} compatible adhesivos for material {material_id}")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"Error fetching compatible adhesivos for material {material_id}: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        return result if result is not None else []
+
+    # --- NUEVO MÉTODO HELPER ---
+    def get_material_id_from_material_adhesivo(self, material_adhesivo_id: int) -> Optional[int]:
+        """
+        Obtiene el material_id asociado a una entrada específica en la tabla material_adhesivo.
+
+        Args:
+            material_adhesivo_id: El ID de la fila en la tabla material_adhesivo.
+
+        Returns:
+            El material_id (int) asociado, o None si no se encuentra o hay error.
+        """
+        def _operation():
+            if material_adhesivo_id is None:
+                print("Error: material_adhesivo_id es requerido para get_material_id_from_material_adhesivo")
+                return None
+            try:
+                # print(f"Querying material_adhesivo for material_id: entry_id={material_adhesivo_id}") # Optional debug
+                response = (self.supabase.table('material_adhesivo')
+                    .select('material_id')
+                    .eq('id', material_adhesivo_id)
+                    .limit(1)
+                    .maybe_single() # Use maybe_single as it should be unique
+                    .execute())
+
+                # maybe_single returns the dict directly if found, or None
+                if response.data:
+                    mat_id = response.data.get('material_id')
+                    # print(f"Found material_id: {mat_id}") # Optional debug
+                    return mat_id
+                else:
+                    print(f"No material_adhesivo entry found with id {material_adhesivo_id}.")
+                    return None
+            except Exception as e:
+                print(f"Error fetching material_id from material_adhesivo: {e}")
+                logging.error(f"Error fetching material_id for material_adhesivo_id={material_adhesivo_id}: {e}", exc_info=True)
+                return None
+
+        # No usamos retry aquí porque None es un resultado esperado si el ID no existe.
+        try:
+             return _operation()
+        except Exception as e:
+             print(f"Excepción final en get_material_id_from_material_adhesivo: {e}")
+             return None
+    # --- FIN NUEVO MÉTODO HELPER ---
+
+    # --- NUEVO MÉTODO PARA CÓDIGO DE MATERIAL_ADHESIVO ---
+    def get_material_adhesivo_code(self, material_adhesivo_id: int) -> str:
+        """
+        Obtiene el código directamente desde la tabla material_adhesivo usando su ID.
+        Se asume que la columna 'code' existe en 'material_adhesivo'.
+
+        Args:
+            material_adhesivo_id: El ID de la fila en la tabla material_adhesivo.
+
+        Returns:
+            El código (str) asociado, o una cadena vacía si no se encuentra o hay error.
+        """
+        if material_adhesivo_id is None:
+            return ""
+        try:
+            response = (self.supabase.table('material_adhesivo')
+                .select('code') # Seleccionar la columna 'code' directamente
+                .eq('id', material_adhesivo_id)
+                .limit(1)
+                .maybe_single()
+                .execute())
+
+            if response.data and response.data.get('code'):
+                return response.data['code']
+            else:
+                print(f"Advertencia: No se encontró código para material_adhesivo_id {material_adhesivo_id}.")
+                return ""
+        except Exception as e:
+            print(f"Error fetching code from material_adhesivo: {e}")
+            logging.error(f"Error fetching code for material_adhesivo_id={material_adhesivo_id}: {e}", exc_info=True)
+            return ""
+    # --- FIN NUEVO MÉTODO ---
+
+    def get_adhesivos_for_material(self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+
+        Args:
+            material_id: ID del material.
+
+        Returns:
+            Lista de objetos Adhesivo compatibles.
+        """
+        if material_id is None:
+            return []
+
+        def _operation():
+            try:
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') # Select all columns from the joined adhesivos table
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        if adhesivo_data:
+                            try:
+                                # REMOVED: Ensure 'Sin adhesivo' is not included in the selectable options for etiquetas
+                                # if adhesivo_data.get('tipo') != 'Sin adhesivo': 
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"Error creating Adhesivo object from data: {adhesivo_data}, Error: {te}")
+                
+                print(f"--- DEBUG: Found {len(adhesivos_compatibles)} compatible adhesivos for material {material_id}")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"Error fetching compatible adhesivos for material {material_id}: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        return result if result is not None else []
+    # --- END NEW METHOD ---

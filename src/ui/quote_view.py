@@ -6,11 +6,12 @@ import tempfile
 from decimal import Decimal
 
 from src.logic.report_generator import generar_informe_tecnico
-from src.logic.calculation_helpers import (
-    generar_tabla_resultados,
-    calcular_totales_cotizacion,
-    formatear_moneda
-)
+# --- Temporarily removed import as the module doesn't exist yet ---
+# from src.logic.calculation_helpers import (
+#     generar_tabla_resultados,
+#     calcular_totales_cotizacion,
+#     formatear_moneda
+# )
 from src.pdf.pdf_generator import CotizacionPDF, MaterialesPDF
 
 def show_quote_header(cotizacion_data: Dict) -> None:
@@ -56,7 +57,8 @@ def show_results_table(resultados: List[Dict], es_manga: bool) -> None:
     st.subheader("Resultados por Escala")
     
     # Generar tabla de resultados
-    tabla = generar_tabla_resultados(resultados, es_manga)
+    # tabla = generar_tabla_resultados(resultados, es_manga) # TODO: Uncomment when calculation_helpers exists
+    tabla = pd.DataFrame(resultados) # Placeholder: Display raw data for now
     
     # Aplicar formato condicional
     def highlight_row(row):
@@ -72,12 +74,14 @@ def show_results_table(resultados: List[Dict], es_manga: bool) -> None:
     )
     
     # Mostrar totales
-    totales = calcular_totales_cotizacion(resultados)
+    # totales = calcular_totales_cotizacion(resultados) # TODO: Uncomment when calculation_helpers exists
+    totales = {'mejor_precio_unitario': 0, 'escala_optima': 0, 'margen_promedio': 0} # Placeholder
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric("Mejor Precio Unitario", 
-                 formatear_moneda(totales['mejor_precio_unitario']))
+                 f"${totales['mejor_precio_unitario']:,.2f}") # Placeholder format
+                 # formatear_moneda(totales['mejor_precio_unitario'])) # TODO: Uncomment when calculation_helpers exists
     with col2:
         st.metric("Escala Óptima", 
                  f"{totales['escala_optima']:,}")

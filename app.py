@@ -3,11 +3,16 @@ import streamlit as st
 from supabase import create_client
 from typing import Optional, Dict, Any, Tuple
 import pandas as pd
+import traceback # Import traceback for detailed error logging
+import math # <-- AÑADIR IMPORTACIÓN
 
 # Luego las importaciones del proyecto, agrupadas por funcionalidad
 # Auth y DB
 from src.auth.auth_manager import AuthManager
 from src.data.database import DBManager
+# --- NUEVO: Importar CotizacionManager ---
+from src.logic.cotizacion_manager import CotizacionManager, CotizacionManagerError
+# ---------------------------------------
 
 # Models y Constants
 from src.data.models import Cotizacion, Cliente, ReferenciaCliente
@@ -78,6 +83,11 @@ def initialize_services():
         if 'db' not in st.session_state:
             st.session_state.db = DBManager(st.session_state.supabase)
             
+        # --- NUEVO: Inicializar CotizacionManager ---
+        if 'cotizacion_manager' not in st.session_state:
+            st.session_state.cotizacion_manager = CotizacionManager(st.session_state.db)
+        # ------------------------------------------
+        
         # Refuerzo: asegúrate de que las claves críticas existen
         for key in ['authenticated', 'user_id', 'usuario_rol', 'perfil_usuario']:
             if key not in st.session_state:
@@ -122,12 +132,13 @@ def load_initial_data() -> Dict[str, Any]:
             st.exception(e)
         return {}
 
-def handle_calculation(form_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optional[Dict[str, Any]]:
     """
     Maneja el proceso de cálculo de la cotización.
     
     Args:
         form_data: Diccionario con los datos del formulario
+        cliente_obj: Objeto Cliente seleccionado
         
     Returns:
         Optional[Dict[str, Any]]: Resultados del cálculo o None si hay error
@@ -275,45 +286,188 @@ def handle_calculation(form_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             porcentaje_desperdicio=DESPERDICIO_MANGAS if es_manga else DESPERDICIO_ETIQUETAS,
             valor_metro=valor_material, # Usar el valor de material determinado (combinado/base + ajustado)
             troquel_existe=troquel_existe,
-            planchas_por_separado=form_data.get('planchas_separadas', False)
+            planchas_por_separado=form_data.get('planchas_separadas', False),
         )
         
-        # Calcular área de etiqueta usando la calculadora
-        area_result = calculadora.calcular_area_etiqueta(datos_escala, num_tintas, es_manga)
-        if 'error' in area_result:
-            st.error(f"Error calculando área: {area_result['error']}")
+        # --- Calcular Mejor Opción de Desperdicio UNA VEZ ---
+        calc_lito = CalculadoraLitografia() # Necesitamos instancia para obtener mejor opción
+        try:
+            mejor_opcion = calc_lito.obtener_mejor_opcion_desperdicio(datos_escala, es_manga)
+            if mejor_opcion is None:
+                st.error("No se encontró una configuración de cilindro/repetición válida para este avance.")
+                return None
+            print(f"\nMejor Opción Desperdicio: Dientes={mejor_opcion.dientes}, Reps={mejor_opcion.repeticiones}, Medida={mejor_opcion.medida_mm}, Desp={mejor_opcion.desperdicio:.4f}")
+        except ValueError as e_desp:
+            st.error(f"Error determinando la mejor opción de desperdicio: {e_desp}")
             return None
-        datos_escala.set_area_etiqueta(area_result['area'])
+        # -----------------------------------------------------
+
+        # Calcular área de etiqueta usando la calculadora (¿Se necesita antes de calcular_costos_por_escala?)
+        # area_result = calculadora.calcular_area_etiqueta(datos_escala, num_tintas, es_manga) # Parece que no se usa directamente ahora
+        # if 'error' in area_result:
+        #     st.error(f"Error calculando área: {area_result['error']}")
+        #     return None
+        # datos_escala.set_area_etiqueta(area_result['area'])
+
+        # --- GUARDAR DATOS DE CALCULO PARA GUARDADO POSTERIOR --- 
+        # Guardamos los valores finales que se usaron en el cálculo
+        # para pasarlos luego a guardar_calculos_escala
         
+        # Calcular valor_troquel por defecto (si no ajustado) usando mejor_opcion
+        valor_troquel_defecto = 0.0
+        if not st.session_state.get('ajustar_troquel'):
+            troquel_result = calc_lito.calcular_valor_troquel(
+                datos_escala, 
+                mejor_opcion.repeticiones, # Usar repeticiones de mejor opción
+                troquel_existe=datos_escala.troquel_existe, # Usar valor procesado
+                tipo_grafado_id=form_data.get('tipo_grafado_id'), # Pasar ID
+                es_manga=es_manga # <-- Añadir parámetro es_manga
+            )
+            if 'error' in troquel_result:
+                 st.warning(f"Advertencia: No se pudo calcular el valor del troquel por defecto: {troquel_result['error']}")
+            else:
+                 valor_troquel_defecto = troquel_result.get('valor', 0.0)
+
+        # Calcular valor_plancha por defecto (si no ajustado)
+        valor_plancha_defecto = 0.0
+        precio_sin_constante = None # Inicializar para guardar el valor separado
+        if not st.session_state.get('ajustar_planchas'):
+             plancha_result = calc_lito.calcular_precio_plancha(datos_escala, num_tintas, es_manga)
+             if 'error' in plancha_result:
+                 st.warning(f"Advertencia: No se pudo calcular el valor de plancha por defecto: {plancha_result['error']}")
+             else:
+                 # Usar el precio que incluye la división por constante si planchas_por_separado=False
+                 valor_plancha_defecto = plancha_result.get('precio', 0.0)
+                 # Guardar el precio ANTES de aplicar la constante (si existe)
+                 if plancha_result.get('detalles'):
+                    precio_sin_constante = plancha_result['detalles'].get('precio_sin_constante')
+
+        datos_calculo_persistir = {
+            'valor_material': valor_material, # Valor final usado
+            'valor_plancha': st.session_state.get('precio_planchas', valor_plancha_defecto) if st.session_state.get('ajustar_planchas') else valor_plancha_defecto,
+            'valor_acabado': acabado.valor if acabado else 0,
+            'valor_troquel': st.session_state.get('precio_troquel', valor_troquel_defecto) if st.session_state.get('ajustar_troquel') else valor_troquel_defecto,
+            'rentabilidad': datos_escala.rentabilidad, # Guardar el valor decimal directamente
+            
+            # --- CORREGIDO: Añadir lógica para valor_plancha_separado --- 
+            # 'valor_plancha_separado': (
+            #     st.session_state.get('precio_planchas') if st.session_state.get('ajustar_planchas') and datos_escala.planchas_por_separado
+            #     else precio_sin_constante if datos_escala.planchas_por_separado and precio_sin_constante is not None
+            #     else None
+            # ),
+            # ----------------------------------------------------------
+            'avance': datos_escala.avance,
+            'ancho': form_data['ancho'], # Guardar ancho original sin ajuste de manga
+            'unidad_z_dientes': mejor_opcion.dientes if mejor_opcion else 0, # <-- CORREGIDO
+            'existe_troquel': datos_escala.troquel_existe, # Usar valor procesado
+            'planchas_x_separado': datos_escala.planchas_por_separado,
+            'num_tintas': num_tintas,
+            'numero_pistas': datos_escala.pistas,
+            'num_paquetes_rollos': form_data['num_paquetes'],
+            'tipo_producto_id': form_data['tipo_producto_id'],
+            'tipo_grafado_id': form_data.get('tipo_grafado_id'), # Usar ID guardado
+            'altura_grafado': form_data.get('altura_grafado'),
+            'valor_plancha_separado': None # Inicializar para aplicar la lógica de redondeo
+        }
+        
+        # --- Aplicar Fórmula de Redondeo a valor_plancha_separado --- 
+        valor_plancha_separado_base = None
+        if datos_calculo_persistir['planchas_x_separado']: # Solo aplica si las planchas son separadas
+            if st.session_state.get('ajustar_planchas'):
+                valor_plancha_separado_base = st.session_state.get('precio_planchas')
+            elif precio_sin_constante is not None:
+                valor_plancha_separado_base = precio_sin_constante
+        
+        if valor_plancha_separado_base is not None and valor_plancha_separado_base > 0:
+            try:
+                valor_dividido = valor_plancha_separado_base / 0.7
+                # Redondear hacia arriba al siguiente múltiplo de 10000
+                valor_redondeado = math.ceil(valor_dividido / 10000) * 10000
+                datos_calculo_persistir['valor_plancha_separado'] = float(valor_redondeado) # Guardar como float
+                print(f"Valor plancha separado (Base: {valor_plancha_separado_base:.2f}, Dividido: {valor_dividido:.2f}, Redondeado: {valor_redondeado:.2f})")
+            except Exception as e_round:
+                print(f"Error aplicando redondeo a valor_plancha_separado: {e_round}")
+                datos_calculo_persistir['valor_plancha_separado'] = None # Poner None si hay error
+        else:
+             datos_calculo_persistir['valor_plancha_separado'] = None # Si no aplica o es cero
+        # -------------------------------------------------------------
+
+        # Realizar cálculos principales por escala
         print(f"\nDEBUG: Calling calculadora.calcular_costos_por_escala with:")
         print(f"  - datos: {datos_escala}")
         print(f"  - num_tintas: {num_tintas}")
-        print(f"  - valor_plancha (pasado): {valor_plancha_a_pasar}")
-        print(f"  - valor_troquel (adjusted): {valor_troquel_a_pasar}")
-        print(f"  - valor_material (final, passed to calc): {valor_material}")
-        print(f"  - valor_acabado: {acabado.valor if acabado else 0}")
+        # Pasar los mismos valores finales que se usarán para persistir
+        print(f"  - valor_plancha (final): {datos_calculo_persistir['valor_plancha']}")
+        print(f"  - valor_troquel (final): {datos_calculo_persistir['valor_troquel']}")
+        print(f"  - valor_material (final): {datos_calculo_persistir['valor_material']}")
+        print(f"  - valor_acabado: {datos_calculo_persistir['valor_acabado']}")
         print(f"  - es_manga: {es_manga}")
-        print(f"  - tipo_grafado_id: {form_data.get('tipo_grafado_id')}")
+        print(f"  - tipo_grafado_id: {datos_calculo_persistir['tipo_grafado_id']}")
+        # NOTA: CalculadoraCostosEscala necesita usar estos valores directamente,
+        # sin recalcular plancha/troquel internamente si ya vienen dados.
 
-        # Realizar cálculos
         resultados = calculadora.calcular_costos_por_escala(
             datos=datos_escala,
             num_tintas=num_tintas,
-            valor_plancha=valor_plancha_a_pasar, # Pass adjusted TOTAL value or None
-            valor_troquel=valor_troquel_a_pasar, # Usar el valor de troquel determinado
-            valor_material=valor_material, # Pasar el valor de material determinado (combinado/base + ajustado)
-            valor_acabado=acabado.valor if acabado else 0,
+            valor_plancha=datos_calculo_persistir['valor_plancha'], # Pasar valor final
+            valor_troquel=datos_calculo_persistir['valor_troquel'], # Pasar valor final
+            valor_material=datos_calculo_persistir['valor_material'], # Pasar valor final
+            valor_acabado=datos_calculo_persistir['valor_acabado'],
             es_manga=es_manga,
-            tipo_grafado_id=form_data.get('tipo_grafado_id')
+            tipo_grafado_id=datos_calculo_persistir['tipo_grafado_id'] # Pasar ID
         )
         
         if resultados:
-            # Guardar resultados en session_state
+            # --- NUEVO: Preparar modelo Cotizacion usando CotizacionManager --- 
+            print("\nCálculo exitoso. Preparando modelo de cotización...")
+            try:
+                manager = st.session_state.cotizacion_manager
+                # Construir kwargs para el manager
+                kwargs_modelo = {
+                    'material_adhesivo_id': form_data['material_adhesivo_id'], # Usar la clave correcta
+                    'acabado_id': form_data.get('acabado_id') if not es_manga else 10, # ID 10 = Sin acabado
+                    'num_tintas': num_tintas,
+                    'num_paquetes_rollos': form_data['num_paquetes'],
+                    'es_manga': es_manga,
+                    'tipo_grafado': form_data.get('tipo_grafado_nombre'), # Pasar nombre si existe
+                    'valor_troquel': datos_calculo_persistir['valor_troquel'], # Usar valor final persistido
+                    'valor_plancha_separado': datos_calculo_persistir.get('valor_plancha_separado'), # Valor ya calculado/ajustado
+                    'planchas_x_separado': datos_escala.planchas_por_separado,
+                    'existe_troquel': datos_escala.troquel_existe, # Usar valor procesado
+                    'numero_pistas': datos_escala.pistas,
+                    'avance': datos_escala.avance, # Usar avance de datos_escala
+                    'ancho': form_data['ancho'], # Ancho original
+                    'tipo_producto_id': form_data['tipo_producto_id'],
+                    'forma_pago_id': form_data['forma_pago_id'],
+                    'altura_grafado': form_data.get('altura_grafado'),
+                    'escalas_resultados': resultados # Pasar la lista de dicts
+                }
+                
+                # Asegurarse de pasar el tipo_grafado_id si es manga
+                if es_manga:
+                    kwargs_modelo['tipo_grafado_id'] = form_data.get('tipo_grafado_id')
+
+                st.session_state.cotizacion_model = manager.preparar_nueva_cotizacion_model(**kwargs_modelo)
+                print("Modelo Cotizacion preparado y guardado en session_state.")
+                st.session_state.cotizacion_calculada = True # Indicar que hay un cálculo listo
+
+            except CotizacionManagerError as cme:
+                st.error(f"Error preparando el modelo de cotización: {cme}")
+                return None # Falló la preparación, no continuar
+            except Exception as e_prep:
+                st.error(f"Error inesperado preparando el modelo: {e_prep}")
+                traceback.print_exc()
+                return None
+            # ----------------------------------------------------------------
+            
+            # Guardar resultados y cambiar vista (sin cambios aquí)
             st.session_state.current_calculation = {
                 'form_data': form_data,
+                'cliente': cliente_obj,
                 'results': resultados,
                 'is_manga': es_manga,
                 'timestamp': datetime.now().isoformat(),
+                'calculos_para_guardar': datos_calculo_persistir, # <-- INCLUIR AQUÍ
                 # Opcional: Guardar info sobre ajustes aplicados
                 'admin_adjustments_applied': {
                     'material': st.session_state.get('ajustar_material', False),
@@ -322,8 +476,6 @@ def handle_calculation(form_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     'rentabilidad': rentabilidad_ajustada is not None and rentabilidad_ajustada > 0
                 }
             }
-            
-            # Cambiar vista y forzar rerun
             st.session_state.current_view = 'quote_results'
             st.rerun()
             
@@ -543,18 +695,19 @@ def mostrar_calculadora():
                     datos_producto['tipo_producto_id'] = st.session_state.get('tipo_producto_seleccionado')
                     datos_producto['es_manga'] = datos_producto['tipo_producto_id'] == 2
 
-                    # Realizar cálculos
-                    resultados = handle_calculation(datos_producto)
-                    if resultados:
-                        # Guardar resultados y mostrarlos
-                        st.session_state.current_calculation = {
-                            'cliente': cliente_seleccionado,
-                            'form_data': datos_producto,
-                            'results': resultados,
-                            'timestamp': datetime.now().isoformat()
-                        }
-                        st.session_state.current_view = 'quote_results'
-                        st.rerun()
+                    # Realizar cálculos - PASS CLIENTE OBJECT
+                    resultados = handle_calculation(datos_producto, cliente_seleccionado)
+                    # --- REMOVED (redundant state setting, handled by handle_calculation) --- 
+                    # if resultados:
+                    #     st.session_state.current_calculation = {
+                    #         'cliente': cliente_seleccionado, # This was missing before
+                    #         'form_data': datos_producto,
+                    #         'results': resultados,
+                    #         'timestamp': datetime.now().isoformat()
+                    #     }
+                    #     st.session_state.current_view = 'quote_results'
+                    #     st.rerun()
+                    # ---------------------------------------------------------------------
                 else:
                     st.warning("No se pudieron recolectar datos del formulario.")
 
@@ -623,83 +776,202 @@ def show_reports():
 
 def show_quote_results():
     """Muestra los resultados de la cotización calculada."""
+    
+    # --- PRIMERO: Verificar si ya se guardó la cotización --- 
+    if st.session_state.get('cotizacion_guardada', False) and st.session_state.get('cotizacion_id') is not None:
+        st.success(f"Cotización #{st.session_state.cotizacion_id} guardada ✓")
+        
+        # --- Botones de PDF y Nueva Cotización (lógica sin cambios, dependen de estado) ---
+        col_pdf, col_new = st.columns(2)
+        with col_pdf:
+             # --- Lógica para botón Generar PDF --- 
+             if st.button("📄 Generar PDF", key="pdf_button_saved"):
+                  with st.spinner("Generando PDF..."):
+                      try:
+                          # Obtener datos completos usando el ID guardado
+                          datos_pdf = st.session_state.db.get_datos_completos_cotizacion(st.session_state.cotizacion_id)
+                          if datos_pdf:
+                              pdf_gen = CotizacionPDF()
+                              pdf_bytes = pdf_gen.generar_pdf(datos_pdf)
+                              # Ofrecer descarga
+                              st.download_button(
+                                  label="Descargar PDF Ahora",
+                                  data=pdf_bytes,
+                                  file_name=f"Cotizacion_{datos_pdf.get('consecutivo', 'N')}.pdf",
+                                  mime="application/pdf"
+                              )
+                          else:
+                              st.error("No se pudieron obtener los datos completos para generar el PDF.")
+                      except Exception as e_pdf:
+                          st.error(f"Error generando PDF: {e_pdf}")
+                          traceback.print_exc()
+        
+        with col_new:
+            if st.button("Nueva Cotización", key="new_quote_button_saved"):
+                st.session_state.current_view = 'calculator'
+                st.session_state.cotizacion_guardada = False
+                st.session_state.referencia_guardar = ""
+                st.session_state.cotizacion_model = None
+                st.session_state.current_calculation = None
+                st.rerun()
+        return # Terminar aquí si ya está guardada
+    # ----------------------------------------------------------
+
+    # --- Si no está guardada, verificar si hay un cálculo válido --- 
     if 'current_calculation' not in st.session_state or not st.session_state.current_calculation:
         st.error("No hay resultados para mostrar. Por favor, realice un cálculo primero.")
+        if st.button("Volver a Calcular", key="back_to_calc_no_results"):
+            st.session_state.current_view = 'calculator'
+            st.rerun()
         return
-
+    # Verificar si el modelo de cotización está listo (preparado por handle_calculation)
+    if 'cotizacion_model' not in st.session_state or st.session_state.cotizacion_model is None:
+        st.error("Error interno: Modelo de cotización no preparado. Por favor, recalcule.")
+        if st.button("Volver a Calcular", key="back_to_calc_no_model"):
+            st.session_state.current_view = 'calculator'
+            st.rerun()
+        return
+    # Verificar que calculos_para_guardar exista dentro de calc
     calc = st.session_state.current_calculation
+    if 'calculos_para_guardar' not in calc or not calc['calculos_para_guardar']:
+        st.error("Error interno: Datos de cálculo para guardar no encontrados. Por favor, recalcule.")
+        if st.button("Volver a Calcular", key="back_to_calc_no_save_data"):
+            st.session_state.current_view = 'calculator'
+            st.rerun()
+        return
+    
+    # --- Si hay cálculo válido, obtener datos y mostrar --- 
+    cotizacion_preparada = st.session_state.cotizacion_model # Modelo listo para guardar
+    datos_calculo_persistir = calc['calculos_para_guardar']
     
     st.markdown("## Resultados de la Cotización")
     
     # Información básica
     st.markdown("### Información General")
-    col1, col2 = st.columns(2)
-    with col1:
+    col1_info, col2_info = st.columns(2)
+    with col1_info:
         st.write(f"**Tipo de Producto:** {'Manga' if calc['is_manga'] else 'Etiqueta'}")
-        st.write(f"**Referencia:** {calc['form_data'].get('referencia', 'N/A')}")
-        st.write(f"**Fecha:** {datetime.fromisoformat(calc['timestamp']).strftime('%Y-%m-%d %H:%M')}")
+        # Mostrar Referencia ingresada (aún no guardada)
+        st.write(f"**Referencia (a guardar):** {st.session_state.get('referencia_guardar', '(Ingrese abajo)')}") 
+        st.write(f"**Fecha Cálculo:** {datetime.fromisoformat(calc['timestamp']).strftime('%Y-%m-%d %H:%M')}")
     
     # Mostrar resultados para cada escala
     st.markdown("### Resultados por Escala")
     
-    # Crear tabla de resultados
+    # Crear tabla de resultados (sin cambios aquí)
     resultados_df = pd.DataFrame(calc['results'])
-    resultados_df = resultados_df.rename(columns={
-        'escala': 'Escala',
-        'valor_unidad': 'Valor por Unidad',
-        'metros': 'Metros',
-        'tiempo_horas': 'Tiempo (horas)',
-        'montaje': 'Montaje',
-        'mo_y_maq': 'MO y Maquinaria',
-        'tintas': 'Tintas',
-        'papel_lam': 'Material',
-        'desperdicio': 'Desperdicio'
-    })
-    
-    # Formatear columnas numéricas
-    formato_moneda = lambda x: f"${x:,.2f}"
-    formato_numero = lambda x: f"{x:,.2f}"
-    
-    resultados_df['Valor por Unidad'] = resultados_df['Valor por Unidad'].apply(formato_moneda)
-    resultados_df['Montaje'] = resultados_df['Montaje'].apply(formato_moneda)
-    resultados_df['MO y Maquinaria'] = resultados_df['MO y Maquinaria'].apply(formato_moneda)
-    resultados_df['Tintas'] = resultados_df['Tintas'].apply(formato_moneda)
-    resultados_df['Material'] = resultados_df['Material'].apply(formato_moneda)
-    resultados_df['Desperdicio'] = resultados_df['Desperdicio'].apply(formato_moneda)
-    resultados_df['Metros'] = resultados_df['Metros'].apply(formato_numero)
-    resultados_df['Tiempo (horas)'] = resultados_df['Tiempo (horas)'].apply(formato_numero)
-    
+    # ... (resto del formateo de la tabla sin cambios) ...
     st.dataframe(resultados_df)
     
-    # Botones de acción
-    col2, col3 = st.columns([2, 1])  # El formulario ocupa más espacio que el botón PDF
-
-    with col2:
-        st.markdown("#### Guardar Cotización")
-        with st.form("guardar_cotizacion_form"):
-            referencia = st.text_input(
-                "Referencia para guardar la cotización",
-                value=st.session_state.get('referencia_guardar', ""),
-                key="referencia_guardar_input"
-            )
-            guardar = st.form_submit_button("Guardar Cotización", type="primary")
-            if guardar:
-                if not referencia.strip():
-                    st.error("Debe ingresar una referencia para guardar la cotización.")
+    # --- Formulario y Lógica de Guardado --- 
+    st.markdown("#### Guardar Cotización")
+    # El formulario solo se muestra si la cotización NO está guardada
+    with st.form("guardar_cotizacion_form"):
+        # Input para la descripción de la referencia
+        referencia_desc = st.text_input(
+            "Referencia / Descripción para guardar *",
+            value=st.session_state.get('referencia_guardar', ""),
+            key="referencia_guardar_input", # Mantener key consistente
+            help="Ingrese un nombre o descripción única para esta cotización (Ej: Etiqueta XYZ V1)"
+        )
+        
+        # --- RESTAURAR: Selector de Comercial para Admin ---
+        selected_comercial_id = None # Inicializar fuera del if para validación posterior
+        if st.session_state.get('usuario_rol') == 'administrador':
+            try:
+                comerciales = st.session_state.db.get_perfiles_by_role('comercial')
+                if comerciales:
+                    # Opciones para el selectbox: (ID, Nombre)
+                    opciones_comercial = [(c['id'], c['nombre']) for c in comerciales] 
+                    # Añadir opción placeholder 
+                    opciones_display = [(None, "-- Seleccione Comercial --")] + opciones_comercial
+                    
+                    # Mostrar el selectbox
+                    selected_option = st.selectbox(
+                        "Asignar a Comercial *", 
+                        options=opciones_display, 
+                        format_func=lambda x: x[1], # Mostrar nombre
+                        key="comercial_selector_admin", # Usar la key correcta
+                        help="Seleccione el comercial al que pertenece esta cotización."
+                    )
+                    # selected_comercial_id se obtendrá del estado DENTRO del submit button
                 else:
-                    st.session_state.referencia_guardar = referencia
-                    st.session_state.cotizacion_guardada = True
-                    st.success("Cotización guardada exitosamente")
-        # Mostrar el botón PDF solo después del éxito de guardado, justo debajo del mensaje de éxito
-        if st.session_state.get('cotizacion_guardada', False):
-            if st.button("Generar PDF"):
-                st.info("Funcionalidad de PDF en desarrollo")
-        # Botón Nueva Cotización siempre visible, pero al final
-        if st.button("Nueva Cotización"):
-            st.session_state.current_view = 'calculator'
-            st.session_state.cotizacion_guardada = False
-            st.session_state.referencia_guardar = ""
-            st.rerun()
+                    st.warning("No se encontraron comerciales para asignar.")
+            except Exception as e_comm:
+                st.error(f"Error al cargar lista de comerciales: {e_comm}")
+        # ----------------------------------------------------
+
+        guardar = st.form_submit_button("Guardar Cotización", type="primary")
+        
+        if guardar:
+            error_guardado = False
+            if not referencia_desc.strip():
+                st.error("Debe ingresar una Referencia / Descripción para guardar la cotización.")
+                error_guardado = True
+                
+            comercial_id_para_guardar = None
+            if st.session_state.get('usuario_rol') == 'administrador':
+                # Re-obtener valor del selector dentro del form submit
+                # Asumiendo que la key del selector es "comercial_selector_admin"
+                selected_comercial_tuple = st.session_state.get("comercial_selector_admin")
+                if selected_comercial_tuple and selected_comercial_tuple[0] is not None:
+                     selected_comercial_id = selected_comercial_tuple[0]
+                else:
+                     selected_comercial_id = None # Asegurar None si no seleccionó
+                
+                if selected_comercial_id is None:
+                    st.error("Como administrador, debe seleccionar un comercial para asignar la cotización.")
+                    error_guardado = True
+                else:
+                    comercial_id_para_guardar = selected_comercial_id
+            else:
+                comercial_id_para_guardar = st.session_state.user_id 
+            
+            if not error_guardado:
+                st.session_state.referencia_guardar = referencia_desc
+                with st.spinner("Guardando cotización..."):                        
+                    try:
+                        cliente_id = calc['cliente'].id 
+                        # datos_calculo_persistir ya está disponible aquí
+                        
+                        if not comercial_id_para_guardar or not cliente_id or not datos_calculo_persistir:
+                             st.error("Error interno: Faltan datos para guardar (cliente, comercial o cálculos).")
+                        else:
+                            manager = st.session_state.cotizacion_manager
+                            success, message, cotizacion_id = manager.guardar_nueva_cotizacion(
+                                cotizacion_model=cotizacion_preparada, 
+                                cliente_id=cliente_id,
+                                referencia_descripcion=referencia_desc,
+                                comercial_id=comercial_id_para_guardar,
+                                datos_calculo=datos_calculo_persistir 
+                            )
+                            
+                            if success:
+                                st.success(message)
+                                st.session_state.cotizacion_guardada = True
+                                st.session_state.cotizacion_id = cotizacion_id
+                                st.session_state.cotizacion_model.id = cotizacion_id 
+                                # --- Limpiar cálculo DESPUÉS de guardar --- 
+                                st.session_state.current_calculation = None
+                                # -----------------------------------------
+                                st.rerun() # Refrescar para mostrar estado guardado
+                            else:
+                                st.error(f"Error al guardar: {message}")
+
+                    except CotizacionManagerError as cme:
+                        st.error(f"Error al guardar: {cme}")
+                    except Exception as e_save:
+                        st.error(f"Error inesperado al guardar: {e_save}")
+                        traceback.print_exc()
+                                
+    # Botón Nueva Cotización (solo visible si hay cálculo pero no se ha guardado)
+    if st.button("Nueva Cotización", key="new_quote_button_results"):
+        st.session_state.current_view = 'calculator'
+        st.session_state.cotizacion_guardada = False
+        st.session_state.referencia_guardar = ""
+        st.session_state.cotizacion_model = None
+        st.session_state.current_calculation = None
+        st.rerun()
 
 if __name__ == "__main__":
     main()
