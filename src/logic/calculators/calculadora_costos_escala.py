@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional # Added Optional here
 import math
 import pandas as pd
 from src.logic.calculators.calculadora_base import CalculadoraBase
@@ -294,6 +294,7 @@ Cálculo:
         
     def calcular_papel_lam(self, escala: int, area_etiqueta: float, 
                           valor_material: float, valor_acabado: float) -> float:
+        print(f"DEBUG (papel_lam): Received valor_material = {valor_material}")
         if area_etiqueta <= 0:
             return 0
         
@@ -302,8 +303,8 @@ Cálculo:
         
         print(f"\n=== CÁLCULO PAPEL/LAM ===")
         print(f"Área etiqueta: {area_etiqueta:.2f} mm²")
-        print(f"Valor material: ${valor_material}/mm²")
-        print(f"Valor acabado: ${valor_acabado}/mm²")
+        print(f"Valor material (received): ${valor_material}/m²")
+        print(f"Valor acabado: ${valor_acabado}/m²")
         print(f"Costo por unidad: ${costo_por_unidad:.6f}")
         print(f"Escala: {escala}")
         print(f"Total papel/lam: ${papel_lam:.2f}")
@@ -437,7 +438,7 @@ Cálculo:
             print(f"Error en cálculo de plancha: {str(e)}")
             return 0
 
-    def calcular_valor_troquel(self, datos: DatosEscala, es_manga: bool = False) -> float:
+    def calcular_valor_troquel(self, datos: DatosEscala, es_manga: bool = False, tipo_grafado_id: Optional[int] = None) -> float: # Added tipo_grafado_id
         """
         Calcula el valor del troquel según la fórmula del código original
         """
@@ -452,14 +453,27 @@ Cálculo:
             repeticiones = calculadora.obtener_mejor_opcion(datos.avance).repeticiones
             valor_base = perimetro * datos.pistas * repeticiones * 100  # valor_mm = 100
             valor_calculado = max(VALOR_MINIMO, valor_base)
-            
-            # Factor de división: 2 si troquel existe, 1 si no
-            factor_division = 2 if datos.troquel_existe else 1
-            
+
+            # Determinar factor de división CORRECTAMENTE
+            if es_manga:
+                # --- DEBUGGING ---
+                print(f"DEBUG (costos_escala): Received tipo_grafado_id = {repr(tipo_grafado_id)} (Type: {type(tipo_grafado_id)})")
+                # --- END DEBUGGING ---
+                # Lógica para mangas usando ID
+                factor_division = 1 if tipo_grafado_id == 4 else 2
+                print(f"ES MANGA (costos_escala) - Tipo grafado ID: {tipo_grafado_id}")
+            else:
+                # Lógica para etiquetas
+                factor_division = 2 if datos.troquel_existe else 1
+                print("ES ETIQUETA (costos_escala)")
+                print(f"Troquel existe: {datos.troquel_existe}")
+
+            print(f"Factor división seleccionado (costos_escala): {factor_division}")
+
             # Calcular valor final
             valor_final = (FACTOR_BASE + valor_calculado) / factor_division
-            
-            print("\n=== CÁLCULO TROQUEL ===")
+
+            print("\n=== CÁLCULO TROQUEL (costos_escala) ===")
             print(f"Perimetro: {perimetro:,.2f} mm")
             print(f"Valor base: ${valor_base:,.2f}")
             print(f"Valor calculado (max con mínimo): ${valor_calculado:,.2f}")
@@ -467,11 +481,11 @@ Cálculo:
             print(f"Troquel existe: {datos.troquel_existe}")
             print(f"Factor división: {factor_division}")
             print(f"Valor final: ${valor_final:,.2f}")
-            
+
             return valor_final
-            
+
         except Exception as e:
-            print(f"Error en cálculo de troquel: {str(e)}")
+            print(f"Error en cálculo de troquel (costos_escala): {str(e)}")
             return 0
 
     def calcular_valor_unidad_full(self, suma_costos: float, datos: DatosEscala, 
@@ -516,12 +530,31 @@ Cálculo:
                 print("Error: Escala es cero o negativa, retornando 0")
                 return 0
             
-            # 3. Calcular factor de rentabilidad
-            factor_rentabilidad = (100 - datos.rentabilidad) / 100
-            print(f"factor_rentabilidad: (100 - {datos.rentabilidad}) / 100 = {factor_rentabilidad:.4f}")
+            # 3. Calcular factor de rentabilidad CORRECTO
+            # Asegurarse que la rentabilidad está en formato decimal (e.g., 0.38 para 38%)
+            if datos.rentabilidad >= 1:
+                # Si por alguna razón llega como porcentaje, convertir a decimal
+                rentabilidad_decimal = datos.rentabilidad / 100.0
+                print(f"ADVERTENCIA: Rentabilidad ({datos.rentabilidad}) parece estar en formato porcentaje. Convirtiendo a {rentabilidad_decimal:.4f}")
+            else:
+                rentabilidad_decimal = datos.rentabilidad
+            
+            # El factor para dividir el costo es (1 - margen)
+            if rentabilidad_decimal >= 1:
+                 # Evitar división por cero o negativo si el margen es 100% o más
+                 print(f"ERROR: Rentabilidad decimal inválida ({rentabilidad_decimal:.4f}), no se puede calcular el precio.")
+                 return 0
+            factor_rentabilidad = 1 - rentabilidad_decimal
+            print(f"rentabilidad_decimal: {rentabilidad_decimal:.4f}")
+            print(f"factor_rentabilidad (1 - rentabilidad_decimal): {factor_rentabilidad:.4f}")
             
             # 4. Calcular costos indirectos (ajustados por rentabilidad)
-            costos_indirectos = suma_costos / factor_rentabilidad
+            # Evitar división por cero si factor_rentabilidad es 0 (margen 100%)
+            if factor_rentabilidad <= 0:
+                print(f"ERROR: Factor de rentabilidad es cero o negativo ({factor_rentabilidad:.4f}). No se puede calcular costos indirectos.")
+                costos_indirectos = float('inf') # o manejar como error
+            else:
+                costos_indirectos = suma_costos / factor_rentabilidad
             print(f"costos_indirectos: {suma_costos:.2f} / {factor_rentabilidad:.4f} = {costos_indirectos:.2f}")
             
             # 5. Usar el valor del troquel directamente sin recalcular
@@ -550,6 +583,7 @@ Cálculo:
             return 0
         
     def calcular_desperdicio_tintas(self, dados: DatosEscala, num_tintas: int, valor_material: float, es_manga: bool = False) -> Dict:
+        print(f"DEBUG (desp_tintas): Received valor_material = {valor_material}")
         # Validaciones iniciales
         if num_tintas <= 0 or valor_material <= 0:
             return {
@@ -602,7 +636,7 @@ Cálculo:
         print(f"6. S3 = GAP_FIJO + Q3 = {GAP_FIJO} + {Q3} = {S3} mm")
 
         # Calcular factor de conversión
-        print(f"7. Valor material: ${valor_material} por mm²")
+        print(f"7. Valor material (received): ${valor_material}/m²")
         factor = valor_material / 1000000
         print(f"8. Factor de conversión (O7) = valor_material / 1000000 = {valor_material} / 1000000 = {factor:.8f}")
 
@@ -713,7 +747,8 @@ Cálculo:
         valor_troquel: float,
         valor_material: float,
         valor_acabado: float,
-        es_manga: bool = False
+        es_manga: bool = False,
+        tipo_grafado_id: Optional[int] = None # Added tipo_grafado_id here
     ) -> List[Dict]:
         """
         Calcula los costos para cada escala especificada.
@@ -758,7 +793,8 @@ Cálculo:
             if valor_plancha == 0:
                 valor_plancha = self.calcular_valor_plancha(datos, num_tintas, es_manga, q3, s3)
             if valor_troquel == 0:
-                valor_troquel = self.calcular_valor_troquel(datos, es_manga)
+                # Pass tipo_grafado_id to the internal method call
+                valor_troquel = self.calcular_valor_troquel(datos, es_manga, tipo_grafado_id) # Pass the ID
 
             # Calcular área de etiqueta si no está establecida
             if datos.area_etiqueta <= 0:

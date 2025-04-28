@@ -53,45 +53,13 @@ def authenticate_user(email: str, password: str) -> Tuple[bool, str]:
     try:
         if 'auth_manager' not in st.session_state:
             return False, "Error: Sistema de autenticación no inicializado"
-            
         auth_manager = st.session_state.auth_manager
         success, user_data = auth_manager.login(email, password)
-        
         if success:
-            # Obtener el ID del usuario de st.session_state.user_id que fue establecido por auth_manager.login
-            user_id = st.session_state.get('user_id')
-            
-            if not user_id:
-                print("No se encontró user_id en session_state después del login")
-                return False, "Error al obtener ID de usuario"
-            
-            print(f"Usando user_id: {user_id}")  # Debug
-            
-            # Obtener el perfil del usuario usando el ID
-            db = st.session_state.db
-            perfil = db.get_perfil(user_id)
-            
-            if not perfil:
-                print(f"No se pudo obtener el perfil para el usuario ID: {user_id}")
-                return False, "Error al obtener el perfil de usuario"
-            
-            rol = perfil.get('rol_nombre')
-            print(f"Perfil obtenido - ID: {user_id}, Rol: {rol}")  # Debug
-            
-            # Guardar los datos en la sesión
-            SessionManager.set_auth_state(
-                authenticated=True,
-                user_id=user_id,
-                role=rol
-            )
-            
-            # Guardar el perfil completo en la sesión
-            st.session_state.perfil_usuario = perfil
-            
+            # Ya se inicializó todo el estado relevante en SessionManager.full_init desde AuthManager
             return True, "Inicio de sesión exitoso"
         else:
             return False, "Credenciales inválidas"
-            
     except Exception as e:
         print(f"Error en autenticación: {str(e)}")
         return False, f"Error durante la autenticación: {str(e)}"
@@ -111,21 +79,10 @@ def handle_logout() -> None:
     try:
         if 'auth_manager' in st.session_state:
             st.session_state.auth_manager.logout()
-        
-        # Limpiar el estado de la sesión
-        SessionManager.set_auth_state(
-            authenticated=False,
-            user_id=None,
-            role=None
-        )
-        SessionManager.clear_cotizacion_state()
-        SessionManager.clear_messages()
-        
-        # Opcional: Agregar mensaje de logout exitoso
+        SessionManager.full_clear()
         SessionManager.add_message("Sesión cerrada exitosamente", "success")
-        
     except Exception as e:
-        print(f"Error en logout: {str(e)}")  # Para debugging
+        print(f"Error en logout: {str(e)}")
         SessionManager.add_message(f"Error al cerrar sesión: {str(e)}", "error")
 
 def show_user_info() -> None:
@@ -164,20 +121,9 @@ def logout_user() -> None:
     """Maneja el proceso de cierre de sesión."""
     try:
         with st.spinner("Cerrando sesión..."):
-            # Limpiar el estado de la sesión
-            auth_manager = st.session_state.auth_manager
-            auth_manager.logout()
-            
-            # Limpiar variables de sesión
-            session_keys = [
-                'authenticated', 'user_id', 'perfil_usuario', 
-                'usuario_verificado', 'usuario_rol', 'last_login',
-                'show_profile_update'
-            ]
-            for key in session_keys:
-                if key in st.session_state:
-                    del st.session_state[key]
-            
+            if 'auth_manager' in st.session_state:
+                st.session_state.auth_manager.logout()
+            SessionManager.full_clear()
             st.success("Sesión cerrada exitosamente")
             st.rerun()
     except Exception as e:

@@ -37,39 +37,32 @@ class AuthManager:
             })
             
             if response.user:
-                # Guardar el ID del usuario primero
                 user_id = response.user.id
-                st.session_state.user_id = user_id
-                
-                # Obtener el perfil del usuario
                 profile_response = self.supabase.rpc('get_current_user_profile').execute()
-                
                 if profile_response.data and len(profile_response.data) > 0:
-                    # La función RPC devuelve una lista con un diccionario
                     profile = profile_response.data[0]
-                    
-                    # Actualizar el estado de la sesión
-                    st.session_state.authenticated = True
+                    from src.utils.session_manager import SessionManager
+                    SessionManager.full_init(user_id=user_id, usuario_rol=profile.get('rol_nombre'), perfil_usuario=profile)
                     st.session_state.user = email
-                    st.session_state.user_profile = profile  # Guardar el perfil completo
                     st.session_state.login_form_submitted = True
-                    
+                    st.session_state.comercial_id = user_id
                     print(f"Login exitoso: Usuario={email}, ID={user_id}")
                     return True, "Login successful"
                 else:
-                    # Si no se encuentra el perfil, limpiar la sesión
                     self.logout()
                     print(f"Error: Login exitoso para {email}, pero no se encontró perfil asociado.")
                     return False, "Error interno: Perfil de usuario no encontrado."
             else:
-                st.session_state.authenticated = False
+                from src.utils.session_manager import SessionManager
+                SessionManager.full_clear()
                 st.session_state.login_form_submitted = True
                 return False, "Credenciales inválidas"
                 
         except Exception as e:
             print(f"Error during login: {str(e)}")
             traceback.print_exc()
-            st.session_state.authenticated = False
+            from src.utils.session_manager import SessionManager
+            SessionManager.full_clear()
             st.session_state.login_form_submitted = True
             return False, f"Error durante el login: {str(e)}"
 
@@ -77,9 +70,8 @@ class AuthManager:
         """Sign out the current user."""
         try:
             self.supabase.auth.sign_out()
-            st.session_state.authenticated = False
-            st.session_state.user = None
-            st.session_state.login_form_submitted = False
+            from src.utils.session_manager import SessionManager
+            SessionManager.full_clear()
         except Exception as e:
             print(f"Error during logout: {str(e)}")
             traceback.print_exc()

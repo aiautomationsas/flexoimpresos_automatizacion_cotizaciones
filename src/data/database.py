@@ -857,14 +857,21 @@ class DBManager:
             return None
 
     def get_perfil(self, user_id: str) -> Optional[Dict]:
-        """Obtiene el perfil del usuario con su rol"""
+        """Obtiene el perfil del usuario con su rol (incluyendo el nombre del rol)"""
         try:
-            response = self.supabase.table('perfiles')\
-                .select('*')\
-                .eq('id', user_id)\
-                .single()\
+            # Hacemos join con la tabla de roles para obtener el nombre del rol
+            response = self.supabase.from_('perfiles') \
+                .select('*, rol:roles(nombre)') \
+                .eq('id', user_id) \
+                .single() \
                 .execute()
-            return response.data if response else None
+            if response and response.data:
+                perfil = response.data
+                # Extraer el nombre del rol del join
+                if 'rol' in perfil and perfil['rol'] and 'nombre' in perfil['rol']:
+                    perfil['rol_nombre'] = perfil['rol']['nombre']
+                return perfil
+            return None
         except Exception as e:
             print(f"Error obteniendo perfil: {str(e)}")
             return None

@@ -356,6 +356,8 @@ class CalculadoraLitografia(CalculadoraBase):
             
             if es_manga:
                 # Lógica específica para mangas usando ID
+                # Si tipo_grafado_id es 4 (Horizontal Total + Vertical), factor_division = 1
+                # Para otros tipos de grafado, factor_division = 2
                 factor_division = 1 if tipo_grafado_id == 4 else 2
                 print(f"ES MANGA - Tipo grafado ID: {tipo_grafado_id}")
                 print(f"Factor división seleccionado: {factor_division}")
