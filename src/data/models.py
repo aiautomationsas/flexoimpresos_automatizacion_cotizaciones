@@ -379,6 +379,7 @@ class Cotizacion:
         ancho=None,
         avance=None,
         fecha_creacion=None,
+        actualizado_en=None,
         escalas=None,
         identificador=None,
         modificado_por=None,
@@ -420,6 +421,7 @@ class Cotizacion:
         self.ancho = ancho
         self.avance = avance
         self.fecha_creacion = fecha_creacion
+        self.actualizado_en = actualizado_en
         self.escalas = escalas if escalas is not None else []
         self.identificador = identificador
         self.modificado_por = modificado_por

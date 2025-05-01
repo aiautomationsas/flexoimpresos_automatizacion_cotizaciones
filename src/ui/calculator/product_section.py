@@ -2,13 +2,29 @@ import streamlit as st
 from typing import Dict, Any, List, Optional
 from src.data.models import Cliente  # Corrected import: Directly from src.data.models module
 from src.data.database import DBManager  # Asumiendo que DBManager está definido aquí
+import time
 
 # --- Helper Functions for Input Sections ---
 
-def _mostrar_escalas(datos: Dict[str, Any]):
+def _mostrar_escalas(datos_cargados: Optional[Dict] = None):
     """Muestra y procesa el input de escalas."""
     st.subheader("Cantidades a Cotizar")
-    default_escalas_texto = st.session_state.get('escalas_texto_value', "1000, 2500, 5000")
+    
+    # Valor inicial desde datos cargados o session state o default
+    default_escalas_list = []
+    if datos_cargados and 'escalas' in datos_cargados:
+        default_escalas_list = datos_cargados['escalas']
+    elif 'escalas_texto_value' in st.session_state:
+        try:
+            default_escalas_list = [int(e.strip()) for e in st.session_state['escalas_texto_value'].split(",") if e.strip()]
+        except ValueError:
+            default_escalas_list = []
+    else:
+        default_escalas_list = [1000, 2500, 5000] # Hardcoded default
+    
+    # Convertir lista a string para el input
+    default_escalas_texto = ", ".join(map(str, default_escalas_list))
+
     escalas_texto = st.text_input(
         "Escalas (separadas por comas)",
         value=default_escalas_texto,
@@ -20,33 +36,42 @@ def _mostrar_escalas(datos: Dict[str, Any]):
         escalas_usuario = [int(e.strip()) for e in escalas_texto.split(",") if e.strip()]
         escalas_usuario = sorted(list(set(escalas_usuario))) # Asegurar lista única y ordenada
 
-        # Guardar el valor en session_state si cambia
-        if st.session_state.get('escalas_texto_value', "") != escalas_texto:
-            st.session_state['escalas_texto_value'] = escalas_texto
-            st.rerun() # Forzar rerun para actualizar la UI si es necesario
+        # Guardar el valor en session_state si cambia (solo si no estamos cargando)
+        # if not datos_cargados and st.session_state.get('escalas_texto_value', "") != escalas_texto:
+        #     st.session_state['escalas_texto_value'] = escalas_texto
+            # Considerar si el rerun es necesario aquí o causa problemas en modo edición
+            # st.rerun() 
 
         if not escalas_usuario:
              st.warning("Ingrese al menos una escala.")
-             datos['escalas'] = []
         elif any(e < 100 for e in escalas_usuario):
             raise ValueError("Las escalas deben ser mayores o iguales a 100.")
         else:
-            datos['escalas'] = escalas_usuario
+            st.session_state['escalas'] = escalas_usuario
 
     except ValueError as e:
         st.error(f"Error en las escalas: {e}")
-        datos['escalas'] = []
     except Exception:
         st.error("Por favor ingrese las escalas como números enteros separados por comas.")
-        datos['escalas'] = []
 
-def _mostrar_dimensiones_y_tintas(datos: Dict[str, Any], es_manga: bool):
+def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict] = None):
     """Muestra los inputs de dimensiones (ancho, avance, pistas) y número de tintas."""
     st.subheader("Dimensiones y Colores")
     col1, col2 = st.columns(2)
+    
+    # Obtener valores por defecto desde datos cargados o session state o hardcoded
+    default_ancho = datos_cargados.get('ancho', st.session_state.get("ancho", 100.0)) if datos_cargados else st.session_state.get("ancho", 100.0)
+    default_avance = datos_cargados.get('avance', st.session_state.get("avance", 150.0)) if datos_cargados else st.session_state.get("avance", 150.0)
+    default_pistas = datos_cargados.get('pistas', st.session_state.get("num_pistas_otro", 1)) if datos_cargados else st.session_state.get("num_pistas_otro", 1)
+    if es_manga:
+        default_pistas = datos_cargados.get('pistas', st.session_state.get("num_pistas_manga", 1)) if datos_cargados else st.session_state.get("num_pistas_manga", 1)
+    default_tintas = datos_cargados.get('num_tintas', st.session_state.get("num_tintas", 3)) if datos_cargados else st.session_state.get("num_tintas", 3)
+    
     with col1:
-        datos['ancho'] = st.number_input("Ancho (mm)", min_value=1.00, format="%.2f", key="ancho", value=st.session_state.get("ancho", 100.0))
-        datos['avance'] = st.number_input("Avance (mm)", min_value=1.00, format="%.2f", key="avance", value=st.session_state.get("avance", 150.0))
+        # El valor se guarda en st.session_state.ancho via key
+        st.number_input("Ancho (mm)", min_value=1.00, format="%.2f", key="ancho", value=float(default_ancho))
+        # El valor se guarda en st.session_state.avance via key
+        st.number_input("Avance (mm)", min_value=1.00, format="%.2f", key="avance", value=float(default_avance))
     with col2:
         # --- Pistas ---
         usuario_rol = st.session_state.get('usuario_rol', '')
@@ -55,149 +80,294 @@ def _mostrar_dimensiones_y_tintas(datos: Dict[str, Any], es_manga: bool):
                 # Mostrar como texto no editable para comercial en manga
                 st.markdown('<label style="font-size: 0.875rem; color: #555;">Número de pistas</label>', unsafe_allow_html=True)
                 st.markdown('<div style="padding: 0.5rem 0; color: #333; font-weight: bold;">1</div>', unsafe_allow_html=True)
-                datos['pistas'] = 1
-                st.session_state['num_pistas_manga'] = 1 # Guardar en session state también
+                # Guardar explícitamente en session state si es diferente
+                if st.session_state.get('num_pistas_manga') != 1:
+                    st.session_state.num_pistas_manga = 1
             else:
                 # Input numérico para admin/otros en manga
-                datos['pistas'] = st.number_input(
-                    "Número de pistas",
-                    min_value=1,
-                    step=1,
+                # El valor se guarda en st.session_state.num_pistas_manga via key
+                st.number_input(
+                    "Número de pistas", 
+                    min_value=1, 
+                    step=1, 
                     key="num_pistas_manga",
-                    value=st.session_state.get("num_pistas_manga", 1)
+                    value=int(default_pistas)
                 )
         else:
             # Input numérico para no-manga (todos los roles)
-            datos['pistas'] = st.number_input(
-                "Número de pistas",
-                min_value=1,
-                step=1,
+            # El valor se guarda en st.session_state.num_pistas_otro via key
+            st.number_input(
+                "Número de pistas", 
+                min_value=1, 
+                step=1, 
                 key="num_pistas_otro",
-                 value=st.session_state.get("num_pistas_otro", 1)
+                 value=int(default_pistas)
             )
 
         # --- Tintas ---
-        datos['num_tintas'] = st.number_input("Número de tintas", min_value=0, step=1, key="num_tintas", value=st.session_state.get("num_tintas", 3))
+        # El valor se guarda en st.session_state.num_tintas via key
+        st.number_input("Número de tintas", min_value=0, step=1, key="num_tintas", value=int(default_tintas))
 
-
-def _mostrar_material(datos: Dict[str, Any], es_manga: bool, materiales: List[Any]):
+def _mostrar_material(es_manga: bool, materiales: List[Any], datos_cargados: Optional[Dict] = None):
     """
-    Muestra el selector de material, filtrando si es manga.
+    Muestra el selector de material, filtrando si es manga y preseleccionando si hay datos cargados.
+    Detecta cambios, actualiza estado, limpia adhesivo, limpia caché y llama a rerun.
 
     Args:
-        datos: Diccionario para almacenar los datos del formulario.
         es_manga: Boolean indicando si el producto es manga.
         materiales: Lista completa de objetos de material.
     """
     st.subheader("Material")
-    # No acceder a st.session_state.db aquí
 
     if es_manga:
-        # Updated IDs for manga materials (e.g., PVC, PETG)
         materiales_filtrados = [m for m in materiales if m.id in [13, 14]] 
     else:
-        materiales_filtrados = materiales # Todos los materiales para otros productos
+        materiales_filtrados = materiales
 
-    # Guardar el ID seleccionado previamente para mantener la selección
-    selected_material_id = st.session_state.get("material_id", None)
+    previous_material_id = st.session_state.get("material_id", None)
+    selected_material_id = previous_material_id 
+    print(f"--> _mostrar_material: Valor PREVIO de material_id en estado: {previous_material_id}") # DEBUG
 
-    # Encontrar el índice del material seleccionado previamente
+    if datos_cargados and previous_material_id is None and 'material_adhesivo_id' in datos_cargados:
+        db = st.session_state.db
+        material_id_from_ma = db.get_material_id_from_material_adhesivo(datos_cargados['material_adhesivo_id'])
+        if material_id_from_ma:
+            selected_material_id = material_id_from_ma
+        else:
+             st.warning(f"No se pudo determinar el material base desde material_adhesivo_id {datos_cargados['material_adhesivo_id']} para preselección.")
+
     try:
-        index = next(i for i, m in enumerate(materiales_filtrados) if m.id == selected_material_id)
+        index = next(i for i, m in enumerate(materiales_filtrados) if m.id == selected_material_id) 
     except StopIteration:
-        index = 0 # Default al primero si no se encuentra o es la primera vez
+        index = 0 
+
+    help_text = ""
+    if not es_manga:
+        help_text = "Seleccione un material compatible con adhesivos para etiquetas. El sistema mostrará los adhesivos disponibles para el material seleccionado."
 
     material_seleccionado = st.selectbox(
         "Seleccione el Material",
         options=materiales_filtrados,
         format_func=lambda m: m.nombre,
-        key="material_select",
-        index=index
+        key="material_select", 
+        index=index,
+        help=help_text
     )
 
-    if material_seleccionado:
-        datos['material_id'] = material_seleccionado.id
-        st.session_state["material_id"] = material_seleccionado.id # Guardar para persistencia
-    else:
-        datos['material_id'] = None
-        st.session_state["material_id"] = None
+    current_material_id = material_seleccionado.id if material_seleccionado else None
+    print(f"--> _mostrar_material: Valor ACTUAL seleccionado en widget: {current_material_id}") # DEBUG
+    print(f"--> _mostrar_material: Comparando: {previous_material_id} != {current_material_id} -> {previous_material_id != current_material_id}") # DEBUG
+
+    if previous_material_id != current_material_id:
+        st.session_state["material_id"] = current_material_id
+        st.session_state["adhesivo_id"] = None
+        print(f"    DETECCION: Material cambiado a {current_material_id}, limpiando adhesivo y caché, forzando rerun.") # DEBUG con indentación
+        # Limpiar explícitamente el caché de la función específica
+        try:
+            st.session_state.db.get_adhesivos_for_material.clear()
+            print("    DETECCION: Caché de get_adhesivos_for_material limpiado.") # DEBUG con indentación
+        except Exception as e:
+            print(f"    DETECCION: Error al intentar limpiar caché: {e}") # DEBUG con indentación
+        
+        # Mostrar advertencia ANTES del rerun
+        st.warning("Refrescando opciones de adhesivo...") 
+        time.sleep(1) # Pausa breve para que se vea el warning
+        
+        st.rerun() # Forzar rerun al detectar cambio
+    # else: # Opcional: Log si no hay cambio
+    #     print("--> _mostrar_material: No se detectó cambio de material.")
+            
+    if not material_seleccionado:
         st.warning("Por favor seleccione un material.")
 
+    # Ya no necesitamos retornar el material
 
-def _mostrar_adhesivo(datos: Dict[str, Any], adhesivos: List[Any]):
+def _mostrar_adhesivo(adhesivos_filtrados: List[Any], material_obj_actual: Optional[Any], datos_cargados: Optional[Dict] = None):
     """
-    Muestra el selector de adhesivo.
+    Muestra el selector de adhesivo, preseleccionando si hay datos cargados.
+    Recibe la lista de adhesivos ya filtrada y el objeto material actual.
 
     Args:
-        datos: Diccionario para almacenar los datos del formulario.
-        adhesivos: Lista completa de objetos de adhesivo.
+        adhesivos_filtrados: Lista de objetos Adhesivo ya filtrados.
+        material_obj_actual: El objeto Material actualmente seleccionado.
+        datos_cargados: Datos precargados para edición.
     """
+    # Log al entrar a la función
+    print(f"--> Entrando a _mostrar_adhesivo:")
+    print(f"    Material Recibido: {material_obj_actual.nombre if material_obj_actual else 'None'}")
+    print(f"    Adhesivos Filtrados Recibidos: {len(adhesivos_filtrados) if adhesivos_filtrados is not None else 'None'} items")
+    print(f"    Datos Cargados: {'Sí' if datos_cargados else 'No'}")
+    
     st.subheader("Adhesivo")
 
-    if not adhesivos:
-        # If the DB call returned an empty list for this material, it means NO adhesives apply (not even 'Sin Adhesivo')
-        st.info("Este material no requiere/utiliza adhesivo.") # Changed warning to info
-        datos['adhesivo_id'] = None # Ensure it's None if no options
-        # Clear session state if it existed from a previous material
-        if "adhesivo_id" in st.session_state:
-            st.session_state["adhesivo_id"] = None
+    # Usar el objeto material pasado directamente
+    material_nombre = material_obj_actual.nombre if material_obj_actual else "desconocido"
+    
+    if not adhesivos_filtrados:
+        st.info(f"No hay adhesivos disponibles para el material seleccionado: {material_nombre}")
+        st.warning("Debe seleccionar un material que sea compatible con adhesivos para etiquetas.")
+        # Asegurarse de que el ID esté limpio si no hay opciones
+        if st.session_state.get("adhesivo_id") is not None:
+             st.session_state["adhesivo_id"] = None
         return
 
-    # Build options. Include "Seleccione..." ONLY if there's more than one actual adhesive option.
-    opciones_adhesivo = [(ad.id, ad.tipo) for ad in adhesivos]
+    st.success(f"Mostrando adhesivos compatibles con: {material_nombre}")
+
+    opciones_adhesivo = [(ad.id, ad.tipo) for ad in adhesivos_filtrados]
     include_select_option = len(opciones_adhesivo) > 1
     display_options = [(None, "Seleccione...")] + opciones_adhesivo if include_select_option else opciones_adhesivo
     
-    # Determine default selection/index
-    selected_adhesivo_id = st.session_state.get("adhesivo_id", None)
+    selected_adhesivo_id = st.session_state.get("adhesivo_id", None) # Usar el estado actual
+    
+    # Preselección si vienen datos cargados (solo si el estado actual es None)
+    if selected_adhesivo_id is None and datos_cargados and 'material_adhesivo_id' in datos_cargados:
+         combined_id = datos_cargados['material_adhesivo_id']
+         if combined_id:
+            try:
+                db = st.session_state.db
+                id_desde_db = db.get_adhesivo_id_from_material_adhesivo(combined_id)
+                if id_desde_db:
+                     selected_adhesivo_id = id_desde_db
+                     st.session_state["adhesivo_id"] = id_desde_db # Actualizar estado si cargamos
+                else:
+                     st.warning(f"No se pudo obtener el adhesivo_id para la entrada material_adhesivo ID {combined_id}")
+            except Exception as e_fetch:
+                 st.error(f"Error obteniendo ID de adhesivo desde DB: {e_fetch}")
+        
+    # Verificar que el adhesivo seleccionado esté en la lista actual de opciones
+    adhesivo_ids_disponibles = [ad.id for ad in adhesivos_filtrados]
+    if selected_adhesivo_id not in adhesivo_ids_disponibles:
+        selected_adhesivo_id = None
+        st.session_state["adhesivo_id"] = None # Limpiar si el ID guardado no es válido
+        
     default_index = 0
+    is_disabled = False
     if len(opciones_adhesivo) == 1:
-        # If only one adhesive is valid, default to it
         selected_adhesivo_id = opciones_adhesivo[0][0]
-        st.session_state["adhesivo_id"] = selected_adhesivo_id # Pre-set state
-        default_index = 0 # Index within display_options (which only has the one option)
+        default_index = 0
+        is_disabled = True
+        # Asegurarse que el estado refleje la única opción
+        if st.session_state.get("adhesivo_id") != selected_adhesivo_id:
+             st.session_state["adhesivo_id"] = selected_adhesivo_id
     elif include_select_option:
-        # If multiple options, find the index of the previously selected one, default to "Seleccione..."
         try:
             default_index = next(i for i, (id, _) in enumerate(display_options) if id == selected_adhesivo_id)
         except StopIteration:
-            default_index = 0 # Default to "Seleccione..."
-    
-    # Determine if the selectbox should be disabled (only one option)
-    is_disabled = len(opciones_adhesivo) == 1
+            default_index = 0 
 
     selected_option = st.selectbox(
         "Seleccione el Adhesivo",
         options=display_options,
-        format_func=lambda opt: opt[1], # Mostrar el tipo/nombre
-        key="adhesivo_select",
+        format_func=lambda opt: opt[1],
+        key="adhesivo_select",  # Volver a una clave simple
         index=default_index,
-        help="Seleccione el adhesivo compatible con el material.",
+        help="Seleccione el adhesivo compatible con el material para el producto tipo etiqueta.",
         disabled=is_disabled
     )
 
-    # Get the actual selected ID (might be None if "Seleccione..." was chosen)
-    actual_selected_id = selected_option[0] if not is_disabled else selected_adhesivo_id
+    # Actualizar el estado basado en la selección del widget
+    actual_selected_id_widget = selected_option[0] if not is_disabled else selected_adhesivo_id
+    if st.session_state.get("adhesivo_id") != actual_selected_id_widget:
+        st.session_state["adhesivo_id"] = actual_selected_id_widget
 
-    datos['adhesivo_id'] = actual_selected_id
-    # Update session state only if the selection changed
-    if st.session_state.get("adhesivo_id") != actual_selected_id:
-        st.session_state["adhesivo_id"] = actual_selected_id
-        # Rerun might be needed if adhesive choice affects other calculations dynamically
-        # st.rerun() 
+    # Mostrar información sobre el adhesivo seleccionado (basado en estado)
+    current_state_adhesivo_id = st.session_state.get("adhesivo_id")
+    if current_state_adhesivo_id is not None:
+        try:
+            adhesivo_info = next((ad for ad in adhesivos_filtrados if ad.id == current_state_adhesivo_id), None)
+            if adhesivo_info:
+                st.success(f"Adhesivo seleccionado: {adhesivo_info.tipo}")
+        except Exception:
+            pass
 
-    # Refined Validation Warning:
-    # Warn only if "Seleccione..." is the current selection AND there were multiple actual options to choose from.
-    if actual_selected_id is None and include_select_option:
+    if current_state_adhesivo_id is None and include_select_option:
         st.warning("Debe seleccionar un adhesivo de la lista.")
 
-
-def _mostrar_acabados_y_empaque(datos: Dict[str, Any], es_manga: bool, tipos_grafado: List[Any], acabados: List[Any]):
+def _mostrar_grafado_altura(es_manga: bool, tipos_grafado: List[Any], datos_cargados: Optional[Dict] = None):
     """
-    Muestra los inputs relacionados con acabados, grafado y empaque.
+    Muestra el selector de tipo de grafado y el campo de altura cuando corresponde (fuera del formulario).
+    
+    Args:
+        es_manga: Boolean indicando si el producto es manga.
+        tipos_grafado: Lista de objetos de tipo grafado.
+        datos_cargados: Datos precargados para edición.
+    """
+    # Solo mostrar para mangas
+    if not es_manga:
+        # No mostrar los selectores y limpiar valores
+        st.session_state["grafado_seleccionado_id"] = None
+        st.session_state["altura_grafado"] = None
+        return
+        
+    st.subheader("Grafado")
+    
+    # Valores por defecto
+    default_grafado_id = datos_cargados.get('tipo_grafado_id', st.session_state.get("grafado_seleccionado_id", 1)) if datos_cargados else st.session_state.get("grafado_seleccionado_id", 1)
+    default_altura_grafado = datos_cargados.get('altura_grafado', st.session_state.get("altura_grafado", 0.0)) if datos_cargados else st.session_state.get("altura_grafado", 0.0)
+    
+    # --- Tipo de Grafado ---
+    # Inicializar variables
+    selected_grafado_id = default_grafado_id
+    try:
+        index_grafado = next(i for i, tg in enumerate(tipos_grafado) if tg.id == selected_grafado_id)
+    except StopIteration:
+        index_grafado = 0
+
+    tipo_grafado_seleccionado = st.selectbox(
+        "Tipo de grafado",
+        options=tipos_grafado,
+        format_func=lambda tg: tg.nombre,
+        key="tipo_grafado_select",
+        index=index_grafado
+    )
+    
+    # Obtener y guardar el ID seleccionado
+    if tipo_grafado_seleccionado:
+        current_selected_id = tipo_grafado_seleccionado.id
+        previous_id = st.session_state.get("grafado_seleccionado_id")
+        
+        # Guardar ID y detectar cambios que requieran rerun
+        st.session_state["grafado_seleccionado_id"] = current_selected_id
+        
+        # Si cambió entre un tipo que requiere altura y uno que no, hacer rerun
+        if previous_id != current_selected_id and (
+            (previous_id in [3, 4] and current_selected_id not in [3, 4]) or
+            (previous_id not in [3, 4] and current_selected_id in [3, 4])
+        ):
+            st.rerun()
+    else:
+        st.session_state["grafado_seleccionado_id"] = None
+    
+    # --- Altura de Grafado (condicional) ---
+    current_id = st.session_state.get("grafado_seleccionado_id")
+    
+    # Solo mostrar campo de altura si es tipo 3 o 4
+    if current_id in [3, 4]:
+        valor_mostrar = 0.0
+        
+        # Determinar valor a mostrar
+        if datos_cargados and 'altura_grafado' in datos_cargados and datos_cargados['altura_grafado'] is not None:
+            valor_mostrar = float(datos_cargados['altura_grafado'])
+        elif st.session_state.get("altura_grafado") is not None:
+            valor_mostrar = float(st.session_state.get("altura_grafado"))
+            
+        # Mostrar campo de altura
+        st.number_input(
+            "Altura de grafado (mm)",
+            min_value=0.0,
+            format="%.2f",
+            key="altura_grafado",
+            value=valor_mostrar
+        )
+    else:
+        # Si no requiere altura, establecer None
+        st.session_state["altura_grafado"] = None
+
+def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabados: List[Any], datos_cargados: Optional[Dict] = None):
+    """
+    Muestra los inputs relacionados con acabados y empaque.
 
     Args:
-        datos: Diccionario para almacenar los datos del formulario.
         es_manga: Boolean indicando si el producto es manga.
         tipos_grafado: Lista de objetos de tipo grafado.
         acabados: Lista de objetos de acabado.
@@ -206,328 +376,134 @@ def _mostrar_acabados_y_empaque(datos: Dict[str, Any], es_manga: bool, tipos_gra
     col1, col2 = st.columns(2)
     # No acceder a st.session_state.db aquí
 
+    # Valores por defecto
+    default_acabado_id = datos_cargados.get('acabado_id', st.session_state.get("acabado_seleccionado_id")) if datos_cargados else st.session_state.get("acabado_seleccionado_id")
+    default_num_paquetes = datos_cargados.get('num_paquetes_rollos', st.session_state.get("num_paquetes", 1000)) if datos_cargados else st.session_state.get("num_paquetes", 1000)
+
     with col1:
-        if es_manga:
-            # --- Grafado (Solo Manga) ---
-            # tipos_grafado ya viene como argumento
-            selected_grafado_id = st.session_state.get("grafado_seleccionado_id", 1) # Default a "Sin grafado" (ID 1)
-
+        if not es_manga:
+            # --- Acabado (No Manga) ---
+            selected_acabado_id = default_acabado_id
             try:
-                index_grafado = next(i for i, tg in enumerate(tipos_grafado) if tg.id == selected_grafado_id)
+                index_acabado = next(i for i, ac in enumerate(acabados) if ac.id == selected_acabado_id)
             except StopIteration:
-                index_grafado = 0
-
-            tipo_grafado_seleccionado = st.selectbox(
-                "Tipo de grafado",
-                options=tipos_grafado,
-                format_func=lambda tg: tg.nombre,
-                key="tipo_grafado_select",
-                index=index_grafado
-            )
-
-            if tipo_grafado_seleccionado:
-                current_selected_id = tipo_grafado_seleccionado.id
-                datos['tipo_grafado_id'] = current_selected_id
-
-                # Actualizar session_state solo si cambia
-                if st.session_state.get("grafado_seleccionado_id") != current_selected_id:
-                    st.session_state["grafado_seleccionado_id"] = current_selected_id
-                    # Limpiar altura si el grafado no lo requiere
-                    if current_selected_id not in [3, 4]:
-                         st.session_state["altura_grafado"] = 0.0
-                    st.rerun() # Rerun para actualizar UI de altura_grafado
-            else:
-                 datos['tipo_grafado_id'] = None
-
-
-            # --- Altura Grafado (Condicional) ---
-            # Usar el ID almacenado en session_state para decidir si mostrar
-            grafado_id_for_altura = st.session_state.get("grafado_seleccionado_id")
-            if grafado_id_for_altura in [3, 4]:
-                 datos['altura_grafado'] = st.number_input(
-                    "Altura de grafado (mm)",
-                    min_value=0.0,
-                    format="%.2f",
-                    help="Requerido para Grafado Horizontal Total o H.Total+Vertical",
-                    key="altura_grafado",
-                    value=st.session_state.get("altura_grafado", 0.0)
-                 )
-            else:
-                 datos['altura_grafado'] = None # No aplica
-                 # No es necesario mostrar nada si no aplica
-
-
-        else:
-            # --- Acabado (Solo No-Manga) ---
-            # acabados ya viene como argumento
-            # Incluir opción "Sin acabado" representada por None
-            opciones_acabado = [(None, "Sin acabado")] + [(ac.id, ac.nombre) for ac in acabados]
-
-            selected_acabado_id = st.session_state.get("acabado_id", None)
-
-            # Encontrar índice
-            try:
-                index_acabado = next(i for i, (id, _) in enumerate(opciones_acabado) if id == selected_acabado_id)
-            except StopIteration:
-                index_acabado = 0 # Default a "Sin acabado"
-
-            selected_option = st.selectbox(
+                index_acabado = 0
+                
+            st.selectbox(
                 "Acabado",
-                options=opciones_acabado,
-                format_func=lambda opt: opt[1], # Mostrar el nombre
+                options=acabados,
+                format_func=lambda ac: ac.nombre,
                 key="acabado_select",
                 index=index_acabado
             )
-
-            datos['acabado_id'] = selected_option[0] # Guardar el ID (o None)
-            st.session_state["acabado_id"] = selected_option[0] # Guardar en session state
+        else:
+            # Para mangas, no mostrar acabado, usar espacio para equilibrio
+            st.write("Sin acabado (manga)")
 
 
     with col2:
-        # --- Número de Paquetes/Rollos ---
-        if es_manga:
-            # Fijo para manga
-            st.markdown('<label style="font-size: 0.875rem; color: #555;">Número de paquetes/rollos</label>', unsafe_allow_html=True)
-            st.markdown('<div style="padding: 0.5rem 0; color: #333; font-weight: bold;">100</div>', unsafe_allow_html=True)
-            datos['num_paquetes'] = 100
-            st.session_state['num_paquetes_manga'] = 100
-        else:
-            # Input para no-manga
-            datos['num_paquetes'] = st.number_input(
-                "Número de paquetes/rollos",
-                min_value=1,
-                step=1,
-                key="num_paquetes_otro",
-                value=st.session_state.get("num_paquetes_otro", 1)
-            )
+        # --- Empaque --- 
+        empaque_label = "Unidades por paquete" if es_manga else "Etiquetas por rollo"
+        st.number_input(empaque_label, min_value=1, step=1, key="num_paquetes", value=int(default_num_paquetes))
 
 
-def _mostrar_opciones_adicionales(datos: Dict[str, Any], es_manga: bool):
-    """Muestra checkboxes para opciones adicionales (troquel, planchas separadas)."""
-    # Mostrar el subheader solo si hay alguna opción visible
-    mostrar_subheader = (not es_manga) or (st.session_state.get('usuario_rol') == 'administrador')
-    if mostrar_subheader:
-        st.subheader("Opciones Adicionales")
+def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict] = None):
+    """Muestra las opciones adicionales (troquel, planchas)."""
+    st.subheader("Opciones Adicionales")
+    
+    # Valores por defecto
+    # Usar nombres de campo consistentes con datos_cargados
+    default_tiene_troquel = datos_cargados.get('existe_troquel', st.session_state.get("tiene_troquel", False)) if datos_cargados else st.session_state.get("tiene_troquel", False)
+    default_planchas_sep = datos_cargados.get('planchas_x_separado', st.session_state.get("planchas_separadas", False)) if datos_cargados else st.session_state.get("planchas_separadas", False)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if not es_manga: # Condición para mostrar el checkbox
-            datos['tiene_troquel'] = st.checkbox(
-                "¿Existe troquel?",
-                key="tiene_troquel",
-                value=st.session_state.get("tiene_troquel", False)
-                )
-        else:
-            datos['tiene_troquel'] = False # Valor por defecto si es manga
-        # st.session_state["tiene_troquel"] = datos['tiene_troquel'] # REMOVED: Widget handles state via key
+    if not es_manga:
+        # El valor bool se guarda en st.session_state.tiene_troquel
+        st.checkbox("¿Cliente tiene troquel?", key="tiene_troquel", value=bool(default_tiene_troquel))
+    else:
+        # Asegurar que el estado es False si es manga
+        if st.session_state.get("tiene_troquel") is not False:
+             st.session_state.tiene_troquel = False
 
-    with col2:
-        # Planchas separadas solo visible para administradores
-        if st.session_state.get('usuario_rol') == 'administrador':
-            datos['planchas_separadas'] = st.checkbox(
-                "¿Planchas por separado?",
-                key="planchas_separadas",
-                value=st.session_state.get("planchas_separadas", False)
-                )
-            # st.session_state["planchas_separadas"] = datos['planchas_separadas'] # REMOVED: Widget handles state via key
-        else:
-            datos['planchas_separadas'] = False # Default para no admin
+    # --- Planchas Separadas (Solo Admin) ---
+    if st.session_state.get('usuario_rol') == 'administrador':
+        # El valor bool se guarda en st.session_state.planchas_separadas
+        st.checkbox(
+            "¿Cobrar planchas por separado?", 
+            key="planchas_separadas", 
+            value=bool(default_planchas_sep),
+            help="Si se marca, el costo de las planchas se mostrará como un ítem separado en la cotización."
+        )
+    else:
+        # Si no es admin, asegurar que el estado sea False
+        if st.session_state.get("planchas_separadas") is not False:
+             st.session_state.planchas_separadas = False
 
 
 # --- Helper Function for Payment Method ---
 
-def _mostrar_formas_pago(datos: Dict[str, Any], formas_pago: List[Any]):
+def _mostrar_formas_pago(formas_pago: List[Any], datos_cargados: Optional[Dict] = None):
     """
     Muestra el selector de forma de pago.
 
     Args:
-        datos: Diccionario para almacenar los datos del formulario.
         formas_pago: Lista completa de objetos de forma de pago.
     """
-    st.subheader("Forma de Pago")
+    st.subheader("Condiciones Comerciales")
+    
+    default_forma_pago_id = datos_cargados.get('forma_pago_id', st.session_state.get("forma_pago_id", 1)) if datos_cargados else st.session_state.get("forma_pago_id", 1) # Default a ID 1
 
-    if not formas_pago:
-        st.warning("No hay formas de pago disponibles para seleccionar.")
-        datos['forma_pago_id'] = None
-        return
-
-    # Guardar el ID seleccionado previamente para mantener la selección
-    selected_forma_pago_id = st.session_state.get("forma_pago_id", None)
-
-    # Encontrar el índice de la forma de pago seleccionada previamente
     try:
-        # Default al primero si no se encuentra o es la primera vez
-        index = next(i for i, fp in enumerate(formas_pago) if fp.id == selected_forma_pago_id)
-    except (StopIteration, AttributeError): # Manejar casos donde no se encuentra o la lista está vacía/mal formada
-        index = 0
+        index_fp = next(i for i, fp in enumerate(formas_pago) if fp.id == default_forma_pago_id)
+    except StopIteration:
+        index_fp = 0 # Default al primero si no se encuentra
 
     forma_pago_seleccionada = st.selectbox(
-        "Seleccione la Forma de Pago",
+        "Forma de Pago",
         options=formas_pago,
-        format_func=lambda fp: fp.descripcion, # Use 'descripcion' instead of 'nombre'
+        format_func=lambda fp: fp.descripcion,
         key="forma_pago_select",
-        index=index
+        index=index_fp
     )
 
     if forma_pago_seleccionada:
-        datos['forma_pago_id'] = forma_pago_seleccionada.id
-        st.session_state["forma_pago_id"] = forma_pago_seleccionada.id # Guardar para persistencia
+        st.session_state["forma_pago_id"] = forma_pago_seleccionada.id # Guardar en estado
     else:
-        # Esto puede ocurrir si la lista de formas_pago está vacía inicialmente
-        datos['forma_pago_id'] = None
         st.session_state["forma_pago_id"] = None
-        st.warning("Por favor seleccione una forma de pago.")
 
 
-# --- Main Function ---
-
-def mostrar_formulario_producto(cliente: Optional[Cliente] = None) -> Dict[str, Any]:
+# --- RENOMBRADA Y SIMPLIFICADA --- 
+def mostrar_secciones_internas_formulario(es_manga: bool, initial_data: Dict, datos_cargados: Optional[Dict] = None) -> None:
     """
-    Muestra los campos del formulario para ingresar los datos del producto,
-    organizados por secciones lógicas.
-
-    ASUME:
-    - El tipo de producto ya fue seleccionado y está en st.session_state['tipo_producto_seleccionado'].
-    - El rol del usuario está en st.session_state['usuario_rol'].
-    - Una instancia de DBManager está en st.session_state.db.
-    - Los adhesivos están cargados en st.session_state.initial_data['adhesivos'] (o similar)
+    Muestra las secciones del formulario que SÍ deben ir dentro del st.form.
+    (Dimensiones, Acabados/Empaque, Opciones Adicionales, Pago).
+    Los valores se leen/escriben directamente en st.session_state.
 
     Args:
-        cliente: Cliente seleccionado (Opcional, actualmente no se usa directamente aquí).
-
-    Returns:
-        Dict con los datos del formulario recolectados.
-        Retorna un diccionario vacío si faltan datos esenciales (ej. tipo producto).
+        es_manga: Boolean indicando si el producto es manga.
+        initial_data: Diccionario con datos iniciales cacheados (tipos_grafado, acabados, etc.).
+        datos_cargados: Diccionario con datos precargados para modo edición.
     """
-    datos_producto = {}
-
-    # Verificar dependencias clave en session_state
-    tipo_producto_id = st.session_state.get('tipo_producto_seleccionado')
-    if tipo_producto_id is None:
-        st.error("Error: Tipo de producto no seleccionado. Por favor, vuelva al paso anterior.")
-        return {} # Retornar vacío si falta el tipo
-
-    db: DBManager = st.session_state.db # Acceder una sola vez
-    if not isinstance(db, DBManager):
-         st.error("Error: Conexión a la base de datos. Por favor, vuelva a cargar la página.")
-         return {}
-
-    if 'usuario_rol' not in st.session_state:
-         st.warning("Rol de usuario no definido, algunas opciones pueden no funcionar correctamente.")
-         # Considerar asignar un rol por defecto si es necesario
-
-    es_manga = (tipo_producto_id == 2) # ID 2 se asume que es Manga
-
-    # --- Obtener datos de la DB una sola vez ---
-    try:
-        todos_materiales = db.get_materiales()
-        todos_tipos_grafado = db.get_tipos_grafado() if es_manga else []
-        todos_acabados = db.get_acabados() if not es_manga else []
-        todas_formas_pago = db.get_formas_pago() # <-- Nueva línea para obtener formas de pago
-    except Exception as e:
-        st.error(f"Error al cargar datos iniciales desde la base de datos: {e}")
-        return {}
-
-
-    # --- Renderizar Secciones del Formulario ---
-    _mostrar_escalas(datos_producto)
+    # Obtener listas necesarias de initial_data
+    # (Asegurarse que initial_data fue cargado correctamente antes de llamar esta función)
+    acabados = initial_data.get('acabados', [])
+    tipos_grafado = initial_data.get('tipos_grafado', [])
+    formas_pago = initial_data.get('formas_pago', [])
+    
+    # --- Renderizar SOLO las secciones internas --- 
+    # Ya no se muestra Material, Adhesivo, ni Grafado aquí
+    
+    # --- AÑADIDO: Mostrar sección de escalas ---
+    _mostrar_escalas(datos_cargados)
+    # -------------------------------------------
+    
     st.divider()
-    _mostrar_dimensiones_y_tintas(datos_producto, es_manga)
+    _mostrar_dimensiones_y_tintas(es_manga, datos_cargados)
     st.divider()
-    _mostrar_material(datos_producto, es_manga, todos_materiales)
-    
-    # --- Obtener Adhesivos Compatibles (si aplica) ---
-    adhesivos_compatibles = []
-    selected_material_id = datos_producto.get('material_id') # Get selected material ID
-    
-    if not es_manga and selected_material_id is not None:
-        try:
-            print(f"--- DEBUG: Fetching compatible adhesives for material ID: {selected_material_id} ---")
-            adhesivos_compatibles = db.get_adhesivos_for_material(selected_material_id)
-            print(f"--- DEBUG: Compatible adhesives found: {len(adhesivos_compatibles)} ---")
-        except Exception as e:
-            st.error(f"Error al cargar adhesivos compatibles para el material seleccionado: {e}")
-            # Handle error appropriately, maybe return {} or show a persistent warning
-    
-    # --- Mostrar Adhesivo solo si NO es manga ---
-    if not es_manga:
-        st.divider() # Separador antes de adhesivo
-        _mostrar_adhesivo(datos_producto, adhesivos_compatibles) # <-- Pass filtered list
-    else:
-        # Asegurar que adhesivo_id sea None si es manga
-        datos_producto['adhesivo_id'] = None
-        if "adhesivo_id" in st.session_state:
-             del st.session_state["adhesivo_id"] # Limpiar estado si se cambió a manga
-
-    st.divider() # Separador después de material/adhesivo
-    _mostrar_acabados_y_empaque(datos_producto, es_manga, todos_tipos_grafado, todos_acabados)
+    _mostrar_acabados_y_empaque(es_manga, tipos_grafado, acabados, datos_cargados)
+    st.divider()
+    _mostrar_opciones_adicionales(es_manga, datos_cargados)
+    st.divider()
+    _mostrar_formas_pago(formas_pago, datos_cargados)
     st.divider()
 
-    # --- OBTENER material_adhesivo_id --- 
-    # Después de obtener material_id y adhesivo_id (si aplica)
-    material_id = datos_producto.get('material_id')
-    adhesivo_id = datos_producto.get('adhesivo_id') # Será None si es manga
-    datos_producto['material_adhesivo_id'] = None # Inicializar
-
-    if material_id is not None and adhesivo_id is not None:
-        try:
-            print(f"Buscando ID de material_adhesivo para material {material_id} y adhesivo {adhesivo_id}")
-            entry = db.get_material_adhesivo_entry(material_id, adhesivo_id)
-            if entry and 'id' in entry:
-                datos_producto['material_adhesivo_id'] = entry['id']
-                print(f"Encontrado material_adhesivo_id: {entry['id']}")
-            else:
-                print(f"Advertencia: No se encontró entrada en material_adhesivo para la combinación {material_id} / {adhesivo_id}")
-                # Mantener material_adhesivo_id como None, puede que se valide después
-        except Exception as e_lookup:
-            print(f"Error buscando material_adhesivo_id: {e_lookup}")
-            # Mantener como None y posiblemente mostrar error
-            st.warning("Error al determinar la combinación material-adhesivo.")
-    elif material_id is not None and es_manga: # Caso específico para manga (sin adhesivo)
-        # Asumiendo que hay una entrada para material + "sin adhesivo" ID
-        ID_SIN_ADHESIVO = 4 # Reconfirmar este ID
-        try:
-            print(f"Buscando ID de material_adhesivo para MANGA material {material_id} (Adhesivo={ID_SIN_ADHESIVO})")
-            entry = db.get_material_adhesivo_entry(material_id, ID_SIN_ADHESIVO)
-            if entry and 'id' in entry:
-                datos_producto['material_adhesivo_id'] = entry['id']
-                print(f"Encontrado material_adhesivo_id para manga: {entry['id']}")
-            else:
-                print(f"Advertencia: No se encontró entrada en material_adhesivo para MANGA {material_id} / Sin Adhesivo ({ID_SIN_ADHESIVO})")
-        except Exception as e_lookup_manga:
-            print(f"Error buscando material_adhesivo_id para manga: {e_lookup_manga}")
-            st.warning("Error al determinar la combinación material-adhesivo para manga.")
-            
-    # Eliminar las claves intermedias si ya no se necesitan fuera
-    # datos_producto.pop('material_id', None)
-    # datos_producto.pop('adhesivo_id', None)
-    # ----------------------------------
-
-    _mostrar_opciones_adicionales(datos_producto, es_manga) # Pasar es_manga aquí
-    st.divider() # <-- Nuevo divisor
-    _mostrar_formas_pago(datos_producto, todas_formas_pago) # <-- Llamada a la nueva función
-
-
-    # Validar datos esenciales antes de retornar
-    if not datos_producto.get('escalas'):
-        st.warning("Por favor, ingrese al menos una escala válida.")
-        # Podríamos invalidar el retorno o dejar que la lógica posterior lo maneje
-        # return {} # Descomentar si se requiere que las escalas sean obligatorias aquí
-
-    if datos_producto.get('material_id') is None:
-         st.warning("Por favor, seleccione un material.")
-         # return {} # Descomentar si se requiere material obligatorio aquí
-
-    # --- Validar Adhesivo si es Etiqueta ---
-    if not es_manga and datos_producto.get('adhesivo_id') is None:
-         st.warning("Por favor, seleccione un adhesivo para la etiqueta.")
-         # return {} # Descomentar si se requiere adhesivo obligatorio aquí
-
-    if datos_producto.get('forma_pago_id') is None and todas_formas_pago: # <-- Nueva validación
-        st.warning("Por favor, seleccione una forma de pago.")
-        # return {} # Descomentar si se requiere forma de pago obligatoria aquí
-
-    # Añadir tipo_producto_id y es_manga al diccionario final (si es necesario fuera)
-    # datos_producto['tipo_producto_id'] = tipo_producto_id
-    # datos_producto['es_manga'] = es_manga
-    return datos_producto
+# --- FIN FUNCIÓN RENOMBRADA --- 

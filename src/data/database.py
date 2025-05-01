@@ -1,4 +1,3 @@
-from supabase import create_client, Client
 from typing import List, Optional, Dict, Any, Tuple
 from src.data.models import (
     Cotizacion, Material, Acabado, Cliente, Escala, ReferenciaCliente,
@@ -13,8 +12,20 @@ import traceback
 import postgrest
 import httpx
 import time
+from supabase import create_client, Client, PostgrestAPIError
 
 class DBManager:
+    # --- INICIO DEFINICIÓN CAMPOS ACTUALIZABLES ---
+    CAMPOS_COTIZACION_ACTUALIZABLES = {
+        'material_adhesivo_id', 'acabado_id', 'num_tintas', 'num_paquetes_rollos',
+        'es_manga', 'tipo_grafado_id', 'valor_troquel', 'valor_plancha_separado',
+        'estado_id', 'id_motivo_rechazo', 'planchas_x_separado', 'existe_troquel',
+        'numero_pistas', 'tipo_producto_id', 'ancho', 'avance', 'forma_pago_id',
+        'altura_grafado', 'es_recotizacion'
+        # Nota: modificado_por y fecha_modificacion se añaden aparte
+    }
+    # --- FIN DEFINICIÓN CAMPOS ACTUALIZABLES ---
+    
     def __init__(self, supabase_client):
         self.supabase = supabase_client
         
@@ -136,49 +147,47 @@ class DBManager:
         
     def _limpiar_datos(self, datos_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Limpia los datos antes de enviarlos a la base de datos:
-        - Elimina campos None
-        - Elimina campos de fecha manejados por la BD
-        - Convierte valores según el tipo de columna en la base de datos
+        Limpia y filtra los datos ANTES de enviarlos a la base de datos (UPDATE).
+        - SOLO incluye campos definidos en CAMPOS_COTIZACION_ACTUALIZABLES.
+        - Elimina valores None.
+        - Convierte tipos si es necesario.
         """
-        campos_fecha = ['creado_en', 'actualizado_en', 'created_at', 'updated_at']
-        campos_booleanos = ['es_manga', 'existe_troquel', 'es_recotizacion', 'troquel_existe']
-        campos_enteros = ['cliente_id', 'referencia_id', 'material_id', 'acabado_id', 
-                         'num_tintas', 'num_rollos', 'consecutivo', 'planchas_x_separado',
-                         'numero_pistas', 'referencia_cliente_id', 'num_paquetes_rollos',
-                         'tipo_producto_id', 'etiquetas_por_rollo', 'forma_pago_id']
-        campos_numericos = ['valor_troquel', 'valor_plancha_separado', 'avance', 'altura_grafado']
-        campos_string = ['comercial_id']
+        campos_booleanos = {'es_manga', 'existe_troquel', 'es_recotizacion', 'planchas_x_separado'}
+        campos_enteros = {'material_adhesivo_id', 'acabado_id', 'num_tintas', 'num_paquetes_rollos',
+                         'tipo_grafado_id', 'estado_id', 'id_motivo_rechazo', 'numero_pistas',
+                         'tipo_producto_id', 'forma_pago_id'}
+        campos_numericos = {'valor_troquel', 'valor_plancha_separado', 'ancho', 'avance', 'altura_grafado'}
         
         new_dict = {}
-        for k, v in datos_dict.items():
-            if v is not None and k not in campos_fecha:
+        # --- INICIO CAMBIO LÓGICA: Iterar solo campos permitidos ---
+        for k in self.CAMPOS_COTIZACION_ACTUALIZABLES:
+            if k in datos_dict and datos_dict[k] is not None:
+                v = datos_dict[k]
+                # Aplicar conversiones de tipo
                 if k in campos_booleanos:
-                    # Convertir a booleano
                     if isinstance(v, str):
                         new_dict[k] = v.lower() == 'true'
                     else:
                         new_dict[k] = bool(v)
                 elif k in campos_enteros and v != '':
-                    # Convertir a entero si no está vacío
                     try:
-                        new_dict[k] = int(v) if v is not None else None
+                        new_dict[k] = int(v)
                     except (ValueError, TypeError):
-                        new_dict[k] = None
+                        new_dict[k] = None # O manejar el error como prefieras
+                        print(f"Advertencia: No se pudo convertir '{k}' a entero: {v}")
                 elif k in campos_numericos and v != '':
-                    # Convertir a float para campos numéricos
                     try:
-                        new_dict[k] = float(v) if v is not None else None
+                        new_dict[k] = float(v)
                     except (ValueError, TypeError):
                         new_dict[k] = None
-                elif k in campos_string:
-                    # Asegurar que estos campos sean string o None
-                    new_dict[k] = str(v) if v is not None else None
+                        print(f"Advertencia: No se pudo convertir '{k}' a float: {v}")
                 else:
-                    # Mantener el valor original para otros campos
-                    new_dict[k] = v
+                    # Si no requiere conversión específica (y está en la lista permitida)
+                    new_dict[k] = v 
+        # --- FIN CAMBIO LÓGICA ---
         
-        return new_dict
+        # Asegurarse de que los campos None resultantes de conversiones fallidas no se incluyan
+        return {k: v for k, v in new_dict.items() if v is not None}
 
 
     def crear_cotizacion(self, datos_cotizacion):
@@ -406,6 +415,18 @@ class DBManager:
             print("\nDatos limpios a actualizar:")
             for k, v in datos_limpios.items():
                 print(f"  {k}: {v}")
+                
+            # --- AÑADIR CAMPOS DE AUDITORÍA ---
+            user_id = st.session_state.get('user_id') # Obtener ID del usuario de la sesión
+            if user_id:
+                datos_limpios['modificado_por'] = user_id
+            else:
+                 print("ADVERTENCIA: No se encontró user_id en session_state para auditoría de actualización.")
+                 # Considerar si se debe fallar la operación o continuar sin auditoría
+            datos_limpios['actualizado_en'] = datetime.now().isoformat() # Usar fecha/hora actual
+            print(f"  modificado_por: {datos_limpios.get('modificado_por')}")
+            print(f"  actualizado_en: {datos_limpios['actualizado_en']}")
+            # ---------------------------------
             
             # Actualizar la cotización
             response = self.supabase.from_('cotizaciones') \
@@ -1354,7 +1375,25 @@ class DBManager:
             referencia = cotizacion.referencia_cliente
             cliente = referencia.cliente if referencia else None
             perfil_comercial = referencia.perfil if referencia else None # Perfil es un dict
-            material = cotizacion.material
+            
+            # --- INICIO CAMBIO: Obtener material correctamente ---
+            # material = cotizacion.material # <-- ESTO FALLA
+            material_adhesivo_info = cotizacion.material_adhesivo # Es un dict o None
+            material_obj = None
+            material_id_from_join = None
+            if material_adhesivo_info:
+                 material_id_from_join = material_adhesivo_info.get('material_id')
+                 if material_id_from_join:
+                      # Usar el método existente para obtener el objeto Material completo
+                      material_obj = self.get_material(material_id_from_join) 
+                      if not material_obj:
+                           print(f"Advertencia: No se encontró el objeto Material para ID {material_id_from_join} obtenido de material_adhesivo_info")
+                 else:
+                      print("Advertencia: material_adhesivo_info no contiene 'material_id'")
+            else:
+                 print("Advertencia: cotizacion.material_adhesivo es None")
+            # --- FIN CAMBIO ---
+
             acabado = cotizacion.acabado
             tipo_producto = cotizacion.tipo_producto
             # Remove redundant fetch, rely on cotizacion.forma_pago from obtener_cotizacion
@@ -1384,7 +1423,9 @@ class DBManager:
                 'consecutivo': cotizacion.numero_cotizacion,
                 'nombre_cliente': cliente.nombre if cliente else None,
                 'descripcion': referencia.descripcion if referencia else None,
-                'material': material.__dict__ if material else {},
+                # --- INICIO CAMBIO: Usar material_obj ---
+                'material': material_obj.__dict__ if material_obj else {}, 
+                # --- FIN CAMBIO ---
                 'acabado': acabado.__dict__ if acabado else {},
                 'num_tintas': cotizacion.num_tintas,
                 'num_rollos': cotizacion.num_paquetes_rollos,
@@ -1678,7 +1719,8 @@ class DBManager:
                                 avance: float, ancho: float, existe_troquel: bool, planchas_x_separado: bool, 
                                 num_tintas: int, numero_pistas: int, num_paquetes_rollos: int, 
                                 tipo_producto_id: int, tipo_grafado_id: Optional[int], valor_acabado: float, 
-                                unidad_z_dientes: float) -> bool:
+                                unidad_z_dientes: float, altura_grafado: Optional[float]=None, 
+                                valor_plancha_separado: Optional[float] = None) -> bool:
         """Guarda o actualiza los parámetros de cálculo de escala para una cotización usando RPC."""
         if not cotizacion_id:
             print("Error: cotizacion_id es requerido para guardar cálculos de escala.")
@@ -1700,9 +1742,10 @@ class DBManager:
             'p_numero_pistas': numero_pistas,
             'p_num_paquetes_rollos': num_paquetes_rollos,
             'p_tipo_producto_id': tipo_producto_id,
-            'p_tipo_grafado_id': tipo_grafado_id, # Pass None if applicable
+            'p_tipo_grafado_id': tipo_grafado_id,
             'p_valor_acabado': valor_acabado,
             'p_unidad_z_dientes': unidad_z_dientes
+            # Eliminar 'p_altura_grafado' y 'p_valor_plancha_separado'
         }
 
         try:
@@ -2700,3 +2743,465 @@ class DBManager:
         result = self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
         return result if result is not None else []
     # --- END NEW METHOD ---
+
+    def get_all_cotizaciones_overview(self) -> List[Dict[str, Any]]:
+        """Obtiene una lista simplificada de todas las cotizaciones para la vista de gestión (Admin)."""
+        def _operation():
+            try:
+                # Llamar a la función RPC get_all_cotizaciones_overview
+                print("Llamando RPC: get_all_cotizaciones_overview")
+                response = self.supabase.rpc('get_all_cotizaciones_overview').execute()
+                
+                if response.data:
+                    # La RPC ya devuelve el formato deseado
+                    print(f"RPC get_all_cotizaciones_overview retornó {len(response.data)} filas.")
+                    return response.data
+                else:
+                    print("RPC get_all_cotizaciones_overview no retornó datos.")
+                    return []
+            except Exception as e:
+                # Capturar errores específicos si es necesario (ej. permiso denegado)
+                if isinstance(e, postgrest.exceptions.APIError) and 'Permiso denegado' in str(e):
+                     print(f"Error de permiso en get_all_cotizaciones_overview: {e}")
+                     # Devolver vacío o lanzar un error específico para la UI
+                     return []
+                print(f"Error llamando a RPC get_all_cotizaciones_overview: {e}")
+                traceback.print_exc()
+                return []
+                
+        # Usar retry operation (útil si hay errores temporales de red)
+        return self._retry_operation("get_all_cotizaciones_overview (RPC)", _operation)
+
+    def get_cotizaciones_overview_by_comercial(self, comercial_id: str) -> List[Dict[str, Any]]:
+        """Obtiene una lista simplificada de las cotizaciones de un comercial específico (Comercial)."""
+        if not comercial_id:
+             print("Error: comercial_id es requerido para get_cotizaciones_overview_by_comercial")
+             return []
+             
+        def _operation():
+            try:
+                # Llamar a la función RPC get_cotizaciones_overview_by_comercial
+                print(f"Llamando RPC: get_cotizaciones_overview_by_comercial con p_comercial_id={comercial_id}") # LOG RPC CALL
+                response = self.supabase.rpc(
+                    'get_cotizaciones_overview_by_comercial',
+                    {'p_comercial_id': comercial_id}
+                ).execute()
+                
+                if response.data:
+                    # La RPC ya devuelve el formato deseado
+                    print(f"RPC get_cotizaciones_overview_by_comercial retornó {len(response.data)} filas.") # LOG SUCCESS + COUNT
+                    return response.data
+                else:
+                    print("RPC get_cotizaciones_overview_by_comercial no retornó datos.") # LOG NO DATA
+                    return []
+            except Exception as e:
+                print(f"Error llamando a RPC get_cotizaciones_overview_by_comercial: {e}") # LOG ERROR
+                traceback.print_exc()
+                return []
+                
+        # Usar retry operation
+        return self._retry_operation(f"get_cotizaciones_overview_by_comercial {comercial_id} (RPC)", _operation)
+        
+    def get_full_cotizacion_details(self, cotizacion_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Obtiene todos los detalles necesarios de una cotización para rellenar el formulario de edición,
+        utilizando la función RPC dedicada.
+        """
+        if cotizacion_id is None:
+            print("Error: cotizacion_id es requerido para get_full_cotizacion_details")
+            return None
+            
+        def _operation():
+            try:
+                print(f"Llamando RPC: get_full_cotizacion_details con p_cotizacion_id={cotizacion_id}")
+                response = self.supabase.rpc(
+                    'get_full_cotizacion_details',
+                    {'p_cotizacion_id': cotizacion_id}
+                ).execute()
+                
+                # La RPC debería devolver una lista con un único diccionario si tiene éxito
+                if response.data and isinstance(response.data, list) and len(response.data) == 1:
+                    # La RPC ya devuelve el formato deseado (o muy cercano)
+                    details = response.data[0]
+                    print(f"RPC get_full_cotizacion_details retornó detalles para ID {cotizacion_id}.")
+                    # Podrían ser necesarias pequeñas adaptaciones aquí si los nombres de columna
+                    # devueltos por la RPC no coinciden exactamente con los esperados por la UI.
+                    # Por ejemplo, si la RPC devuelve 'pistas' pero la UI espera 'numero_pistas'.
+                    # Ejemplo de adaptación:
+                    # if 'pistas' in details and 'numero_pistas' not in details:
+                    #     details['numero_pistas'] = details.pop('pistas') 
+                    return details
+                elif response.data and isinstance(response.data, list) and len(response.data) == 0:
+                     print(f"RPC get_full_cotizacion_details no retornó datos para ID {cotizacion_id} (No encontrado o sin permiso)." )
+                     return None
+                else:
+                    print(f"Respuesta inesperada de RPC get_full_cotizacion_details: {response.data}")
+                    return None
+            except Exception as e:
+                print(f"Error llamando a RPC get_full_cotizacion_details: {e}")
+                traceback.print_exc()
+                return None
+                
+        # Usar retry operation
+        # Devolvemos None si no se encuentra después de reintentos
+        return self._retry_operation(f"get_full_cotizacion_details {cotizacion_id} (RPC)", _operation)
+
+    # --- Funciones para Edición --- 
+    def obtener_cotizacion(self, cotizacion_id: int) -> Optional[Cotizacion]:
+        """
+        Obtiene un objeto Cotizacion completo por su ID usando la RPC get_full_cotizacion_details,
+        y luego poblando el objeto con sus relaciones y escalas.
+        Respeta RLS a través de la RPC subyacente.
+
+        Args:
+            cotizacion_id (int): ID de la cotización.
+
+        Returns:
+            Optional[Cotizacion]: El objeto Cotizacion completo o None.
+        """
+        print(f"-- Ejecutando obtener_cotizacion para ID: {cotizacion_id} --") # DEBUG
+        try:
+            # 1. Obtener los detalles planos usando la RPC via get_full_cotizacion_details
+            details = self.get_full_cotizacion_details(cotizacion_id)
+
+            if not details:
+                print(f"obtener_cotizacion: No se encontraron detalles vía RPC para ID {cotizacion_id}. Retornando None.") # DEBUG
+                return None
+
+            print(f"obtener_cotizacion: Detalles RPC obtenidos para ID {cotizacion_id}. Procesando...") # DEBUG
+            # print(f"Detalles RPC: {details}") # DEBUG detallado opcional
+            
+            # 2. Crear objetos relacionados a partir del diccionario `details`
+            # Nota: Los nombres de las claves en `details` deben coincidir con los alias en la RPC SQL.
+            cliente_obj = None
+            if details.get('cliente_id'):
+                try:
+                    cliente_obj = Cliente(
+                        id=details['cliente_id'],
+                        nombre=details.get('cliente_nombre'),
+                        codigo=details.get('cliente_codigo'),
+                        persona_contacto=details.get('cliente_persona_contacto'),
+                        correo_electronico=details.get('cliente_correo_electronico'),
+                        telefono=details.get('cliente_telefono')
+                    )
+                except KeyError as ke:
+                    print(f"Error creando Cliente: Falta la clave {ke} en detalles RPC")
+                    # Podrías retornar None aquí o continuar sin cliente
+                except Exception as e_cli:
+                    print(f"Error inesperado creando Cliente: {e_cli}")
+
+            perfil_obj = None # Perfil es solo un dict simple aquí
+            if details.get('comercial_id'): # Asume que RPC devuelve 'comercial_id' y 'comercial_nombre'
+                 perfil_obj = {
+                     'id': details['comercial_id'],
+                     'nombre': details.get('comercial_nombre')
+                     # Añadir más campos si la RPC los devuelve (email, celular)
+                 }
+
+            referencia_obj = None
+            if details.get('referencia_cliente_id'):
+                try:
+                    referencia_obj = ReferenciaCliente(
+                        id=details['referencia_cliente_id'],
+                        cliente_id=details.get('cliente_id'),
+                        descripcion=details.get('referencia_descripcion'),
+                        id_usuario=details.get('comercial_id'),
+                        # creado_en/actualizado_en podrían venir de la RPC si se añadieron
+                        # cliente y perfil se asignan después de crear el objeto
+                    )
+                    referencia_obj.cliente = cliente_obj
+                    referencia_obj.perfil = perfil_obj
+                except KeyError as ke:
+                    print(f"Error creando ReferenciaCliente: Falta la clave {ke} en detalles RPC")
+                except Exception as e_ref:
+                    print(f"Error inesperado creando ReferenciaCliente: {e_ref}")
+
+            material_obj = None
+            # La RPC devuelve material_id y adhesivo_id, podríamos usarlos para obtener los objetos
+            # O si la RPC ya devuelve el nombre/valor, usarlos directamente
+            if details.get('material_id'):
+                material_obj = Material(id=details['material_id'], nombre=details.get('material_nombre', 'N/A')) # Simplificado
+                # Si necesitas el valor u otros campos, la RPC debería devolverlos o hacer otra consulta
+                
+            adhesivo_obj = None # La RPC devuelve adhesivo_id, podríamos obtener objeto si fuera necesario
+            if details.get('adhesivo_id'):
+                 adhesivo_obj = Adhesivo(id=details['adhesivo_id'], tipo=details.get('adhesivo_tipo', 'N/A')) # Simplificado
+                 
+            # Crear objeto MaterialAdhesivo (aunque Cotizacion solo guarda el ID)
+            # Esto es más para completar la información si se necesitara
+            material_adhesivo_obj = None
+            if details.get('material_adhesivo_id'):
+                 material_adhesivo_obj = { # Usar un dict simple ya que no hay modelo específico
+                      'id': details['material_adhesivo_id'],
+                      'material_id': details.get('material_id'),
+                      'adhesivo_id': details.get('adhesivo_id'),
+                      'valor': details.get('material_valor') # Asumiendo que la RPC devuelve el valor usado
+                 }
+
+            acabado_obj = None
+            if details.get('acabado_id'):
+                 acabado_obj = Acabado(id=details['acabado_id'], nombre=details.get('acabado_nombre', 'N/A')) # Simplificado
+                 # Si necesitas el valor, la RPC debe devolverlo o hacer otra consulta
+            
+            tipo_prod_obj = None
+            if details.get('tipo_producto_id'):
+                tipo_prod_obj = TipoProducto(id=details['tipo_producto_id'], nombre=details.get('tipo_producto_nombre', 'N/A')) # Simplificado
+                
+            forma_pago_obj = None
+            if details.get('forma_pago_id'):
+                 forma_pago_obj = FormaPago(id=details['forma_pago_id'], descripcion=details.get('forma_pago_desc', 'N/A')) # Simplificado
+                 
+            tipo_grafado_obj = None # El modelo Cotizacion usa tipo_grafado_id directamente
+            if details.get('tipo_grafado_id'):
+                 tipo_grafado_obj = TipoGrafado(id=details['tipo_grafado_id'], nombre=details.get('tipo_grafado_nombre', 'N/A')) # Simplificado
+
+            # 3. Crear el objeto Cotizacion principal
+            cotizacion = Cotizacion(
+                id=cotizacion_id,
+                # IDs (directamente de `details`)
+                referencia_cliente_id=details.get('referencia_cliente_id'),
+                material_adhesivo_id=details.get('material_adhesivo_id'), # Guardamos el ID de la tabla combinada
+                acabado_id=details.get('acabado_id'),
+                tipo_producto_id=details.get('tipo_producto_id'),
+                forma_pago_id=details.get('forma_pago_id'),
+                tipo_grafado_id=details.get('tipo_grafado_id'),
+                estado_id=details.get('estado_id'),
+                id_motivo_rechazo=details.get('id_motivo_rechazo'),
+                # Campos directos de `details` (asegurar que la RPC los devuelve)
+                numero_cotizacion=details.get('numero_cotizacion'),
+                num_tintas=details.get('num_tintas'),
+                num_paquetes_rollos=details.get('num_paquetes_rollos'),
+                es_manga=details.get('es_manga', False),
+                valor_troquel=details.get('valor_troquel'),
+                valor_plancha_separado=details.get('valor_plancha_separado'),
+                planchas_x_separado=details.get('planchas_x_separado', False),
+                existe_troquel=details.get('existe_troquel', False),
+                numero_pistas=details.get('numero_pistas', 1), # Usar el valor de details si la RPC lo devuelve
+                ancho=details.get('ancho'),
+                avance=details.get('avance'),
+                fecha_creacion=details.get('fecha_creacion'),
+                identificador=details.get('identificador'),
+                es_recotizacion=details.get('es_recotizacion', False),
+                altura_grafado=details.get('altura_grafado'),
+                # Campos de auditoría
+                modificado_por=details.get('modificado_por'),
+                actualizado_en=details.get('actualizado_en'), # Corregido: usar actualizado_en
+                # Objetos relacionados (creados arriba)
+                referencia_cliente=referencia_obj,
+                material_adhesivo=material_adhesivo_obj, # Pasar el dict simple
+                # Los siguientes son opcionales para el objeto Cotizacion si no se usan directamente
+                # material=material_obj, 
+                # adhesivo=adhesivo_obj,
+                acabado=acabado_obj,
+                tipo_producto=tipo_prod_obj,
+                forma_pago=forma_pago_obj,
+                # tipo_grafado=tipo_grafado_obj, # ID es suficiente
+            )
+            
+            print(f"obtener_cotizacion: Objeto Cotizacion creado para ID {cotizacion_id}") # DEBUG
+
+            # 4. Obtener y asignar las escalas
+            print(f"obtener_cotizacion: Obteniendo escalas para ID {cotizacion_id}...") # DEBUG
+            cotizacion.escalas = self.get_cotizacion_escalas(cotizacion.id)
+            print(f"obtener_cotizacion: {len(cotizacion.escalas)} escalas asignadas.") # DEBUG
+            
+            print(f"-- Fin obtener_cotizacion (Éxito) para ID: {cotizacion_id} --") # DEBUG
+            return cotizacion
+
+        except KeyError as ke:
+            print(f"Error fatal en obtener_cotizacion (KeyError): Falta la clave {ke} en los detalles de la RPC.")
+            traceback.print_exc()
+            return None
+        except Exception as e:
+            print(f"Error inesperado en obtener_cotizacion para ID {cotizacion_id}: {e}")
+            traceback.print_exc()
+            return None
+
+    def update_referencia_cliente(self, referencia_id: int, data: Dict[str, Any]) -> bool:
+        """Actualiza campos específicos de una referencia cliente."""
+        # TODO: Implementar query de actualización para la tabla referencia_cliente
+        print(f"Placeholder: update_referencia_cliente called for ID {referencia_id} with data: {data}")
+        try:
+            # Ejemplo:
+            # self.supabase.from_('referencia_cliente').update(data).eq('id', referencia_id).execute()
+            # Verificar si la actualización fue exitosa (puede requerir chequear el resultado)
+            return True # Asumir éxito por ahora
+        except Exception as e:
+            print(f"Error actualizando referencia_cliente ID {referencia_id}: {e}")
+            return False
+
+    def eliminar_calculos_escala(self, cotizacion_id: int) -> bool:
+        """Elimina los registros de calculos_escala_cotizacion asociados a una cotización."""
+        # TODO: Implementar query de eliminación
+        print(f"Placeholder: eliminar_calculos_escala called for cotizacion_id {cotizacion_id}")
+        try:
+            # Ejemplo:
+            # self.supabase.from_('calculos_escala_cotizacion').delete().eq('cotizacion_id', cotizacion_id).execute()
+            return True # Asumir éxito
+        except Exception as e:
+            print(f"Error eliminando calculos_escala_cotizacion para cotizacion_id {cotizacion_id}: {e}")
+            return False
+
+    def eliminar_cotizacion_escalas(self, cotizacion_id: int) -> bool:
+        """Elimina los registros de cotizacion_escalas asociados a una cotización."""
+        # TODO: Implementar query de eliminación
+        print(f"Placeholder: eliminar_cotizacion_escalas called for cotizacion_id {cotizacion_id}")
+        try:
+            # Ejemplo:
+            # self.supabase.from_('cotizacion_escalas').delete().eq('cotizacion_id', cotizacion_id).execute()
+            # Considerar eliminar precios_escala también si no se hace en cascada
+            # self.supabase.rpc('eliminar_escalas_y_precios', {'p_cotizacion_id': cotizacion_id})
+            return True # Asumir éxito
+        except Exception as e:
+            print(f"Error eliminando cotizacion_escalas para cotizacion_id {cotizacion_id}: {e}")
+            return False
+    # --- Fin Funciones para Edición ---
+
+    # --- INICIO NUEVA FUNCIÓN ---
+    def get_adhesivo_id_from_material_adhesivo(self, material_adhesivo_id: int) -> Optional[int]:
+        """
+        Obtiene el adhesivo_id asociado a una entrada específica en la tabla material_adhesivo.
+
+        Args:
+            material_adhesivo_id: El ID de la fila en la tabla material_adhesivo.
+
+        Returns:
+            El adhesivo_id (int) asociado, o None si no se encuentra o hay error.
+        """
+        def _operation():
+            if material_adhesivo_id is None:
+                print("Error: material_adhesivo_id es requerido para get_adhesivo_id_from_material_adhesivo")
+                return None
+            try:
+                # print(f"Querying material_adhesivo for adhesivo_id: entry_id={material_adhesivo_id}") # Optional debug
+                response = (self.supabase.table('material_adhesivo') # <-- Sin escapes
+                    .select('adhesivo_id') # Seleccionar adhesivo_id
+                    .eq('id', material_adhesivo_id)
+                    .limit(1)
+                    .maybe_single() # Use maybe_single as it should be unique
+                    .execute())
+
+                # maybe_single returns the dict directly if found, or None
+                if response.data:
+                    adh_id = response.data.get('adhesivo_id')
+                    # print(f"Found adhesivo_id: {adh_id}") # Optional debug
+                    return adh_id
+                else:
+                    print(f"No material_adhesivo entry found with id {material_adhesivo_id}.")
+                    return None
+            except Exception as e:
+                print(f"Error fetching adhesivo_id from material_adhesivo: {e}")
+                logging.error(f"Error fetching adhesivo_id for material_adhesivo_id={material_adhesivo_id}: {e}", exc_info=True)
+                return None
+
+        # No usamos retry aquí porque None es un resultado esperado si el ID no existe.
+        try:
+             return _operation()
+        except Exception as e:
+             print(f"Excepción final en get_adhesivo_id_from_material_adhesivo: {e}")
+             return None
+    # --- FIN NUEVA FUNCIÓN ---
+
+    
+    def get_adhesivos_for_material(_self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+
+        Args:
+            material_id: ID del material.
+
+        Returns:
+            Lista de objetos Adhesivo compatibles.
+        """
+        if material_id is None:
+            return []
+
+        def _operation():
+            try:
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (_self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') # Select all columns from the joined adhesivos table
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        if adhesivo_data:
+                            try:
+                                # REMOVED: Ensure 'Sin adhesivo' is not included in the selectable options for etiquetas
+                                # if adhesivo_data.get('tipo') != 'Sin adhesivo': 
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"Error creating Adhesivo object from data: {adhesivo_data}, Error: {te}")
+                
+                print(f"--- DEBUG: Found {len(adhesivos_compatibles)} compatible adhesivos for material {material_id}")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"Error fetching compatible adhesivos for material {material_id}: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = _self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        return result if result is not None else []
+
+    #@st.cache_data
+    def get_adhesivos_for_material(_self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+        ... (docstring) ...
+        """
+        print(f"[CACHE CHECK] get_adhesivos_for_material llamado para material_id: {material_id}")
+        if material_id is None:
+            print("[CACHE CHECK] material_id es None, retornando lista vacía.")
+            return []
+
+        # La función interna _operation no se cacheará individualmente,
+        # pero su resultado sí a través del decorador externo.
+        def _operation():
+            try:
+                print(f"  [_operation] Intentando query para material_id: {material_id}")
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (_self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') 
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                # Log detallado de la respuesta cruda
+                print(f"  [_operation] Respuesta DB cruda: {response}")
+                if hasattr(response, 'data'):
+                     print(f"  [_operation] Datos en respuesta DB: {response.data}")
+                if hasattr(response, 'error'):
+                     print(f"  [_operation] Error en respuesta DB: {response.error}")
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    print(f"  [_operation] Procesando {len(response.data)} items de la respuesta...")
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        print(f"    Item: {item}, Adhesivo Data Extraído: {adhesivo_data}") # Log cada item
+                        if adhesivo_data:
+                            try:
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"    Error creando Adhesivo: {te}, Datos: {adhesivo_data}")
+                        else:
+                             print("    Item no contenía clave 'adhesivos' o era None.")
+                else:
+                     print("  [_operation] response.data estaba vacío o era None.")
+                
+                print(f"  [_operation] Final: {len(adhesivos_compatibles)} adhesivos compatibles encontrados.")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"  [_operation] EXCEPCIÓN en fetching: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        # Llamada a _retry_operation (que llama a _operation)
+        print(f"[CACHE CHECK] Llamando a _retry_operation para material_id: {material_id}")
+        result = _self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        print(f"[CACHE CHECK] Resultado final para material_id {material_id} (después de retry): {'Lista vacía' if not result else f'{len(result)} items'}")
+        return result if result is not None else []

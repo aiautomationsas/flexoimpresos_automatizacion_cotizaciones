@@ -176,6 +176,11 @@ class SessionManager:
         st.session_state.material_seleccionado = None
         st.session_state.acabado_seleccionado = None
         st.session_state.comercial_seleccionado = None
+        if 'tipo_producto_seleccionado' not in st.session_state:
+            st.session_state.tipo_producto_seleccionado = None
+        if 'tipo_producto_objeto' not in st.session_state:
+            st.session_state.tipo_producto_objeto = None
+        SessionManager.init_session()
 
     @staticmethod
     def full_clear():
@@ -184,3 +189,40 @@ class SessionManager:
         for key in list(st.session_state.keys()):
             if key not in keys_to_keep:
                 del st.session_state[key]
+
+    @staticmethod
+    def reset_calculator_widgets():
+        """Resetea los valores de los widgets del formulario de calculadora en session_state."""
+        keys_to_reset = [
+            'escalas_texto_input', 'escalas', # Texto y lista procesada
+            'ancho', 'avance', 'num_tintas',
+            'num_pistas_manga', 'num_pistas_otro',
+            'material_select', 'material_id',
+            'adhesivo_select', 'adhesivo_id',
+            'tipo_grafado_select', 'grafado_seleccionado_id',
+            'altura_grafado',
+            'acabado_select', 'acabado_seleccionado_id',
+            'num_paquetes',
+            'tiene_troquel',
+            'planchas_separadas',
+            'forma_pago_select', 'forma_pago_id',
+            'es_manga', # Estado derivado
+            'material_adhesivo_id', # Estado derivado
+            'tipo_producto_seleccionado', # Forzar selección de nuevo
+            'tipo_producto_objeto', # Forzar selección de nuevo
+            # Ajustes Admin (si existen)
+            'ajustar_material', 'valor_material_ajustado',
+            'ajustar_troquel', 'precio_troquel',
+            'ajustar_planchas', 'precio_planchas', 'precio_planchas_input',
+            'ajustar_rentabilidad', 'rentabilidad_ajustada', 'rentabilidad_ajustada_input'
+        ]
+        
+        for key in keys_to_reset:
+            if key in st.session_state:
+                del st.session_state[key]
+                
+        # Opcional: Podríamos querer establecer algunos a valores por defecto en lugar de borrar
+        # Ejemplo: st.session_state.num_tintas = 3
+        # Por ahora, borrar es más simple y fuerza al usuario a rellenar.
+        
+        print("DEBUG: Calculator widgets reset in session state.") # Para confirmar

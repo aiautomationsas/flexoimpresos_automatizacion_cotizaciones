@@ -1,9 +1,10 @@
 import streamlit as st
-from ...logic.cotizacion_manager import CotizacionManager
-from ...data.models.cotizacion import Cotizacion
-from ...logic.utils import generar_tabla_resultados
-from ...pdf.pdf_generator import CotizacionPDF
+from src.logic.cotizacion_manager import CotizacionManager
+from src.data.models import Cotizacion
+from src.logic.utils import generar_tabla_resultados
+from src.pdf.pdf_generator import generar_bytes_pdf_cotizacion
 import tempfile
+import traceback
 from typing import Dict, List
 
 def mostrar_cotizacion():
@@ -88,45 +89,46 @@ def mostrar_cotizacion():
 
 def mostrar_botones_pdf():
     """Maneja la generación y descarga de PDFs"""
-    # Generar PDF de Cotización si no existe
-    if 'pdf_data' not in st.session_state or st.session_state.pdf_data is None:
+    pdf_bytes = None
+    # Intentar obtener PDF cacheado o generar si no existe
+    if 'pdf_data' in st.session_state and st.session_state.pdf_data is not None:
+        pdf_bytes = st.session_state.pdf_data
+        print("Usando PDF cacheado de session_state.")
+    else:
+        print("No hay PDF cacheado, intentando generar...")
         try:
-            generar_pdf_cotizacion()
+            # --- INICIO CAMBIO: Usar nueva función --- 
+            # generar_pdf_cotizacion() # Ya no existe esta función
+            db = st.session_state.db
+            cotizacion_id = st.session_state.get('cotizacion_id') or getattr(st.session_state.get('cotizacion_model'), 'id', None)
+            if not cotizacion_id:
+                raise ValueError("No se encontró ID para generar PDF.")
+            
+            datos_completos = db.get_datos_completos_cotizacion(cotizacion_id)
+            if not datos_completos:
+                 raise ValueError("No se pudieron obtener datos completos para PDF.")
+                 
+            pdf_bytes = generar_bytes_pdf_cotizacion(datos_completos)
+            if pdf_bytes:
+                 st.session_state.pdf_data = pdf_bytes # Guardar en caché si se generó
+                 print("PDF generado y cacheado en session_state.")
+            else:
+                 st.warning("La generación de PDF no produjo datos.")
+            # --- FIN CAMBIO --- 
         except Exception as e:
             st.error(f"Error generando PDF: {str(e)}")
-            return
+            traceback.print_exc() # Mostrar traceback para depuración
+            return # No mostrar botón si hay error
 
-    # Botón de descarga si el PDF está en memoria
-    if st.session_state.pdf_data is not None:
-        cotizacion_id = st.session_state.get('cotizacion_id') or \
-                       getattr(st.session_state.get('cotizacion_model'), 'id', 'sin_id')
+    # Botón de descarga si tenemos los bytes del PDF (cacheados o recién generados)
+    if pdf_bytes is not None:
+        cotizacion_id_nombre = st.session_state.get('cotizacion_id') or getattr(st.session_state.get('cotizacion_model'), 'id', 'sin_id')
         
         st.download_button(
             label="Descargar Cotización (PDF)",
-            data=st.session_state.pdf_data,
-            file_name=f"cotizacion_{cotizacion_id}.pdf",
+            data=pdf_bytes,
+            file_name=f"cotizacion_{cotizacion_id_nombre}.pdf",
             mime="application/pdf",
-            type="primary"
+            type="primary",
+            key="download_pdf_quote_results" # Añadir key única
         )
-
-def generar_pdf_cotizacion():
-    """Genera el PDF de la cotización"""
-    try:
-        db = st.session_state.db
-        cotizacion_id = st.session_state.get('cotizacion_id') or \
-                       getattr(st.session_state.get('cotizacion_model'), 'id')
-
-        if not cotizacion_id:
-            raise ValueError("No se encontró un ID de cotización válido")
-
-        datos_completos = db.get_datos_completos_cotizacion(cotizacion_id)
-        if datos_completos:
-            pdf_gen = CotizacionPDF()
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                pdf_gen.generar_pdf(datos_completos, tmp_file.name)
-                with open(tmp_file.name, "rb") as pdf_file:
-                    st.session_state.pdf_data = pdf_file.read()
-        else:
-            raise ValueError("No se pudieron obtener los datos completos")
-    except Exception as e:
-        raise Exception(f"Error generando PDF: {str(e)}")

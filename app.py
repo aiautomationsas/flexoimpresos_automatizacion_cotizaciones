@@ -28,7 +28,7 @@ from src.config.constants import (
 
 # Utils y PDF
 from src.utils.session_manager import SessionManager
-from src.pdf.pdf_generator import CotizacionPDF, MaterialesPDF
+from src.pdf.pdf_generator import generar_bytes_pdf_cotizacion, CotizacionPDF # Importar la nueva función helper y la clase
 
 # Calculadoras
 from src.logic.calculators.calculadora_costos_escala import CalculadoraCostosEscala, DatosEscala
@@ -38,7 +38,11 @@ from src.logic.calculators.calculadora_litografia import CalculadoraLitografia
 from src.ui.auth_ui import handle_authentication, show_login, show_logout_button
 from src.ui.calculator_view import show_calculator, show_quote_results, show_quote_summary
 from src.ui.calculator.client_section import mostrar_seccion_cliente
-from src.ui.calculator.product_section import mostrar_formulario_producto
+# MODIFICADO: Importar funciones específicas
+from src.ui.calculator.product_section import (_mostrar_material, _mostrar_adhesivo, 
+                                             _mostrar_grafado_altura, mostrar_secciones_internas_formulario)
+# --- INICIO CAMBIO ---
+# ... (resto de importaciones sin cambios) ...
 
 # Configuración de página
 st.set_page_config(
@@ -114,11 +118,13 @@ def load_initial_data() -> Dict[str, Any]:
             'clientes': db.get_clientes(),
             'formas_pago': db.get_formas_pago(),
             'tipos_grafado': db.get_tipos_grafado(),
-            'adhesivos': db.get_adhesivos()
+            'adhesivos': db.get_adhesivos(),
+            'estados_cotizacion': db.get_estados_cotizacion() # <-- AÑADIDO
         }
         
         # Verificar que se obtuvieron todos los datos necesarios (excluding adhesives for now as they might be optional initially)
-        required_data = ['materiales', 'acabados', 'tipos_producto', 'clientes', 'formas_pago', 'tipos_grafado']
+        required_data = ['materiales', 'acabados', 'tipos_producto', 'clientes', 
+                         'formas_pago', 'tipos_grafado', 'estados_cotizacion'] # <-- AÑADIDO a la verificación
         missing_data = [k for k in required_data if k not in data or not data[k]]
         if missing_data:
             st.error(f"No se pudieron cargar los siguientes datos requeridos: {', '.join(missing_data)}")
@@ -477,7 +483,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 }
             }
             st.session_state.current_view = 'quote_results'
-            st.rerun()
+            st.rerun() # <-- DESCOMENTADO
             
         return resultados
         
@@ -490,17 +496,57 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
 def show_navigation():
     """Muestra la barra de navegación con las diferentes opciones"""
     st.sidebar.markdown("### Navegación")
-    
+
+    # Define las claves y los nombres para mostrar
     options = {
-        'calculator': "Calculadora",
-        'quote_history': "Historial de Cotizaciones",
-        'reports': "Reportes"
+        'calculator': "📝 Calculadora / Editar",
+        'manage_quotes': "📂 Gestionar Cotizaciones",
+        'reports': "📊 Reportes"
     }
+
+    # Obtener la vista actual o default a 'calculator'
+    current_view_key = st.session_state.get('current_view', 'calculator')
     
-    selected = st.sidebar.radio("Ir a:", list(options.values()))
-    
-    # Actualizar vista actual basado en la selección
-    st.session_state.current_view = next(k for k, v in options.items() if v == selected)
+    # Asegurarse de que la vista actual sea válida para la navegación
+    # Si la vista actual no es una de las opciones del radio (p.ej. 'quote_results'),
+    # mantenemos esa vista pero seleccionamos 'calculator' en el radio visualmente.
+    if current_view_key not in options:
+        nav_display_key = 'calculator' # Clave para mostrar en el radio
+    else:
+        nav_display_key = current_view_key # La vista actual es una opción del radio
+
+    # Encontrar el índice de la opción a mostrar en el radio
+    try:
+        current_index = list(options.keys()).index(nav_display_key)
+    except ValueError:
+        current_index = 0 # Default seguro al primer índice
+
+    # Mostrar el radio button
+    selected_display_name = st.sidebar.radio(
+        "Ir a:",
+        list(options.values()),
+        index=current_index, 
+        key="navigation_radio"
+    )
+
+    # Obtener la clave de la vista que CORRESPONDE al radio seleccionado
+    selected_key_from_radio = next((k for k, v in options.items() if v == selected_display_name), 'calculator')
+
+    # Cambiar la vista SOLO si la selección del radio es DIFERENTE a la 
+    # clave que usamos para mostrar la selección inicial (nav_display_key).
+    # Esto significa que el usuario hizo clic activamente en una opción diferente.
+    if selected_key_from_radio != nav_display_key:
+        st.session_state.current_view = selected_key_from_radio
+        # Limpiar estado específico de cálculo/resultados al navegar manualmente
+        if 'current_calculation' in st.session_state: del st.session_state['current_calculation']
+        if 'cotizacion_model' in st.session_state: del st.session_state['cotizacion_model']
+        if 'cotizacion_guardada' in st.session_state: del st.session_state['cotizacion_guardada']
+        if 'modo_edicion' in st.session_state: 
+             st.session_state.modo_edicion = False # Salir de modo edición si navegamos fuera
+             st.session_state.cotizacion_a_editar_id = None
+             st.session_state.datos_cotizacion_editar = None
+        SessionManager.reset_calculator_widgets() # Resetear widgets también
+        st.rerun() 
 
 def initialize_session():
     """Inicializa el estado de la sesión después del login"""
@@ -523,12 +569,83 @@ def initialize_session():
     return True
 
 def get_filtered_clients():
-    """Obtiene clientes filtrados por comercial si no es admin"""
+    """Obtiene todos los clientes sin filtrar. Los comerciales pueden ver todos los clientes,
+    aunque solo pueden trabajar con las referencias que les corresponden."""
+    # Siempre mostrar todos los clientes independientemente del rol
+    return st.session_state.db.get_clientes()
+
+def _mostrar_ajustes_admin():
+    """Muestra la sección de ajustes avanzados para administradores (fuera del form)."""
     if st.session_state.usuario_rol == 'administrador':
-        return st.session_state.db.get_clientes()
-    return st.session_state.db.get_clientes_by_comercial(
-        st.session_state.comercial_id
-    )
+        with st.expander("⚙️ Ajustes Avanzados (Admin)", expanded=True):
+            st.markdown("##### Sobrescribir Valores Calculados")
+            st.caption("Marque la casilla para activar el ajuste e ingrese el nuevo valor.")
+            
+            # Rentabilidad
+            st.divider()
+            ajustar_rentabilidad_checked = st.checkbox("Ajustar Rentabilidad", key='ajustar_rentabilidad')
+            if ajustar_rentabilidad_checked:
+                valor_rentabilidad = st.number_input(
+                    "Nueva Rentabilidad (%)", 
+                    key='rentabilidad_ajustada',
+                    min_value=0.1, 
+                    max_value=100.0, 
+                    step=0.1, 
+                    format="%.1f"
+                )
+                st.caption(f"Valor configurado: {valor_rentabilidad}%")
+            else: 
+                if 'rentabilidad_ajustada' in st.session_state:
+                    st.session_state.rentabilidad_ajustada = None
+            
+            # Material
+            st.divider()
+            ajustar_material_checked = st.checkbox("Ajustar Material", key='ajustar_material')
+            if ajustar_material_checked:
+                valor_material = st.number_input(
+                    "Nuevo Valor Material ($/m²)", 
+                    key='valor_material_ajustado', 
+                    min_value=0.0, 
+                    step=1.0, 
+                    format="%.2f"
+                )
+                st.caption(f"Valor configurado: ${valor_material}/m²")
+            else: 
+                if 'valor_material_ajustado' in st.session_state:
+                    st.session_state.valor_material_ajustado = 0.0
+            
+            # Troquel
+            st.divider()
+            ajustar_troquel_checked = st.checkbox("Ajustar Troquel", key='ajustar_troquel')
+            if ajustar_troquel_checked:
+                valor_troquel = st.number_input(
+                    "Nuevo Precio Troquel ($)", 
+                    key='precio_troquel', 
+                    min_value=0.0, 
+                    step=1.0, 
+                    format="%.2f"
+                )
+                st.caption(f"Valor configurado: ${valor_troquel}")
+            else: 
+                if 'precio_troquel' in st.session_state:
+                    st.session_state.precio_troquel = 0.0
+            
+            # Planchas
+            st.divider()
+            ajustar_planchas_checked = st.checkbox("Ajustar Planchas", key='ajustar_planchas')
+            if ajustar_planchas_checked:
+                valor_planchas = st.number_input(
+                    "Nuevo Precio Total Planchas ($)", 
+                    key='precio_planchas', 
+                    min_value=0.0, 
+                    step=1.0, 
+                    format="%.2f"
+                )
+                st.caption(f"Valor configurado: ${valor_planchas}")
+            else: 
+                if 'precio_planchas' in st.session_state:
+                    st.session_state.precio_planchas = 0.0
+# --- Fin _mostrar_ajustes_admin ---
 
 def mostrar_calculadora():
     """Vista principal de la calculadora"""
@@ -536,180 +653,351 @@ def mostrar_calculadora():
         st.error("Error de inicialización")
         return
 
-    # Saludo personalizado
-    st.title("Cotizador Flexo Impresos 📊")
-    st.write(f"Hola {st.session_state.perfil_usuario['nombre']}")
+    # --- Lógica de Carga para Modo Edición ---
+    datos_cargados = None
+    is_edit_mode = st.session_state.get('modo_edicion', False)
+    if is_edit_mode:
+        # --- INICIO CAMBIO ---
+        # cotizacion_id_editar = st.session_state.get('cotizacion_a_editar_id') # <-- Clave incorrecta
+        cotizacion_id_editar = st.session_state.get('cotizacion_id_editar') # <-- Clave correcta
+        # --- FIN CAMBIO ---
+        if cotizacion_id_editar:
+            # Solo cargar si no tenemos ya los datos cargados en sesión 
+            # (evita recargar en cada rerun dentro del modo edición)
+            if 'datos_cotizacion_editar' not in st.session_state or st.session_state.datos_cotizacion_editar is None:
+                st.info(f"**Modo Edición:** Cargando datos de Cotización ID {cotizacion_id_editar}")
+                with st.spinner("Cargando datos para edición..."):
+                    db = st.session_state.db
+                    datos_cargados = db.get_full_cotizacion_details(cotizacion_id_editar)
+                    if datos_cargados:
+                        st.session_state.datos_cotizacion_editar = datos_cargados
+                        # Forzar tipo producto ANTES de mostrar selector
+                        tipo_producto_id_cargado = datos_cargados.get('tipo_producto_id')
+                        if tipo_producto_id_cargado:
+                            tipos_producto_list = st.session_state.initial_data.get('tipos_producto', [])
+                            tipo_producto_obj_cargado = next((tp for tp in tipos_producto_list if tp.id == tipo_producto_id_cargado), None)
+                            if tipo_producto_obj_cargado:
+                                st.session_state['tipo_producto_seleccionado'] = tipo_producto_id_cargado
+                                st.session_state['tipo_producto_objeto'] = tipo_producto_obj_cargado
+                            else:
+                                st.error(f"Error crítico: Tipo de producto ID {tipo_producto_id_cargado} de la cotización no se encontró en los datos iniciales. No se puede editar.")
+                                # Limpiar estado para evitar inconsistencias
+                                if 'tipo_producto_objeto' in st.session_state: del st.session_state['tipo_producto_objeto']
+                                if 'tipo_producto_seleccionado' in st.session_state: del st.session_state['tipo_producto_seleccionado']
+                                st.session_state.modo_edicion = False # Salir del modo edición
+                                st.session_state.cotizacion_a_editar_id = None
+                                st.session_state.datos_cotizacion_editar = None
+                                # Detener la ejecución de esta función para este rerun
+                                return # <-- AÑADIDO: Detener si no se encuentra el objeto
+                        else:
+                            st.warning("Cotización sin tipo de producto definido.")
+                            # También deberíamos detenernos aquí si el tipo es esencial
+                            st.error("Error crítico: La cotización a editar no tiene tipo de producto definido. No se puede editar.")
+                            if 'tipo_producto_objeto' in st.session_state: del st.session_state['tipo_producto_objeto']
+                            if 'tipo_producto_seleccionado' in st.session_state: del st.session_state['tipo_producto_seleccionado']
+                            st.session_state.modo_edicion = False # Salir del modo edición
+                            st.session_state.cotizacion_a_editar_id = None
+                            st.session_state.datos_cotizacion_editar = None
+                            return # <-- AÑADIDO: Detener si falta el ID
+                    else:
+                        st.error(f"No se pudieron cargar detalles para Cotización ID {cotizacion_id_editar}.")
+                        st.session_state.modo_edicion = False
+                        st.session_state.cotizacion_a_editar_id = None
+                        st.rerun()
+            else:
+                 # Ya tenemos los datos cargados, usarlos
+                 datos_cargados = st.session_state.datos_cotizacion_editar 
+        else:
+             st.warning("Modo edición activado pero no se encontró ID.")
+             st.session_state.modo_edicion = False
+             # Limpiar por si acaso
+             if 'datos_cotizacion_editar' in st.session_state: del st.session_state['datos_cotizacion_editar']
+             st.rerun()
 
+    # --- Barra de Edición (si aplica) --- 
+    if is_edit_mode:
+        edit_cols = st.columns([0.8, 0.2])
+        with edit_cols[0]:
+            st.warning("**✏️ Modo Edición:** Modificando cotización existente. Los cambios sobrescribirán la versión anterior.")
+            st.caption("Nota: Precios actuales de materiales/acabados serán usados al recalcular.")
+        with edit_cols[1]:
+            if st.button("❌ Cancelar Edición", key="cancel_edit_button", use_container_width=True):
+                st.session_state.modo_edicion = False
+                st.session_state.cotizacion_a_editar_id = None
+                st.session_state.datos_cotizacion_editar = None
+                SessionManager.reset_calculator_widgets()
+                st.session_state.current_view = 'manage_quotes' # Volver a la lista
+                st.rerun()
+        st.divider()
+        st.title("📝 Editar Cotización") 
+    else:
+        st.title("📊 Cotizador Flexo Impresos")
+    # --- Fin Barra Edición ---
+    
     st.write(f"Selecciona un cliente y un tipo de producto para comenzar a cotizar.")
     
-    # Selector de cliente (filtrado por comercial)
     clientes = get_filtered_clients()
+    default_cliente_index = 0
+    if is_edit_mode and datos_cargados:
+        cliente_id_cargado = datos_cargados.get('cliente_id')
+        if cliente_id_cargado:
+            try:
+                default_cliente_index = next(i for i, c in enumerate(clientes) if c.id == cliente_id_cargado)
+            except StopIteration:
+                 st.warning(f"Cliente ID {cliente_id_cargado} no encontrado.")
+                 default_cliente_index = 0 
+                 
     cliente_seleccionado = st.selectbox(
         "Cliente",
         options=clientes,
-        format_func=lambda x: x.nombre
+        format_func=lambda x: x.nombre,
+        index=default_cliente_index, 
+        key="cliente_selector",
+        disabled=is_edit_mode # Deshabilitar en modo edición
     )
     
     if cliente_seleccionado:
-        # --- Selección y confirmación de tipo de producto (fuera del formulario) ---
-        # Mostrar solo si el tipo de producto NO ha sido seleccionado aún
-        if not st.session_state.get('tipo_producto_seleccionado'):
-            tipos_producto = st.session_state.db.get_tipos_producto()
-            tipo_producto = st.selectbox(
-                "Tipo de Producto",
-                options=tipos_producto,
-                format_func=lambda x: x.nombre,
-                key="tipo_producto_select",
-                help="Seleccione si es manga o etiqueta"
-            )
-            if st.button("Seleccionar producto"):
-                st.session_state['tipo_producto_seleccionado'] = tipo_producto.id
-                st.session_state['tipo_producto_objeto'] = tipo_producto
-                st.rerun() # Forzar recarga para que el form aparezca
-
-        # --- Formulario principal solo si ya se confirmó el tipo de producto ---
-        else: # Si ya se seleccionó, muestra el formulario y un botón para cambiar
-            st.success(f"Tipo de producto seleccionado: {st.session_state.tipo_producto_objeto.nombre}")
-            if st.button("Cambiar tipo de producto"):
-                del st.session_state['tipo_producto_seleccionado']
-                del st.session_state['tipo_producto_objeto']
-                st.rerun()
+        st.session_state.cliente_seleccionado = cliente_seleccionado 
+        
+        # === INICIO SECCIÓN FUERA DEL FORMULARIO ===
+        
+        # -- Tipo de Producto (Fuera del form) --
+        tipo_producto_seleccionado_id = None
+        tipo_producto_objeto = None
+        if not is_edit_mode:
+            # Permitir seleccionar si no estamos editando
+            if 'tipo_producto_seleccionado' not in st.session_state:
+                tipos_producto = st.session_state.initial_data.get('tipos_producto', [])
+                tipo_producto = st.selectbox(
+                    "Tipo de Producto",
+                    options=tipos_producto,
+                    format_func=lambda x: x.nombre,
+                    key="tipo_producto_select",
+                    help="Seleccione si es manga o etiqueta"
+                )
+                if st.button("Seleccionar producto"):
+                    st.session_state['tipo_producto_seleccionado'] = tipo_producto.id
+                    st.session_state['tipo_producto_objeto'] = tipo_producto
+                    # Limpiar material/adhesivo si cambia tipo producto
+                    st.session_state['material_id'] = None
+                    st.session_state['adhesivo_id'] = None
+                    st.rerun()
+            else:
+                # Mostrar tipo ya seleccionado y botón para cambiar
+                tipo_producto_seleccionado_id = st.session_state['tipo_producto_seleccionado']
                 
-            # --- Inputs reactivos (sin form) ---
-            # Llamar a la función que muestra los inputs
-            datos_producto = mostrar_formulario_producto(cliente_seleccionado)
-
-            # --- Ajustes Avanzados (Solo Admin) ---
-            if st.session_state.usuario_rol == 'administrador':
-                with st.expander("⚙️ Ajustes Avanzados (Admin)", expanded=True): # Keep expanded for easier access
-                    st.markdown("##### Sobrescribir Valores Calculados")
-                    st.caption("Marque la casilla para activar el ajuste e ingrese el nuevo valor.")
-
-                    # --- Rentabilidad ---
-                    st.divider()
-                    rent_col1, rent_col2 = st.columns([1, 2], gap="medium")
-                    with rent_col1:
-                        ajustar_rentabilidad_checked = st.checkbox(
-                            "Ajustar Rentabilidad", 
-                            key='ajustar_rentabilidad', # New key for the checkbox
-                            help="Activar para sobrescribir el % de rentabilidad por defecto."
-                        )
-                    with rent_col2:
-                        if ajustar_rentabilidad_checked:
-                            # Get current raw value from state for the input field
-                            rentabilidad_ajustada_raw = st.session_state.get('rentabilidad_ajustada', None)
-                            # Explicitly update session state from the number input
-                            st.session_state.rentabilidad_ajustada = st.number_input(
-                                "Nueva Rentabilidad (%)", 
-                                key='rentabilidad_ajustada_input', # New key for the input widget
-                                value=float(rentabilidad_ajustada_raw) if rentabilidad_ajustada_raw is not None else None, # Ensure initial value is float or None
-                                min_value=0.1, # Prevent entering 0 directly, use checkbox to disable
-                                max_value=100.0, 
-                                step=0.1, 
-                                format="%.1f",
-                                help="Ingrese el nuevo porcentaje de rentabilidad (ej: 35.5).",
-                                label_visibility="collapsed"
-                            )
-                        else:
-                            # Reset state if unchecked and key exists
-                            if 'rentabilidad_ajustada' in st.session_state:
-                                st.session_state.rentabilidad_ajustada = None
-
-                    # --- Material ---
-                    st.divider()
-                    mat_col1, mat_col2 = st.columns([1, 2], gap="medium")
-                    with mat_col1:
-                        ajustar_material_checked = st.checkbox(
-                            "Ajustar Material", 
-                            key='ajustar_material',
-                            help="Activar para sobrescribir el costo por m² del material."
-                        )
-                    with mat_col2:
-                        if ajustar_material_checked:
-                            st.number_input(
-                                "Nuevo Valor Material ($/m²)",
-                                key='valor_material_ajustado', 
-                                value=st.session_state.get('valor_material_ajustado', 0.0), 
-                                min_value=0.0, step=1.0, format="%.2f",
-                                help="Ingrese el nuevo costo por metro cuadrado ($/m²) del material.",
-                                label_visibility="collapsed"
-                            )
-                        else:
-                            # Reset state if unchecked
-                            if 'valor_material_ajustado' in st.session_state:
-                                st.session_state.valor_material_ajustado = 0.0
-                    
-                    # --- Troquel ---
-                    st.divider()
-                    troq_col1, troq_col2 = st.columns([1, 2], gap="medium")
-                    with troq_col1:
-                        ajustar_troquel_checked = st.checkbox(
-                            "Ajustar Troquel", 
-                            key='ajustar_troquel',
-                            help="Activar para sobrescribir el costo del troquel."
-                        )
-                    with troq_col2:
-                        if ajustar_troquel_checked:
-                            st.number_input(
-                                "Nuevo Precio Troquel ($)", 
-                                key='precio_troquel', 
-                                value=st.session_state.get('precio_troquel', 0.0), 
-                                min_value=0.0, step=1.0, format="%.2f",
-                                help="Ingrese el precio fijo para el troquel si se ajusta.",
-                                label_visibility="collapsed"
-                            )
-                        else:
-                            # Reset state if unchecked
-                            if 'precio_troquel' in st.session_state:
-                                st.session_state.precio_troquel = 0.0
-
-                    # --- Planchas ---
-                    st.divider()
-                    plan_col1, plan_col2 = st.columns([1, 2], gap="medium")
-                    with plan_col1:
-                         ajustar_planchas_checked = st.checkbox(
-                            "Ajustar Planchas", 
-                            key='ajustar_planchas',
-                            help="Activar para sobrescribir el costo total de las planchas."
-                         )
-                    with plan_col2:
-                        if ajustar_planchas_checked:
-                            # Explicitly update session state from the number input
-                            st.session_state.precio_planchas = st.number_input(
-                                "Nuevo Precio Total Planchas ($)", 
-                                key='precio_planchas_input', # Use a different key for the widget itself
-                                value=st.session_state.get('precio_planchas', 0.0), # Still use state for initial value
-                                min_value=0.0, step=1.0, format="%.2f",
-                                help="Ingrese el precio fijo total para todas las planchas si se ajusta.",
-                                label_visibility="collapsed"
-                            )
-                        else:
-                             # Reset if unchecked and key exists
-                             if 'precio_planchas' in st.session_state:
-                                st.session_state.precio_planchas = 0.0
-            
-            # --- Botón de acción fuera (ahora st.button) ---
-            if st.button("Calcular"):
-                if datos_producto:
-                    # Añadir tipo_producto_id y es_manga a los datos antes de calcular
-                    datos_producto['tipo_producto_id'] = st.session_state.get('tipo_producto_seleccionado')
-                    datos_producto['es_manga'] = datos_producto['tipo_producto_id'] == 2
-
-                    # Realizar cálculos - PASS CLIENTE OBJECT
-                    resultados = handle_calculation(datos_producto, cliente_seleccionado)
-                    # --- REMOVED (redundant state setting, handled by handle_calculation) --- 
-                    # if resultados:
-                    #     st.session_state.current_calculation = {
-                    #         'cliente': cliente_seleccionado, # This was missing before
-                    #         'form_data': datos_producto,
-                    #         'results': resultados,
-                    #         'timestamp': datetime.now().isoformat()
-                    #     }
-                    #     st.session_state.current_view = 'quote_results'
-                    #     st.rerun()
-                    # ---------------------------------------------------------------------
+                # --- VERIFICACIÓN ADICIONAL: Si el ID es None, manejar como si no existiera la clave ---
+                if tipo_producto_seleccionado_id is None:
+                    st.warning("Debe seleccionar un tipo de producto para continuar.")
+                    # Limpiar la clave del estado para forzar el flujo correcto
+                    del st.session_state['tipo_producto_seleccionado']
+                    if 'tipo_producto_objeto' in st.session_state: 
+                        del st.session_state['tipo_producto_objeto']
+                    # Forzar rerun para mostrar el selector de tipo
+                    st.rerun()
+                # --- FIN VERIFICACIÓN ADICIONAL ---
+                
+                # --- REFUERZO: Volver a buscar el objeto desde el ID --- 
+                tipos_producto_list = st.session_state.initial_data.get('tipos_producto', [])
+                tipo_producto_objeto = next((tp for tp in tipos_producto_list if tp.id == tipo_producto_seleccionado_id), None)
+                
+                # Guardar el objeto recuperado (o None si no se encontró) de nuevo en el estado
+                st.session_state['tipo_producto_objeto'] = tipo_producto_objeto 
+                # -----------------------------------------------------
+                
+                # --- Verificación (ya existente y ahora más robusta) --- 
+                if tipo_producto_objeto is not None:
+                    st.success(f"Tipo producto: {tipo_producto_objeto.nombre}")
                 else:
-                    st.warning("No se pudieron recolectar datos del formulario.")
+                    # Ahora este error indica que el ID guardado no corresponde a ningún tipo válido
+                    st.error(f"Error crítico: ID de tipo de producto ({tipo_producto_seleccionado_id}) inválido en sesión.")
+                    if st.button("Reintentar selección de producto"):
+                         del st.session_state['tipo_producto_seleccionado']
+                         if 'tipo_producto_objeto' in st.session_state: del st.session_state['tipo_producto_objeto']
+                         st.rerun()
+                    return # Detener ejecución si el objeto es None aquí
+                    
+                if st.button("Cambiar tipo de producto"):
+                    del st.session_state['tipo_producto_seleccionado']
+                    del st.session_state['tipo_producto_objeto']
+                    # Limpiar también material/adhesivo
+                    st.session_state['material_id'] = None
+                    st.session_state['adhesivo_id'] = None
+                    st.rerun()
+        else: 
+            # Modo edición: solo mostrar, obtener ID y objeto del estado
+            tipo_producto_seleccionado_id = st.session_state.get('tipo_producto_seleccionado')
+            tipo_producto_objeto = st.session_state.get('tipo_producto_objeto')
+            if tipo_producto_objeto is not None: # <-- CORRECCIÓN: Check explícito para None
+                 st.success(f"Tipo producto: {tipo_producto_objeto.nombre} (No editable)")
+            else:
+                 st.error("Error: Tipo de producto no definido en modo edición.")
+                 return # No continuar si falta en modo edición
+        
+        # Determinar es_manga basado en la selección (necesario para _mostrar_material)
+        es_manga = (tipo_producto_seleccionado_id == 2) if tipo_producto_seleccionado_id else False
+        st.session_state['es_manga'] = es_manga
+        
+        # -- Material (Fuera del form, si ya se seleccionó Tipo Producto) --
+        material_obj_actual = None
+        if tipo_producto_seleccionado_id:
+            materiales = st.session_state.initial_data.get('materiales', [])
+            _mostrar_material(es_manga, materiales, datos_cargados)
+            st.divider()
+            # Obtener el objeto material actual DESPUÉS de llamar a _mostrar_material
+            material_obj_actual = st.session_state.get('material_select')
+        
+        # -- Adhesivo (Fuera del form, si aplica y hay material) --
+        if not es_manga and material_obj_actual:
+            material_id_actual = material_obj_actual.id
+            adhesivos_filtrados = []
+            db = st.session_state.db
+            try:
+                print(f"APP: Llamando a get_adhesivos_for_material para ID: {material_id_actual}") # DEBUG
+                adhesivos_filtrados = db.get_adhesivos_for_material(material_id_actual)
+                print(f"APP: Resultado get_adhesivos_for_material: {len(adhesivos_filtrados)} items") # DEBUG
+            except Exception as e:
+                st.error(f"APP: Error al obtener adhesivos: {e}")
+                
+            # Llamar a _mostrar_adhesivo fuera del form
+            _mostrar_adhesivo(adhesivos_filtrados, material_obj_actual, datos_cargados)
+            st.divider()
+            
+        # -- Grafado (Fuera del form, si es manga) --
+        if es_manga:
+            tipos_grafado = st.session_state.initial_data.get('tipos_grafado', [])
+            _mostrar_grafado_altura(es_manga, tipos_grafado, datos_cargados)
+            st.divider()
+            
+        # -- Ajustes Admin (Fuera del form) --> SE MOVERÁ AL FINAL <--
+        # _mostrar_ajustes_admin() 
+        # st.divider()
+
+        # === FIN SECCIÓN FUERA DEL FORMULARIO (INICIAL) ===
+        
+        # --- INICIO FORMULARIO (SOLO WIDGETS INTERNOS) --- 
+        # Mostrar el formulario SOLO si ya se seleccionó el tipo de producto
+        if tipo_producto_seleccionado_id:
+            # Ya no usamos st.form aquí, los widgets se leen directamente de session_state
+            # Eliminamos with st.form(...) y st.form_submit_button
+            
+            # Llamar a la función refactorizada para mostrar secciones internas
+            mostrar_secciones_internas_formulario(
+                es_manga=es_manga, 
+                initial_data=st.session_state.initial_data, # Pasar datos necesarios
+                datos_cargados=datos_cargados 
+            )
+                
+            # --- Ajustes Admin YA NO ESTÁ AQUÍ --- 
+                
+            # --- El botón Calcular/Actualizar se mueve abajo --- 
+                
+        # --- MOVER AJUSTES ADMIN AQUÍ (DESPUÉS DEL FORM) --- 
+        st.divider() # Añadir un divisor antes de los ajustes
+        _mostrar_ajustes_admin() # Llamar a la función de ajustes aquí
+        st.divider() # Añadir un divisor después de los ajustes
+
+        # --- MOVER BOTÓN CALCULAR/ACTUALIZAR AQUÍ --- 
+        if tipo_producto_seleccionado_id: # Solo mostrar si hay tipo producto
+            button_label = "Actualizar Cálculo" if is_edit_mode else "Calcular"
+            if st.button(button_label, key="calculate_button_main"):
+                # === RECOLECTAR DATOS ===
+                datos_formulario_enviado = {}
+                validation_errors = []
+                try:
+                    # ** Obtener valores de FUERA del form (desde session_state) **
+                    datos_formulario_enviado['material_id'] = st.session_state.get('material_id')
+                    datos_formulario_enviado['adhesivo_id'] = st.session_state.get('adhesivo_id') # Será None si es manga o no se seleccionó
+                    datos_formulario_enviado['tipo_producto_id'] = st.session_state.get('tipo_producto_seleccionado')
+                    datos_formulario_enviado['es_manga'] = st.session_state.get('es_manga')
+                    
+                    # Validar que los IDs necesarios (fuera del form) existan
+                    if not datos_formulario_enviado['material_id']:
+                         validation_errors.append("Material no definido en sesión.")
+                    if not datos_formulario_enviado['es_manga'] and not datos_formulario_enviado['adhesivo_id']:
+                         validation_errors.append("Adhesivo no definido en sesión para etiquetas.")
+                    if not datos_formulario_enviado['tipo_producto_id']:
+                        validation_errors.append("Tipo de producto no definido en sesión.")
+
+                    # ** Obtener valores de DENTRO del form (desde session_state via keys) **
+                    # Escalas 
+                    escalas_texto = st.session_state.get('escalas_texto_input', '')
+                    escalas_usuario = [int(e.strip()) for e in escalas_texto.split(",") if e.strip()]
+                    if not escalas_usuario or any(e < 100 for e in escalas_usuario):
+                        raise ValueError("Ingrese al menos una escala válida (>= 100).")
+                    datos_formulario_enviado['escalas'] = sorted(list(set(escalas_usuario)))
+                    
+                    # Dimensiones y Tintas
+                    datos_formulario_enviado['ancho'] = float(st.session_state.get('ancho', 0.0))
+                    datos_formulario_enviado['avance'] = float(st.session_state.get('avance', 0.0))
+                    datos_formulario_enviado['num_tintas'] = int(st.session_state.get('num_tintas', 0))
+                    # Pistas 
+                    if datos_formulario_enviado['es_manga']:
+                         if st.session_state.get('usuario_rol') == 'comercial': datos_formulario_enviado['pistas'] = 1
+                         else: datos_formulario_enviado['pistas'] = int(st.session_state.get('num_pistas_manga', 1))
+                    else:
+                        datos_formulario_enviado['pistas'] = int(st.session_state.get('num_pistas_otro', 1))
+
+                    # Acabado/Grafado
+                    if datos_formulario_enviado['es_manga']:
+                        grafado_obj = st.session_state.get('tipo_grafado_select')
+                        if grafado_obj: 
+                            datos_formulario_enviado['tipo_grafado_id'] = grafado_obj.id
+                            datos_formulario_enviado['tipo_grafado_nombre'] = grafado_obj.nombre # Para handle_calculation
+                            if grafado_obj.id in [3, 4]: datos_formulario_enviado['altura_grafado'] = float(st.session_state.get('altura_grafado', 0.0))
+                            else: datos_formulario_enviado['altura_grafado'] = None
+                        else: validation_errors.append("Tipo de grafado no seleccionado.")
+                        datos_formulario_enviado['acabado_id'] = None
+                    else: # Etiqueta
+                        acabado_obj = st.session_state.get('acabado_select')
+                        if acabado_obj: datos_formulario_enviado['acabado_id'] = acabado_obj.id
+                        else: validation_errors.append("Acabado no seleccionado.")
+                        datos_formulario_enviado['tipo_grafado_id'] = None
+                        datos_formulario_enviado['altura_grafado'] = None
+
+                    # Empaque
+                    datos_formulario_enviado['num_paquetes'] = int(st.session_state.get('num_paquetes', 0))
+                    # Opciones Adicionales
+                    datos_formulario_enviado['tiene_troquel'] = bool(st.session_state.get('tiene_troquel', False))
+                    datos_formulario_enviado['planchas_separadas'] = bool(st.session_state.get('planchas_separadas', False))
+                    # Forma de Pago 
+                    forma_pago_obj = st.session_state.get('forma_pago_select')
+                    if forma_pago_obj: datos_formulario_enviado['forma_pago_id'] = forma_pago_obj.id
+                    else: validation_errors.append("Forma de pago no seleccionada.")
+                         
+                    # Calcular ID Combinado (como antes)
+                    mat_id = datos_formulario_enviado.get('material_id')
+                    adh_id = datos_formulario_enviado.get('adhesivo_id')
+                    id_combinado = None
+                    if mat_id:
+                        db = st.session_state.db
+                        if datos_formulario_enviado['es_manga']:
+                            ID_SIN_ADHESIVO = 4 # Asumiendo ID 4
+                            ma_entry = db.get_material_adhesivo_entry(mat_id, ID_SIN_ADHESIVO)
+                            if ma_entry: id_combinado = ma_entry['id']
+                        elif adh_id:
+                            ma_entry = db.get_material_adhesivo_entry(mat_id, adh_id)
+                            if ma_entry: id_combinado = ma_entry['id']
+                    if id_combinado: datos_formulario_enviado['material_adhesivo_id'] = id_combinado
+                    else: validation_errors.append("No se encontró ID combinado Material/Adhesivo. Verifique config.")
+                         
+                except ValueError as ve: validation_errors.append(f"Error en valor numérico: {ve}")
+                except KeyError as ke: validation_errors.append(f"Falta un campo esperado en session_state: {ke}")
+                except Exception as e: validation_errors.append(f"Error inesperado recolectando datos: {e}")
+                # === FIN RECOLECCIÓN ===
+                
+                # --- Validación y Ejecución --- 
+                if not validation_errors:
+                    # Necesitamos el objeto cliente seleccionado, asegurarnos que está en sesión
+                    cliente_seleccionado = st.session_state.get('cliente_seleccionado')
+                    if cliente_seleccionado:
+                        resultados = handle_calculation(datos_formulario_enviado, cliente_seleccionado)
+                    else:
+                        st.error("Error interno: Cliente no encontrado en sesión.")
+                else:
+                    for error in validation_errors: st.error(error)
+                    st.warning("No se pudo calcular debido a errores en los datos ingresados.")
+        # --- FIN MOVIMIENTO BOTÓN ---
 
 def main():
     """Función principal que orquesta el flujo de la aplicación"""
@@ -746,38 +1034,58 @@ def main():
             else:
                 st.info(message)
         SessionManager.clear_messages()
+        
+    # --- Mostrar Navegación --- 
+    show_navigation()
+    # ------------------------
+
+    # --- Cargar datos iniciales si no están ---
+    # Asegurar que la clave exista, aunque sea como None inicialmente
+    if 'initial_data' not in st.session_state:
+        st.session_state.initial_data = None 
+
+    # Intentar cargar solo si aún no tenemos datos válidos
+    if st.session_state.initial_data is None: 
+        with st.spinner("Cargando datos iniciales (materiales, acabados, etc.)..."):
+            try:
+                # Llamar a la función cacheada
+                data = load_initial_data() 
+                if data:
+                    st.session_state.initial_data = data
+                else:
+                    # Si load_initial_data devuelve None o {}, marcamos que no se cargó
+                    st.session_state.initial_data = None 
+                    SessionManager.add_message('error', "Error crítico: No se pudieron cargar los datos iniciales necesarios (empty data returned).")
+            except Exception as e_load:
+                 st.session_state.initial_data = None # Marcar como no cargado en excepción
+                 SessionManager.add_message('error', f"Excepción al cargar datos iniciales: {e_load}")
+                 if st.session_state.get('usuario_rol') == 'administrador':
+                     st.exception(e_load)
+
+    # Verificar si los datos se cargaron correctamente ANTES de continuar
+    if not st.session_state.get('initial_data'):
+        st.error("No se pudieron cargar los datos iniciales. La aplicación no puede continuar.")
+        # Mostrar mensajes de error acumulados
+        if st.session_state.messages:
+            for msg_type, message in st.session_state.messages:
+                if msg_type == 'error': st.error(message)
+                else: st.info(message)
+            SessionManager.clear_messages()
+        st.stop() # Detener ejecución si los datos no están
+    # --------------------------------------------
 
     # Mostrar la vista actual
     if st.session_state.current_view == 'calculator':
         mostrar_calculadora()
     elif st.session_state.current_view == 'quote_results':
         show_quote_results()
-    elif st.session_state.current_view == 'quote_history':
-        show_quote_history()
+    elif st.session_state.current_view == 'manage_quotes':
+        show_manage_quotes()
     elif st.session_state.current_view == 'reports':
         show_reports()
 
-def show_quote_history():
-    """Muestra el historial de cotizaciones"""
-    st.subheader("Historial de Cotizaciones")
-    
-    if not st.session_state.calculation_history:
-        st.info("No hay cotizaciones en el historial.")
-        return
-    
-    for idx, calc in enumerate(reversed(st.session_state.calculation_history[-10:])):
-        with st.expander(f"Cotización {len(st.session_state.calculation_history) - idx}", expanded=idx==0):
-            show_quote_summary(calc['form_data'], calc['results'], calc['is_manga'])
-
-def show_reports():
-    """Muestra la sección de reportes"""
-    st.subheader("Reportes y Análisis")
-    st.info("Sección en desarrollo...")
-
 def show_quote_results():
     """Muestra los resultados de la cotización calculada."""
-    
-    # --- PRIMERO: Verificar si ya se guardó la cotización --- 
     if st.session_state.get('cotizacion_guardada', False) and st.session_state.get('cotizacion_id') is not None:
         st.success(f"Cotización #{st.session_state.cotizacion_id} guardada ✓")
         
@@ -815,23 +1123,19 @@ def show_quote_results():
                 st.session_state.current_calculation = None
                 st.rerun()
         return # Terminar aquí si ya está guardada
-    # ----------------------------------------------------------
 
-    # --- Si no está guardada, verificar si hay un cálculo válido --- 
     if 'current_calculation' not in st.session_state or not st.session_state.current_calculation:
         st.error("No hay resultados para mostrar. Por favor, realice un cálculo primero.")
         if st.button("Volver a Calcular", key="back_to_calc_no_results"):
             st.session_state.current_view = 'calculator'
             st.rerun()
         return
-    # Verificar si el modelo de cotización está listo (preparado por handle_calculation)
     if 'cotizacion_model' not in st.session_state or st.session_state.cotizacion_model is None:
         st.error("Error interno: Modelo de cotización no preparado. Por favor, recalcule.")
         if st.button("Volver a Calcular", key="back_to_calc_no_model"):
             st.session_state.current_view = 'calculator'
             st.rerun()
         return
-    # Verificar que calculos_para_guardar exista dentro de calc
     calc = st.session_state.current_calculation
     if 'calculos_para_guardar' not in calc or not calc['calculos_para_guardar']:
         st.error("Error interno: Datos de cálculo para guardar no encontrados. Por favor, recalcule.")
@@ -840,7 +1144,6 @@ def show_quote_results():
             st.rerun()
         return
     
-    # --- Si hay cálculo válido, obtener datos y mostrar --- 
     cotizacion_preparada = st.session_state.cotizacion_model # Modelo listo para guardar
     datos_calculo_persistir = calc['calculos_para_guardar']
     
@@ -860,67 +1163,72 @@ def show_quote_results():
     
     # Crear tabla de resultados (sin cambios aquí)
     resultados_df = pd.DataFrame(calc['results'])
-    # ... (resto del formateo de la tabla sin cambios) ...
     st.dataframe(resultados_df)
     
     # --- Formulario y Lógica de Guardado --- 
-    st.markdown("#### Guardar Cotización")
-    # El formulario solo se muestra si la cotización NO está guardada
+    is_edit_mode = st.session_state.get('modo_edicion', False)
+    section_title = "Actualizar Cotización" if is_edit_mode else "Guardar Cotización"
+    button_label = "💾 Actualizar" if is_edit_mode else "💾 Guardar Cotización"
+    st.markdown(f"#### {section_title}")
+    
+    default_referencia = ""
+    if is_edit_mode and 'datos_cotizacion_editar' in st.session_state and st.session_state.datos_cotizacion_editar:
+        # Usar la descripción de la cotización que se está editando
+        default_referencia = st.session_state.datos_cotizacion_editar.get('referencia_descripcion', "")
+    elif 'referencia_guardar' in st.session_state:
+        # Usar lo que se haya ingresado previamente en esta sesión (si no estamos editando)
+        default_referencia = st.session_state.referencia_guardar
+    
     with st.form("guardar_cotizacion_form"):
-        # Input para la descripción de la referencia
         referencia_desc = st.text_input(
             "Referencia / Descripción para guardar *",
-            value=st.session_state.get('referencia_guardar', ""),
-            key="referencia_guardar_input", # Mantener key consistente
+            value=default_referencia,
+            key="referencia_guardar_input", 
             help="Ingrese un nombre o descripción única para esta cotización (Ej: Etiqueta XYZ V1)"
         )
         
-        # --- RESTAURAR: Selector de Comercial para Admin ---
-        selected_comercial_id = None # Inicializar fuera del if para validación posterior
+        selected_comercial_id = None 
         if st.session_state.get('usuario_rol') == 'administrador':
             try:
                 comerciales = st.session_state.db.get_perfiles_by_role('comercial')
                 if comerciales:
-                    # Opciones para el selectbox: (ID, Nombre)
                     opciones_comercial = [(c['id'], c['nombre']) for c in comerciales] 
-                    # Añadir opción placeholder 
                     opciones_display = [(None, "-- Seleccione Comercial --")] + opciones_comercial
-                    
-                    # Mostrar el selectbox
+                    default_comercial_index = 0
+                    comercial_id_cargado = None
+                    if is_edit_mode and 'datos_cotizacion_editar' in st.session_state and st.session_state.datos_cotizacion_editar:
+                        comercial_id_cargado = st.session_state.datos_cotizacion_editar.get('comercial_id') 
+                        if comercial_id_cargado:
+                            try:
+                                default_comercial_index = next(i for i, (id, _) in enumerate(opciones_display) if id == comercial_id_cargado)
+                            except StopIteration:
+                                default_comercial_index = 0 
                     selected_option = st.selectbox(
                         "Asignar a Comercial *", 
                         options=opciones_display, 
-                        format_func=lambda x: x[1], # Mostrar nombre
-                        key="comercial_selector_admin", # Usar la key correcta
+                        format_func=lambda x: x[1], 
+                        key="comercial_selector_admin", 
+                        index=default_comercial_index,
                         help="Seleccione el comercial al que pertenece esta cotización."
                     )
-                    # selected_comercial_id se obtendrá del estado DENTRO del submit button
                 else:
                     st.warning("No se encontraron comerciales para asignar.")
             except Exception as e_comm:
                 st.error(f"Error al cargar lista de comerciales: {e_comm}")
-        # ----------------------------------------------------
 
-        guardar = st.form_submit_button("Guardar Cotización", type="primary")
+        guardar = st.form_submit_button(button_label, type="primary")
         
         if guardar:
             error_guardado = False
             if not referencia_desc.strip():
                 st.error("Debe ingresar una Referencia / Descripción para guardar la cotización.")
                 error_guardado = True
-                
             comercial_id_para_guardar = None
             if st.session_state.get('usuario_rol') == 'administrador':
-                # Re-obtener valor del selector dentro del form submit
-                # Asumiendo que la key del selector es "comercial_selector_admin"
                 selected_comercial_tuple = st.session_state.get("comercial_selector_admin")
-                if selected_comercial_tuple and selected_comercial_tuple[0] is not None:
-                     selected_comercial_id = selected_comercial_tuple[0]
-                else:
-                     selected_comercial_id = None # Asegurar None si no seleccionó
-                
+                selected_comercial_id = selected_comercial_tuple[0] if selected_comercial_tuple else None
                 if selected_comercial_id is None:
-                    st.error("Como administrador, debe seleccionar un comercial para asignar la cotización.")
+                    st.error("Como administrador, debe seleccionar un comercial.")
                     error_guardado = True
                 else:
                     comercial_id_para_guardar = selected_comercial_id
@@ -928,50 +1236,237 @@ def show_quote_results():
                 comercial_id_para_guardar = st.session_state.user_id 
             
             if not error_guardado:
-                st.session_state.referencia_guardar = referencia_desc
-                with st.spinner("Guardando cotización..."):                        
+                st.session_state.referencia_guardar = referencia_desc 
+                spinner_text = "Actualizando cotización..." if is_edit_mode else "Guardando cotización..."
+                with st.spinner(spinner_text):
                     try:
+                        # Usar cliente del cálculo actual (no puede cambiar en edit mode)
                         cliente_id = calc['cliente'].id 
-                        # datos_calculo_persistir ya está disponible aquí
-                        
                         if not comercial_id_para_guardar or not cliente_id or not datos_calculo_persistir:
-                             st.error("Error interno: Faltan datos para guardar (cliente, comercial o cálculos).")
+                             st.error("Error interno: Faltan datos (cliente, comercial o cálculos).")
                         else:
                             manager = st.session_state.cotizacion_manager
-                            success, message, cotizacion_id = manager.guardar_nueva_cotizacion(
-                                cotizacion_model=cotizacion_preparada, 
-                                cliente_id=cliente_id,
-                                referencia_descripcion=referencia_desc,
-                                comercial_id=comercial_id_para_guardar,
-                                datos_calculo=datos_calculo_persistir 
-                            )
-                            
-                            if success:
-                                st.success(message)
-                                st.session_state.cotizacion_guardada = True
-                                st.session_state.cotizacion_id = cotizacion_id
-                                st.session_state.cotizacion_model.id = cotizacion_id 
-                                # --- Limpiar cálculo DESPUÉS de guardar --- 
-                                st.session_state.current_calculation = None
-                                # -----------------------------------------
-                                st.rerun() # Refrescar para mostrar estado guardado
+                            if is_edit_mode:
+                                cotizacion_id_a_actualizar = st.session_state.get('cotizacion_id_editar')
+                                if not cotizacion_id_a_actualizar:
+                                     st.error("Error: ID de cotización a editar no encontrado.")
+                                else:
+                                    success, message = manager.actualizar_cotizacion_existente(
+                                        cotizacion_id=cotizacion_id_a_actualizar,
+                                        cotizacion_model=cotizacion_preparada, 
+                                        cliente_id=cliente_id,
+                                        referencia_descripcion=referencia_desc,
+                                        comercial_id=comercial_id_para_guardar,
+                                        datos_calculo=datos_calculo_persistir,
+                                        modificado_por=st.session_state.user_id
+                                    )
+                                    if success:
+                                        st.success(message)
+                                        st.session_state.cotizacion_guardada = True
+                                        st.session_state.cotizacion_id = cotizacion_id_a_actualizar
+                                        st.session_state.modo_edicion = False
+                                        st.session_state.cotizacion_a_editar_id = None
+                                        st.session_state.datos_cotizacion_editar = None
+                                        st.session_state.current_calculation = None 
+                                        SessionManager.reset_calculator_widgets()
+                                        st.rerun() # <-- DESCOMENTADO
+                                    else:
+                                        st.error(f"Error al actualizar: {message}")
                             else:
-                                st.error(f"Error al guardar: {message}")
-
+                                success, message, cotizacion_id = manager.guardar_nueva_cotizacion(
+                                    cotizacion_model=cotizacion_preparada, 
+                                    cliente_id=cliente_id,
+                                    referencia_descripcion=referencia_desc,
+                                    comercial_id=comercial_id_para_guardar,
+                                    datos_calculo=datos_calculo_persistir 
+                                )
+                                if success:
+                                    st.success(message)
+                                    st.session_state.cotizacion_guardada = True
+                                    st.session_state.cotizacion_id = cotizacion_id
+                                    st.session_state.cotizacion_model.id = cotizacion_id 
+                                    st.session_state.current_calculation = None
+                                    st.rerun() # <-- DESCOMENTADO
+                                else:
+                                    st.error(f"Error al guardar: {message}")
                     except CotizacionManagerError as cme:
-                        st.error(f"Error al guardar: {cme}")
+                        st.error(f"Error en guardado/actualización: {cme}")
                     except Exception as e_save:
-                        st.error(f"Error inesperado al guardar: {e_save}")
+                        st.error(f"Error inesperado: {e_save}")
                         traceback.print_exc()
                                 
-    # Botón Nueva Cotización (solo visible si hay cálculo pero no se ha guardado)
+    # Botón Nueva Cotización 
     if st.button("Nueva Cotización", key="new_quote_button_results"):
+        # Resetear todo para una nueva cotización
         st.session_state.current_view = 'calculator'
         st.session_state.cotizacion_guardada = False
         st.session_state.referencia_guardar = ""
         st.session_state.cotizacion_model = None
         st.session_state.current_calculation = None
+        st.session_state.modo_edicion = False
+        st.session_state.cotizacion_a_editar_id = None
+        st.session_state.datos_cotizacion_editar = None
+        SessionManager.reset_calculator_widgets() # Resetear widgets
         st.rerun()
+
+def show_manage_quotes():
+    """Muestra la vista para gestionar (ver y modificar) cotizaciones."""
+    st.title("Gestión de Cotizaciones")
+
+    # Recuperar datos necesarios
+    db_manager = st.session_state.db
+    user_role = st.session_state.usuario_rol
+    user_id = st.session_state.user_id
+
+    # --- DEBUG PRINT ---
+    print(f"DEBUG: show_manage_quotes - User Role: {user_role}")
+    print(f"DEBUG: show_manage_quotes - User ID: {user_id}")
+    # --- END DEBUG ---
+
+    cotizaciones = []
+    try:
+        if user_role == 'administrador':
+            # --- DEBUG PRINT ---
+            print("DEBUG: show_manage_quotes - Calling db_manager.get_all_cotizaciones_overview()")
+            # --- END DEBUG ---
+            cotizaciones = db_manager.get_all_cotizaciones_overview()
+        elif user_role == 'comercial':
+            comercial_id = user_id
+            # --- DEBUG PRINT ---
+            print(f"DEBUG: show_manage_quotes - Calling db_manager.get_cotizaciones_overview_by_comercial(comercial_id='{comercial_id}')")
+            # --- END DEBUG ---
+            if comercial_id:
+                cotizaciones = db_manager.get_cotizaciones_overview_by_comercial(comercial_id)
+            else:
+                st.warning("No se pudo identificar el ID del comercial.")
+                cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
+        else:
+             st.warning("Rol de usuario no reconocido para esta vista.")
+             cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
+
+    except Exception as e:
+        st.error(f"Error al cargar las cotizaciones: {e}")
+        traceback.print_exc()
+        cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
+        
+    # --- Convertir a DataFrame para mostrar en tabla ---
+    if cotizaciones:
+        try:
+            # Crear el DataFrame
+            df = pd.DataFrame(cotizaciones)
+            
+            # Asegurar que columnas esperadas existen, añadir las que falten con valores default
+            required_cols = ['id', 'numero_cotizacion', 'referencia', 'cliente', 'fecha_creacion', 'estado_id']
+            for col in required_cols:
+                if col not in df.columns:
+                    df[col] = None # O un valor default apropiado
+
+            # Mapear estado_id a nombres
+            estados_dict = {estado.id: estado.estado for estado in st.session_state.initial_data['estados_cotizacion']}
+            df['Estado'] = df['estado_id'].map(estados_dict).fillna('Desconocido')
+
+            # Formatear fecha_creacion (manejar posibles errores o NaT)
+            df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion'], errors='coerce')
+            df['Fecha Creación'] = df['fecha_creacion'].dt.strftime('%Y-%m-%d %H:%M').fillna('Fecha inválida')
+            
+            # Renombrar y seleccionar columnas para mostrar
+            df_display = df[['id', 'numero_cotizacion', 'referencia', 'cliente', 'Fecha Creación', 'Estado']].copy()
+            df_display.rename(columns={
+                'id': 'ID',
+                'numero_cotizacion': 'Consecutivo',
+                'referencia': 'Referencia',
+                'cliente': 'Cliente'
+            }, inplace=True)
+
+            # --- Mostrar tabla y botones ---
+            st.markdown("### Cotizaciones Existentes")
+            
+            # Usar st.columns para poner botones al lado de la tabla o encima/debajo
+            cols = st.columns(len(df_display)) # Crear una columna para cada fila teóricamente
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+            # Añadir botones de acción (Editar, Ver PDF) - Ejemplo conceptual
+            st.write("--- Acciones ---")
+            
+            selected_quote_id = st.selectbox("Selecciona una cotización para ver acciones:", 
+                                             options=df_display['ID'].tolist(),
+                                             format_func=lambda x: f"ID: {x} - {df_display[df_display['ID'] == x]['Consecutivo'].iloc[0]}" if not df_display[df_display['ID'] == x].empty else f"ID: {x}",
+                                             index=None, # No seleccionar nada por defecto
+                                             placeholder="Elige una cotización...")
+
+            if selected_quote_id:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button("✏️ Editar", key=f"edit_{selected_quote_id}"):
+                        # --- Lógica para entrar en modo edición ---
+                        st.session_state.modo_edicion = True
+                        st.session_state.cotizacion_id_editar = selected_quote_id
+                        st.session_state.current_view = 'calculator' # <--- Correcto
+                        # Limpiar posibles datos de cálculo anterior
+                        # (No es necesario si se limpia al entrar en modo edición en mostrar_calculadora)
+                        st.rerun() # Forzar recarga para navegar y entrar en modo edición
+
+                with col2:
+                    # Botón para generar PDF
+                    try:
+                        # Obtener datos completos para el PDF seleccionado
+                        datos_pdf = db_manager.get_datos_completos_cotizacion(selected_quote_id)
+                        if datos_pdf:
+                            
+                            # --- INICIO CAMBIO: Usar la nueva función --- 
+                            pdf_bytes = generar_bytes_pdf_cotizacion(datos_pdf) 
+                            # --- FIN CAMBIO ---                            
+                            
+                            # --- Solo mostrar botón si se generó el PDF --- 
+                            if pdf_bytes:
+                                # Crear nombre de archivo
+                                identificador_pdf = datos_pdf.get('identificador', f"cotizacion_{selected_quote_id}")
+                                filename = f"{identificador_pdf}.pdf"
+                                
+                                st.download_button(
+                                    label="📄 Ver PDF",
+                                    data=pdf_bytes,
+                                    file_name=filename,
+                                    mime="application/pdf",
+                                    key=f"pdf_{selected_quote_id}"
+                                )
+                            else:
+                                 st.warning("No se generaron datos PDF (revisar logs).")
+                        else:
+                             st.warning("No se pudieron cargar los datos completos para el PDF.")
+                             
+                    except Exception as pdf_error:
+                         st.error(f"Error generando PDF: {pdf_error}")
+                         traceback.print_exc()
+                
+                # Podríamos añadir más botones (ej: Eliminar, Marcar como aprobada, etc.) aquí
+                # with col3:
+                #     if st.button("🗑️ Eliminar", key=f"delete_{selected_quote_id}"):
+                #         # Lógica para eliminar cotización (con confirmación)
+                #         st.warning(f"Funcionalidad de eliminar cotización {selected_quote_id} no implementada.")
+
+
+        except KeyError as ke:
+             st.error(f"Error: Falta una columna esperada en los datos de cotización: {ke}")
+             print("--- ERROR DATAFRAME ---")
+             print("Columnas recibidas:", cotizaciones[0].keys() if cotizaciones else "N/A")
+             print("Columnas esperadas:", required_cols)
+             traceback.print_exc()
+        except Exception as df_error:
+             st.error(f"Error al procesar y mostrar las cotizaciones: {df_error}")
+             traceback.print_exc()
+             
+    else:
+        st.info("No se encontraron cotizaciones.")
+        
+# --- Fin de la función show_manage_quotes ---
+
+def show_reports():
+    """Muestra la sección de reportes"""
+    st.title("Reportes")
+    st.write("Funcionalidad de reportes en desarrollo.")
+    # Aquí se implementará la lógica para mostrar reportes
 
 if __name__ == "__main__":
     main()
