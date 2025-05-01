@@ -2745,106 +2745,114 @@ class DBManager:
     # --- END NEW METHOD ---
 
     def get_all_cotizaciones_overview(self) -> List[Dict[str, Any]]:
-        """Obtiene una lista simplificada de todas las cotizaciones para la vista de gestión (Admin)."""
+        """Recupera una lista simplificada de todas las cotizaciones para la vista de gestión."""
         def _operation():
             try:
                 # Llamar a la función RPC get_all_cotizaciones_overview
-                print("Llamando RPC: get_all_cotizaciones_overview")
                 response = self.supabase.rpc('get_all_cotizaciones_overview').execute()
                 
+                # La RPC ya devuelve los datos procesados como una lista de diccionarios
                 if response.data:
-                    # La RPC ya devuelve el formato deseado
-                    print(f"RPC get_all_cotizaciones_overview retornó {len(response.data)} filas.")
                     return response.data
                 else:
-                    print("RPC get_all_cotizaciones_overview no retornó datos.")
                     return []
+
+            except PostgrestAPIError as e:
+                print(f"Error al obtener overview de cotizaciones vía RPC: {e}")
+                return []
             except Exception as e:
-                # Capturar errores específicos si es necesario (ej. permiso denegado)
-                if isinstance(e, postgrest.exceptions.APIError) and 'Permiso denegado' in str(e):
-                     print(f"Error de permiso en get_all_cotizaciones_overview: {e}")
-                     # Devolver vacío o lanzar un error específico para la UI
-                     return []
-                print(f"Error llamando a RPC get_all_cotizaciones_overview: {e}")
+                print(f"Error inesperado en RPC get_all_cotizaciones_overview: {e}")
                 traceback.print_exc()
                 return []
-                
-        # Usar retry operation (útil si hay errores temporales de red)
+        
         return self._retry_operation("get_all_cotizaciones_overview (RPC)", _operation)
 
     def get_cotizaciones_overview_by_comercial(self, comercial_id: str) -> List[Dict[str, Any]]:
-        """Obtiene una lista simplificada de las cotizaciones de un comercial específico (Comercial)."""
-        if not comercial_id:
-             print("Error: comercial_id es requerido para get_cotizaciones_overview_by_comercial")
-             return []
-             
+        """Recupera una lista simplificada de cotizaciones para un comercial específico."""
+        
         def _operation():
             try:
                 # Llamar a la función RPC get_cotizaciones_overview_by_comercial
-                print(f"Llamando RPC: get_cotizaciones_overview_by_comercial con p_comercial_id={comercial_id}") # LOG RPC CALL
                 response = self.supabase.rpc(
                     'get_cotizaciones_overview_by_comercial',
                     {'p_comercial_id': comercial_id}
                 ).execute()
                 
+                # La RPC ya devuelve los datos procesados como una lista de diccionarios
                 if response.data:
-                    # La RPC ya devuelve el formato deseado
-                    print(f"RPC get_cotizaciones_overview_by_comercial retornó {len(response.data)} filas.") # LOG SUCCESS + COUNT
                     return response.data
                 else:
-                    print("RPC get_cotizaciones_overview_by_comercial no retornó datos.") # LOG NO DATA
                     return []
+                    
+            except PostgrestAPIError as e:
+                print(f"Error al obtener overview de cotizaciones por comercial ({comercial_id}) vía RPC: {e}")
+                return []
             except Exception as e:
-                print(f"Error llamando a RPC get_cotizaciones_overview_by_comercial: {e}") # LOG ERROR
+                print(f"Error inesperado en RPC get_cotizaciones_overview_by_comercial ({comercial_id}): {e}")
                 traceback.print_exc()
                 return []
                 
-        # Usar retry operation
-        return self._retry_operation(f"get_cotizaciones_overview_by_comercial {comercial_id} (RPC)", _operation)
-        
+        return self._retry_operation(f"get_cotizaciones_overview_by_comercial (RPC {comercial_id})", _operation)
+
     def get_full_cotizacion_details(self, cotizacion_id: int) -> Optional[Dict[str, Any]]:
         """
-        Obtiene todos los detalles necesarios de una cotización para rellenar el formulario de edición,
-        utilizando la función RPC dedicada.
+        Recupera todos los detalles de una cotización específica, incluyendo datos relacionados,
+        para poder recargar el formulario en modo edición.
+        Utiliza una función RPC para mayor eficiencia y robustez.
         """
-        if cotizacion_id is None:
-            print("Error: cotizacion_id es requerido para get_full_cotizacion_details")
-            return None
+        print(f"-- DEBUG: Entrando en get_full_cotizacion_details para ID: {cotizacion_id} --")
+        rpc_result_data = None
+        response_obj = None # Para inspeccionar el objeto response
+        try:
+            # --- Llamada directa a RPC SIN _retry_operation --- 
+            print(f"-- DEBUG: Llamando RPC 'get_cotizacion_details_for_edit' con p_cotizacion_id={cotizacion_id} --")
             
-        def _operation():
+            # --- Bloque try/except específico para la llamada RPC --- 
             try:
-                print(f"Llamando RPC: get_full_cotizacion_details con p_cotizacion_id={cotizacion_id}")
-                response = self.supabase.rpc(
-                    'get_full_cotizacion_details',
+                response_obj = self.supabase.rpc(
+                    'get_cotizacion_details_for_edit',
                     {'p_cotizacion_id': cotizacion_id}
                 ).execute()
-                
-                # La RPC debería devolver una lista con un único diccionario si tiene éxito
-                if response.data and isinstance(response.data, list) and len(response.data) == 1:
-                    # La RPC ya devuelve el formato deseado (o muy cercano)
-                    details = response.data[0]
-                    print(f"RPC get_full_cotizacion_details retornó detalles para ID {cotizacion_id}.")
-                    # Podrían ser necesarias pequeñas adaptaciones aquí si los nombres de columna
-                    # devueltos por la RPC no coinciden exactamente con los esperados por la UI.
-                    # Por ejemplo, si la RPC devuelve 'pistas' pero la UI espera 'numero_pistas'.
-                    # Ejemplo de adaptación:
-                    # if 'pistas' in details and 'numero_pistas' not in details:
-                    #     details['numero_pistas'] = details.pop('pistas') 
-                    return details
-                elif response.data and isinstance(response.data, list) and len(response.data) == 0:
-                     print(f"RPC get_full_cotizacion_details no retornó datos para ID {cotizacion_id} (No encontrado o sin permiso)." )
-                     return None
-                else:
-                    print(f"Respuesta inesperada de RPC get_full_cotizacion_details: {response.data}")
-                    return None
-            except Exception as e:
-                print(f"Error llamando a RPC get_full_cotizacion_details: {e}")
+                print(f"-- DEBUG: Llamada RPC execute() completada. --")
+            except PostgrestAPIError as pg_err:
+                print(f"-- ERROR: PostgrestAPIError directo en llamada RPC ({cotizacion_id}): {pg_err.code} - {pg_err.message} --")
+                print(f"-- ERROR Details: {pg_err.details} --")
+                print(f"-- ERROR Hint: {pg_err.hint} --")
+                return None # Error API, retornar None
+            except Exception as call_err:
+                # Capturar cualquier otro error durante la ejecución de RPC
+                print(f"-- ERROR: Excepción directa en llamada RPC ({cotizacion_id}): {type(call_err).__name__} - {call_err} --")
                 traceback.print_exc()
-                return None
+                return None # Error inesperado, retornar None
+            # ----------------------------------------------------------
+            
+            # -- Inspeccionar el objeto response --
+            print(f"-- DEBUG: Objeto Response RAW recibido: {response_obj} (Tipo: {type(response_obj)}) --")
+            if response_obj and hasattr(response_obj, 'data'):
+                print(f"-- DEBUG: Atributo response.data: {response_obj.data} (Tipo: {type(response_obj.data)}) --")
+                rpc_result_data = response_obj.data
+            elif response_obj:
+                print("-- WARNING: Objeto response recibido pero no tiene atributo 'data' o es None/False --")
+            else:
+                print("-- WARNING: El objeto response en sí es None o False después de execute() --")
+            # ------------------------------------
+
+            # Verificar si obtuvimos datos válidos (diccionario)
+            if rpc_result_data and isinstance(rpc_result_data, dict):
+                print(f"-- DEBUG: RPC devolvió datos válidos (diccionario). Retornando... --")
+                return rpc_result_data
+            elif rpc_result_data:
+                print(f"-- WARNING: RPC devolvió datos pero no en formato dict. Tipo: {type(rpc_result_data)} --")
+                return None 
+            else:
+                print(f"-- DEBUG: RPC no devolvió datos válidos (o fue None/False) para ID {cotizacion_id} --")
+                return None 
                 
-        # Usar retry operation
-        # Devolvemos None si no se encuentra después de reintentos
-        return self._retry_operation(f"get_full_cotizacion_details {cotizacion_id} (RPC)", _operation)
+        except Exception as outer_err:
+            # Error fuera de la llamada RPC específica pero dentro de la función
+            print(f"-- ERROR: Error inesperado en get_full_cotizacion_details ({cotizacion_id}): {type(outer_err).__name__} - {outer_err} --")
+            traceback.print_exc()
+            return None
 
     # --- Funciones para Edición --- 
     def obtener_cotizacion(self, cotizacion_id: int) -> Optional[Cotizacion]:
@@ -3058,6 +3066,175 @@ class DBManager:
     # --- Fin Funciones para Edición ---
 
     # --- INICIO NUEVA FUNCIÓN ---
+    def get_adhesivo_id_from_material_adhesivo(self, material_adhesivo_id: int) -> Optional[int]:
+        """
+        Obtiene el adhesivo_id asociado a una entrada específica en la tabla material_adhesivo.
+
+        Args:
+            material_adhesivo_id: El ID de la fila en la tabla material_adhesivo.
+
+        Returns:
+            El adhesivo_id (int) asociado, o None si no se encuentra o hay error.
+        """
+        def _operation():
+            if material_adhesivo_id is None:
+                print("Error: material_adhesivo_id es requerido para get_adhesivo_id_from_material_adhesivo")
+                return None
+            try:
+                # print(f"Querying material_adhesivo for adhesivo_id: entry_id={material_adhesivo_id}") # Optional debug
+                response = (self.supabase.table('material_adhesivo') # <-- Sin escapes
+                    .select('adhesivo_id') # Seleccionar adhesivo_id
+                    .eq('id', material_adhesivo_id)
+                    .limit(1)
+                    .maybe_single() # Use maybe_single as it should be unique
+                    .execute())
+
+                # maybe_single returns the dict directly if found, or None
+                if response.data:
+                    adh_id = response.data.get('adhesivo_id')
+                    # print(f"Found adhesivo_id: {adh_id}") # Optional debug
+                    return adh_id
+                else:
+                    print(f"No material_adhesivo entry found with id {material_adhesivo_id}.")
+                    return None
+            except Exception as e:
+                print(f"Error fetching adhesivo_id from material_adhesivo: {e}")
+                logging.error(f"Error fetching adhesivo_id for material_adhesivo_id={material_adhesivo_id}: {e}", exc_info=True)
+                return None
+
+        # No usamos retry aquí porque None es un resultado esperado si el ID no existe.
+        try:
+             return _operation()
+        except Exception as e:
+             print(f"Excepción final en get_adhesivo_id_from_material_adhesivo: {e}")
+             return None
+    # --- FIN NUEVA FUNCIÓN ---
+
+    
+    def get_adhesivos_for_material(_self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+
+        Args:
+            material_id: ID del material.
+
+        Returns:
+            Lista de objetos Adhesivo compatibles.
+        """
+        if material_id is None:
+            return []
+
+        def _operation():
+            try:
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (_self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') # Select all columns from the joined adhesivos table
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        if adhesivo_data:
+                            try:
+                                # REMOVED: Ensure 'Sin adhesivo' is not included in the selectable options for etiquetas
+                                # if adhesivo_data.get('tipo') != 'Sin adhesivo': 
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"Error creating Adhesivo object from data: {adhesivo_data}, Error: {te}")
+                
+                print(f"--- DEBUG: Found {len(adhesivos_compatibles)} compatible adhesivos for material {material_id}")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"Error fetching compatible adhesivos for material {material_id}: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        result = _self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        return result if result is not None else []
+
+    #@st.cache_data
+    def get_adhesivos_for_material(_self, material_id: int) -> List[Adhesivo]:
+        """
+        Obtiene la lista de adhesivos disponibles para un material específico.
+        ... (docstring) ...
+        """
+        print(f"[CACHE CHECK] get_adhesivos_for_material llamado para material_id: {material_id}")
+        if material_id is None:
+            print("[CACHE CHECK] material_id es None, retornando lista vacía.")
+            return []
+
+        # La función interna _operation no se cacheará individualmente,
+        # pero su resultado sí a través del decorador externo.
+        def _operation():
+            try:
+                print(f"  [_operation] Intentando query para material_id: {material_id}")
+                # Query material_adhesivo, join with adhesivos, filter by material_id
+                response = (_self.supabase.table('material_adhesivo')
+                    .select('adhesivos(*)') 
+                    .eq('material_id', material_id)
+                    .execute())
+                
+                # Log detallado de la respuesta cruda
+                print(f"  [_operation] Respuesta DB cruda: {response}")
+                if hasattr(response, 'data'):
+                     print(f"  [_operation] Datos en respuesta DB: {response.data}")
+                if hasattr(response, 'error'):
+                     print(f"  [_operation] Error en respuesta DB: {response.error}")
+                
+                adhesivos_compatibles = []
+                if response.data:
+                    print(f"  [_operation] Procesando {len(response.data)} items de la respuesta...")
+                    # The result is a list of dicts like: [{'adhesivos': {'id': 1, 'tipo': '...', ...}}, ...]
+                    for item in response.data:
+                        adhesivo_data = item.get('adhesivos')
+                        print(f"    Item: {item}, Adhesivo Data Extraído: {adhesivo_data}") # Log cada item
+                        if adhesivo_data:
+                            try:
+                                adhesivos_compatibles.append(Adhesivo(**adhesivo_data))
+                            except TypeError as te:
+                                print(f"    Error creando Adhesivo: {te}, Datos: {adhesivo_data}")
+                        else:
+                             print("    Item no contenía clave 'adhesivos' o era None.")
+                else:
+                     print("  [_operation] response.data estaba vacío o era None.")
+                
+                print(f"  [_operation] Final: {len(adhesivos_compatibles)} adhesivos compatibles encontrados.")
+                return adhesivos_compatibles
+            except Exception as e:
+                print(f"  [_operation] EXCEPCIÓN en fetching: {e}")
+                logging.error(f"Error fetching compatible adhesivos for material {material_id}: {e}", exc_info=True)
+                return None # Return None to trigger retry
+
+        # Llamada a _retry_operation (que llama a _operation)
+        print(f"[CACHE CHECK] Llamando a _retry_operation para material_id: {material_id}")
+        result = _self._retry_operation(f"fetching compatible adhesivos for material {material_id}", _operation)
+        print(f"[CACHE CHECK] Resultado final para material_id {material_id} (después de retry): {'Lista vacía' if not result else f'{len(result)} items'}")
+        return result if result is not None else []
+
+    # --- Fin Funciones para Edición --- 
+
+    # --- NUEVA FUNCIÓN: Verificar existencia de identificador --- 
+    def check_identificador_exists(self, identificador: str, exclude_cotizacion_id: int) -> bool:
+        """Verifica si un identificador ya existe para otra cotización."""
+        if not identificador:
+            return False # No verificar si el identificador está vacío
+        try:
+            response = self.supabase.rpc(
+                'check_identificador_exists', 
+                {'p_identificador': identificador, 'p_exclude_id': exclude_cotizacion_id}
+            ).execute()
+            # La RPC devuelve true si existe, false si no
+            return response.data if isinstance(response.data, bool) else False
+        except Exception as e:
+            print(f"Error verificando identificador '{identificador}' (excluyendo {exclude_cotizacion_id}): {e}")
+            # En caso de error, es más seguro asumir que SÍ existe para evitar duplicados
+            return True 
+    # --- FIN NUEVA FUNCIÓN ---
+    
+    # --- INICIO NUEVA FUNCIÓN --- 
     def get_adhesivo_id_from_material_adhesivo(self, material_adhesivo_id: int) -> Optional[int]:
         """
         Obtiene el adhesivo_id asociado a una entrada específica en la tabla material_adhesivo.

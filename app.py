@@ -466,16 +466,28 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 return None
             # ----------------------------------------------------------------
             
-            # Guardar resultados y cambiar vista (sin cambios aquí)
+            # --- NUEVO: Determinar si ajustes admin estaban activos ---
+            admin_ajustes_activos_calculo = False
+            if st.session_state.get('usuario_rol') == 'administrador':
+                if (st.session_state.get('ajustar_material') or 
+                    st.session_state.get('ajustar_troquel') or 
+                    st.session_state.get('ajustar_planchas') or
+                    (st.session_state.get('rentabilidad_ajustada') is not None and st.session_state.get('rentabilidad_ajustada') > 0)):
+                    admin_ajustes_activos_calculo = True
+            # ------------------------------------------------------
+
+            # Guardar resultados y cambiar vista
             st.session_state.current_calculation = {
                 'form_data': form_data,
                 'cliente': cliente_obj,
                 'results': resultados,
                 'is_manga': es_manga,
                 'timestamp': datetime.now().isoformat(),
-                'calculos_para_guardar': datos_calculo_persistir, # <-- INCLUIR AQUÍ
-                # Opcional: Guardar info sobre ajustes aplicados
-                'admin_adjustments_applied': {
+                'calculos_para_guardar': datos_calculo_persistir, 
+                # --- AÑADIR EL NUEVO FLAG AQUÍ ---
+                'admin_ajustes_activos': admin_ajustes_activos_calculo, 
+                # ----------------------------------
+                'admin_adjustments_applied': { # Mantener esto también si se usa en otro lado
                     'material': st.session_state.get('ajustar_material', False),
                     'troquel': st.session_state.get('ajustar_troquel', False),
                     'planchas': st.session_state.get('ajustar_planchas', False),
@@ -483,7 +495,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 }
             }
             st.session_state.current_view = 'quote_results'
-            st.rerun() # <-- DESCOMENTADO
+            st.rerun() 
             
         return resultados
         
@@ -881,15 +893,32 @@ def mostrar_calculadora():
             # Ya no usamos st.form aquí, los widgets se leen directamente de session_state
             # Eliminamos with st.form(...) y st.form_submit_button
             
+            # === MOVER LÓGICA DE ESCALAS AQUÍ ===
+            # --- INICIO: Lógica para obtener valor inicial de escalas en modo edición --- 
+            default_escalas_str = "" 
+            if is_edit_mode and datos_cargados:
+                escalas_guardadas = datos_cargados.get('escalas_guardadas') 
+                if escalas_guardadas and isinstance(escalas_guardadas, list):
+                    default_escalas_str = ", ".join(map(str, escalas_guardadas))
+                    print(f"-- DEBUG (Modo Edición): Escalas cargadas: {escalas_guardadas} -> String: '{default_escalas_str}'")
+                else:
+                    print(f"-- DEBUG (Modo Edición): No se encontraron 'escalas_guardadas' válidas.")
+            # --- FIN: Lógica para obtener valor inicial --- 
+            # ====================================
+            
             # Llamar a la función refactorizada para mostrar secciones internas
+            # PASAR default_escalas_str A LA FUNCIÓN
             mostrar_secciones_internas_formulario(
                 es_manga=es_manga, 
-                initial_data=st.session_state.initial_data, # Pasar datos necesarios
-                datos_cargados=datos_cargados 
+                initial_data=st.session_state.initial_data, 
+                datos_cargados=datos_cargados, 
+                default_escalas=default_escalas_str # <-- NUEVO ARGUMENTO
             )
-                
+            
+            # -- EL CÓDIGO AÑADIDO ERRÓNEAMENTE POR EL PASO ANTERIOR SE ELIMINA DE AQUÍ --
+            
             # --- Ajustes Admin YA NO ESTÁ AQUÍ --- 
-                
+
             # --- El botón Calcular/Actualizar se mueve abajo --- 
                 
         # --- MOVER AJUSTES ADMIN AQUÍ (DESPUÉS DEL FORM) --- 
@@ -899,6 +928,9 @@ def mostrar_calculadora():
 
         # --- MOVER BOTÓN CALCULAR/ACTUALIZAR AQUÍ --- 
         if tipo_producto_seleccionado_id: # Solo mostrar si hay tipo producto
+            # Mostrar ajustes Admin también solo después de seleccionar tipo producto
+            st.divider()
+
             button_label = "Actualizar Cálculo" if is_edit_mode else "Calcular"
             if st.button(button_label, key="calculate_button_main"):
                 # === RECOLECTAR DATOS ===
@@ -1273,12 +1305,17 @@ def show_quote_results():
                                     else:
                                         st.error(f"Error al actualizar: {message}")
                             else:
+                                # --- CREACIÓN NUEVA: Obtener flag de admin_ajustes_activos --- 
+                                admin_ajustes_activos = calc.get('admin_ajustes_activos', False)
+                                print(f"-- Pasando admin_ajustes_activos = {admin_ajustes_activos} a guardar_nueva_cotizacion --")
+                                # -------------------------------------------------------------
                                 success, message, cotizacion_id = manager.guardar_nueva_cotizacion(
-                                    cotizacion_model=cotizacion_preparada, 
-                                    cliente_id=cliente_id,
-                                    referencia_descripcion=referencia_desc,
-                                    comercial_id=comercial_id_para_guardar,
-                                    datos_calculo=datos_calculo_persistir 
+                                    cotizacion_preparada, 
+                                    cliente_id,
+                                    referencia_desc,
+                                    comercial_id_para_guardar,
+                                    datos_calculo_persistir, 
+                                    admin_ajustes_activos # <-- PASAR POSICIONALMENTE
                                 )
                                 if success:
                                     st.success(message)
@@ -1356,10 +1393,11 @@ def show_manage_quotes():
             df = pd.DataFrame(cotizaciones)
             
             # Asegurar que columnas esperadas existen, añadir las que falten con valores default
-            required_cols = ['id', 'numero_cotizacion', 'referencia', 'cliente', 'fecha_creacion', 'estado_id']
+            required_cols = ['id', 'numero_cotizacion', 'referencia', 'cliente', 
+                             'fecha_creacion', 'estado_id', 'ajustes_modificados_admin'] # <-- AÑADIDO aquí
             for col in required_cols:
                 if col not in df.columns:
-                    df[col] = None # O un valor default apropiado
+                    df[col] = None if col != 'ajustes_modificados_admin' else False # Default False para el nuevo campo
 
             # Mapear estado_id a nombres
             estados_dict = {estado.id: estado.estado for estado in st.session_state.initial_data['estados_cotizacion']}
@@ -1369,7 +1407,7 @@ def show_manage_quotes():
             df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion'], errors='coerce')
             df['Fecha Creación'] = df['fecha_creacion'].dt.strftime('%Y-%m-%d %H:%M').fillna('Fecha inválida')
             
-            # Renombrar y seleccionar columnas para mostrar
+            # Renombrar y seleccionar columnas para mostrar (NO incluir ajustes_modificados_admin aquí)
             df_display = df[['id', 'numero_cotizacion', 'referencia', 'cliente', 'Fecha Creación', 'Estado']].copy()
             df_display.rename(columns={
                 'id': 'ID',
@@ -1382,7 +1420,7 @@ def show_manage_quotes():
             st.markdown("### Cotizaciones Existentes")
             
             # Usar st.columns para poner botones al lado de la tabla o encima/debajo
-            cols = st.columns(len(df_display)) # Crear una columna para cada fila teóricamente
+            # cols = st.columns(len(df_display)) # No necesitamos una columna por fila
             
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
@@ -1397,18 +1435,33 @@ def show_manage_quotes():
 
             if selected_quote_id:
                 col1, col2, col3 = st.columns(3)
+                
+                # --- Obtener la info de la cotización seleccionada del DF original ---
+                selected_quote_info = df[df['id'] == selected_quote_id].iloc[0] if not df[df['id'] == selected_quote_id].empty else None
+                admin_modified = False # Default
+                if selected_quote_info is not None:
+                    admin_modified = selected_quote_info.get('ajustes_modificados_admin', False)
+                # ----------------------------------------------------------------------
+                
                 with col1:
-                    if st.button("✏️ Editar", key=f"edit_{selected_quote_id}"):
-                        # --- Lógica para entrar en modo edición ---
-                        st.session_state.modo_edicion = True
-                        st.session_state.cotizacion_id_editar = selected_quote_id
-                        st.session_state.current_view = 'calculator' # <--- Correcto
-                        # Limpiar posibles datos de cálculo anterior
-                        # (No es necesario si se limpia al entrar en modo edición en mostrar_calculadora)
-                        st.rerun() # Forzar recarga para navegar y entrar en modo edición
+                    # Determinar si el botón editar debe estar deshabilitado
+                    disable_edit = (user_role == 'comercial' and admin_modified)
+                    edit_tooltip = "No editable: modificada por administrador." if disable_edit else "Editar cotización seleccionada"
+                    
+                    if st.button("✏️ Editar", key=f"edit_{selected_quote_id}", 
+                                 disabled=disable_edit, help=edit_tooltip): # <-- AÑADIDO disabled y help
+                        if not disable_edit: # Doble chequeo por si acaso
+                            # --- Lógica para entrar en modo edición ---
+                            st.session_state.modo_edicion = True
+                            st.session_state.cotizacion_id_editar = selected_quote_id
+                            st.session_state.current_view = 'calculator' # <--- Correcto
+                            # Limpiar posibles datos de cálculo anterior
+                            # (Se limpia al entrar en modo edición en mostrar_calculadora)
+                            st.rerun() # Forzar recarga para navegar y entrar en modo edición
+                        # Si está deshabilitado, el click no hace nada
 
                 with col2:
-                    # Botón para generar PDF
+                    # Botón para generar PDF (sin cambios en la lógica de deshabilitado)
                     try:
                         # Obtener datos completos para el PDF seleccionado
                         datos_pdf = db_manager.get_datos_completos_cotizacion(selected_quote_id)

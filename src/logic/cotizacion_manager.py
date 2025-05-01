@@ -193,7 +193,8 @@ class CotizacionManager:
         cliente_id: int, 
         referencia_descripcion: str, 
         comercial_id: str,
-        datos_calculo: Dict[str, Any] # Diccionario con resultados del cálculo para tabla calculos_escala
+        datos_calculo: Dict[str, Any], # Diccionario con resultados del cálculo
+        admin_ajustes_calculo: bool # <-- NUEVO PARÁMETRO
     ) -> Tuple[bool, str, Optional[int]]:
         """
         Orquesta el guardado de una nueva cotización en la BD.
@@ -202,6 +203,7 @@ class CotizacionManager:
         3. Llama a db.crear_cotizacion (pasando datos calculo también).
         4. Llama a db.guardar_cotizacion_escalas.
         Devuelve (éxito, mensaje, cotizacion_id).
+        Ahora incluye un flag para saber si admin aplicó ajustes durante el cálculo.
         """
         print("\n=== Iniciando guardado de NUEVA cotización ===")
         cotizacion_id = None # Inicializar ID
@@ -253,6 +255,11 @@ class CotizacionManager:
                 
             # Añadir id_usuario explícitamente (el comercial que crea)
             datos_bd['id_usuario'] = comercial_id
+            
+            # --- NUEVO: Establecer el flag basado en el parámetro --- 
+            datos_bd['ajustes_modificados_admin'] = admin_ajustes_calculo 
+            print(f"---> Valor para 'ajustes_modificados_admin' (creación): {admin_ajustes_calculo}")
+            # -------------------------------------------------------
             
             print("\nDatos preparados para db.crear_cotizacion:")
             for k, v in datos_bd.items():
@@ -340,152 +347,202 @@ class CotizacionManager:
     ) -> Tuple[bool, str]:
         """
         Orquesta la actualización de una cotización existente en la BD.
-        1. Obtiene la ReferenciaCliente existente (NO crea una nueva).
-        2. Actualiza la descripción de la ReferenciaCliente si ha cambiado.
-        3. Actualiza los datos principales de la cotización (usando db.actualizar_cotizacion).
-        4. Elimina los cálculos de escala anteriores (db.eliminar_calculos_escala).
-        5. Guarda los nuevos cálculos de escala (db.guardar_calculos_escala).
-        6. Elimina los resultados de escala anteriores (db.eliminar_cotizacion_escalas).
-        7. Guarda los nuevos resultados de escala (db.guardar_cotizacion_escalas).
+        1. Obtiene o crea la ReferenciaCliente (si cambia la descripción).
+        2. Asigna el ID de referencia actualizado al modelo.
+        3. Determina si el flag 'ajustes_modificados_admin' debe ser True.
+        4. Llama a db.actualizar_cotizacion (RPC) pasando los datos.
         Devuelve (éxito, mensaje).
         """
-        print(f"\n=== Iniciando actualización de Cotización ID: {cotizacion_id} ===")
+        print(f"\n=== Iniciando actualización de cotización ID: {cotizacion_id} ===")
         try:
-            # 0. Validar ID
-            if cotizacion_id is None:
-                return False, "ID de cotización inválido para actualizar."
-            
-            # 1. Obtener la referencia existente (asumiendo que ya existe y está vinculada)
-            # Necesitamos obtener la referencia_cliente_id desde la cotización original
-            cotizacion_original = self.db.obtener_cotizacion(cotizacion_id) # Necesitamos esta función
-            if not cotizacion_original:
-                return False, f"No se encontró la cotización original con ID {cotizacion_id}."
-            
-            referencia_id = cotizacion_original.referencia_cliente_id
-            if referencia_id is None:
-                 return False, "Error crítico: La cotización original no tiene una referencia asociada."
+            # --- PASO 0: Obtener datos originales necesarios --- 
+            datos_originales = self.db.supabase.table('cotizaciones')\
+                .select('numero_cotizacion, tipo_producto_id, referencia_cliente_id')\
+                .eq('id', cotizacion_id)\
+                .maybe_single().execute()
+            if not datos_originales.data:
+                 raise CotizacionManagerError(f"No se encontró la cotización original {cotizacion_id}")
                  
-            # 2. Actualizar descripción de la referencia si cambió
-            referencia_original = self.db.get_referencia_cliente(referencia_id)
-            if not referencia_original:
-                 return False, f"Error crítico: No se encontró la referencia original con ID {referencia_id}."
+            numero_cotizacion_original = datos_originales.data.get('numero_cotizacion')
+            tipo_producto_id_original = datos_originales.data.get('tipo_producto_id')
+            referencia_cliente_id_original = datos_originales.data.get('referencia_cliente_id') # <-- Guardar ID original
             
-            if referencia_original.descripcion != referencia_descripcion:
-                print(f"Actualizando descripción de Referencia ID {referencia_id}...")
-                # Asumiendo una función db.update_referencia_cliente(referencia_id, {'descripcion': ...})
-                update_ref_success = self.db.update_referencia_cliente(referencia_id, {'descripcion': referencia_descripcion})
-                if not update_ref_success:
-                    return False, f"Error al actualizar la descripción de la referencia ID {referencia_id}."
-            
-            # 3. Preparar datos y actualizar cotización principal
-            datos_bd = cotizacion_model.__dict__.copy()
-            datos_bd.pop('id', None) # No se actualiza el ID
-            datos_bd.pop('escalas', None) # Escalas se manejan por separado
-            datos_bd.pop('fecha_creacion', None) # No se actualiza
-            datos_bd.pop('numero_cotizacion', None) # No se actualiza
-            datos_bd.pop('identificador', None) # Se podría recalcular y actualizar si es necesario
-            datos_bd.pop('referencia_cliente_id', None) # No se cambia la referencia
-            # Eliminar objetos relacionales
-            datos_bd.pop('cliente', None)
-            datos_bd.pop('referencia_cliente', None)
-            datos_bd.pop('material', None)
-            datos_bd.pop('acabado', None)
-            datos_bd.pop('tipo_producto', None)
-            datos_bd.pop('forma_pago', None)
-            datos_bd.pop('perfil_comercial_info', None)
-            datos_bd.pop('tipo_grafado', None)
-            
-            # Añadir quién modificó y asegurar comercial_id
-            datos_bd['modificado_por'] = modificado_por
-            datos_bd['comercial_id'] = comercial_id # Permitir reasignación por admin
-            
-            # Convertir Decimal a float
-            for key in ['valor_troquel', 'valor_plancha_separado']:
-                 if key in datos_bd and isinstance(datos_bd[key], Decimal):
-                     datos_bd[key] = float(datos_bd[key])
-                     
-            # Asegurar que los campos None se manejen correctamente
-            if 'valor_plancha_separado' in datos_bd and datos_bd['valor_plancha_separado'] is None:
-                 # Si es None, asegurarse de que se envíe NULL a la BD si la función de update lo maneja
-                 pass # O eliminar la clave si la función de update no actualiza si la clave no está
-            if 'altura_grafado' in datos_bd and datos_bd['altura_grafado'] is None:
-                 pass
+            if numero_cotizacion_original is None:
+                 raise CotizacionManagerError(f"La cotización original {cotizacion_id} no tiene número.")
+            if referencia_cliente_id_original is None:
+                 raise CotizacionManagerError(f"La cotización original {cotizacion_id} no tiene ID de referencia asociado.")
                  
-            print(f"Actualizando datos principales de Cotización ID {cotizacion_id}...")
-            # Asumiendo una función db.update_cotizacion(cotizacion_id, datos_bd)
-            update_coti_success, update_coti_msg = self.db.actualizar_cotizacion(cotizacion_id, datos_bd)
-            if not update_coti_success:
-                 return False, f"Error al actualizar la cotización principal: {update_coti_msg}"
-                 
-            # --- Actualizar Cálculos y Escalas --- 
-            # Es más simple eliminar y volver a insertar que intentar actualizar en su lugar.
+            tipo_producto_id_actual = datos_calculo.get('tipo_producto_id', tipo_producto_id_original)
+            tipo_producto_obj = self.db.get_tipo_producto(tipo_producto_id_actual)
+            tipo_producto_nombre_actual = tipo_producto_obj.nombre if tipo_producto_obj else "DESCONOCIDO"
+            # ------------------------------------------------------------------
             
-            # 4. Eliminar cálculos de escala anteriores
-            print(f"Eliminando cálculos de escala anteriores para Cotización ID {cotizacion_id}...")
-            delete_calc_success = self.db.eliminar_calculos_escala(cotizacion_id) # Necesita implementar esta función
-            if not delete_calc_success:
-                 # Podría ser un warning en lugar de error fatal si la tabla no existía o estaba vacía
-                 print(f"Advertencia: No se pudieron eliminar los cálculos de escala anteriores para {cotizacion_id}.")
+            # --- PASO 1: Obtener Referencia Actual y manejar cambio de descripción --- 
+            referencia_actual = self.db.get_referencia_cliente(referencia_cliente_id_original)
+            if not referencia_actual:
+                 # Esto sería muy raro si el ID original existía, pero por seguridad
+                 raise CotizacionManagerError(f"No se pudo encontrar la referencia original con ID {referencia_cliente_id_original}.")
                  
-            # 5. Guardar nuevos cálculos de escala
-            print(f"Guardando nuevos cálculos de escala para Cotización ID {cotizacion_id}...")
-            # Reutilizar la lógica de guardar_calculos_escala existente
-            save_calc_success = self.db.guardar_calculos_escala(
-                cotizacion_id=cotizacion_id,
-                **datos_calculo # Desempaquetar el diccionario con los datos del cálculo
-            )
-            if not save_calc_success:
-                return False, "Error al guardar los nuevos datos de cálculo."
+            referencia_id_final = None
+            cliente_nombre_identificador = ""
+            referencia_desc_identificador = ""
+            
+            if referencia_actual.descripcion == referencia_descripcion:
+                # Descripción NO cambió
+                referencia_id_final = referencia_actual.id
+                cliente_nombre_identificador = referencia_actual.cliente.nombre if referencia_actual.cliente else ""
+                referencia_desc_identificador = referencia_actual.descripcion
+                print(f"Descripción de referencia no cambió. Usando ID existente: {referencia_id_final}")
+            else:
+                # Descripción SÍ cambió
+                print(f"Descripción de referencia cambió (o no existía). Buscando/creando nueva...")
+                # Usamos el cliente_id de la referencia original y el comercial_id de quien guarda
+                referencia_id_final = self._obtener_o_crear_referencia(
+                    referencia_actual.cliente_id, 
+                    referencia_descripcion, 
+                    comercial_id # ID del comercial asignado a la cotización (puede cambiar si edita admin)
+                )
+                if referencia_id_final is None:
+                    return False, "Error crítico: No se pudo obtener o crear la nueva referencia de cliente necesaria."
+                # Obtener detalles de la nueva referencia para el identificador
+                nueva_ref_obj = self.db.get_referencia_cliente(referencia_id_final)
+                cliente_nombre_identificador = nueva_ref_obj.cliente.nombre if nueva_ref_obj and nueva_ref_obj.cliente else ""
+                referencia_desc_identificador = nueva_ref_obj.descripcion if nueva_ref_obj else referencia_descripcion
+            
+            # Asignar ID de referencia al modelo (útil si se usa más adelante)
+            cotizacion_model.referencia_cliente_id = referencia_id_final
+            print(f"Referencia a usar para la actualización: {referencia_id_final}")
+            # ------------------------------------------------------------------------
+
+            # --- PASO 2: Lógica MEJORADA para marcar 'ajustes_modificados_admin' --- 
+            ajustes_modificados_por_admin_ahora = False
+            perfil_modificador = self.db.get_perfil(modificado_por)
+            rol_modificador = perfil_modificador.get('rol_nombre') if perfil_modificador else None
+            if rol_modificador == 'administrador':
+                ajustes_modificados_por_admin_ahora = True
+            valor_actual_flag_bd = False 
+            try:
+                response_flag = self.db.supabase.table('cotizaciones').select('ajustes_modificados_admin').eq('id', cotizacion_id).maybe_single().execute()
+                if response_flag.data: valor_actual_flag_bd = response_flag.data.get('ajustes_modificados_admin', False)
+            except Exception as e_flag: print(f"ERROR al leer flag: {e_flag}")
+            flag_final_a_enviar = valor_actual_flag_bd or ajustes_modificados_por_admin_ahora
+            # ------------------------------------------------------------------------
+
+            # --- PASO 3: GENERAR Y VALIDAR IDENTIFICADOR --- 
+            print("\nGenerando y validando identificador actualizado...")
+            identificador_nuevo = ""
+            try:
+                mat_ad_id_actual = cotizacion_model.material_adhesivo_id
+                material_code = self.db.get_material_adhesivo_code(mat_ad_id_actual) if mat_ad_id_actual else ""
+                acabado_id_actual = cotizacion_model.acabado_id
+                acabado_code = self.db.get_acabado_code(acabado_id_actual) if acabado_id_actual else ""
+                ancho_actual = cotizacion_model.ancho
+                avance_actual = cotizacion_model.avance
+                num_pistas_actual = cotizacion_model.numero_pistas
+                num_tintas_actual = cotizacion_model.num_tintas
+                num_paq_rollos_actual = cotizacion_model.num_paquetes_rollos
                 
-            # 6. Eliminar resultados de escala anteriores
-            print(f"Eliminando resultados de escala anteriores para Cotización ID {cotizacion_id}...")
-            delete_esc_success = self.db.eliminar_cotizacion_escalas(cotizacion_id) # Necesita implementar esta función
-            if not delete_esc_success:
-                 print(f"Advertencia: No se pudieron eliminar los resultados de escala anteriores para {cotizacion_id}.")
-                 
-            # 7. Guardar nuevos resultados de escala
-            print(f"Guardando nuevos resultados de escala para Cotización ID {cotizacion_id}...")
-            # Reutilizar la lógica de guardar_cotizacion_escalas existente
-            if cotizacion_model.escalas:
-                 save_esc_success = self.db.guardar_cotizacion_escalas(cotizacion_id, cotizacion_model.escalas)
-                 if not save_esc_success:
-                     return False, "Error al guardar los nuevos resultados de escala."
+                identificador_nuevo = self.db._generar_identificador(
+                    tipo_producto=tipo_producto_nombre_actual,
+                    material_code=material_code,
+                    ancho=ancho_actual,
+                    avance=avance_actual,
+                    num_pistas=num_pistas_actual,
+                    num_tintas=num_tintas_actual,
+                    acabado_code=acabado_code,
+                    num_paquetes_rollos=num_paq_rollos_actual,
+                    cliente=cliente_nombre_identificador, 
+                    referencia=referencia_desc_identificador,
+                    numero_cotizacion=numero_cotizacion_original
+                )
+                print(f"Nuevo identificador generado: {identificador_nuevo}")
+                if self.db.check_identificador_exists(identificador_nuevo, cotizacion_id):
+                    error_msg = f"❌ El identificador generado '{identificador_nuevo}' ya existe para otra cotización. No se puede actualizar."
+                    print(error_msg)
+                    return False, error_msg
+                else:
+                    print("Identificador nuevo es único.")
+            except Exception as e_ident:
+                print(f"Error generando o validando identificador: {e_ident}")
+                traceback.print_exc()
+                return False, f"❌ Error al procesar el identificador: {e_ident}"
+            # ------------------------------------------------------------------------
+
+            # --- PASO 4: Limpiar y preparar datos para la actualización --- 
+            datos_actualizar = cotizacion_model.__dict__.copy()
+            datos_actualizar.pop('escalas', None) 
+            datos_actualizar.pop('id', None) 
+            datos_actualizar.pop('fecha_creacion', None) 
+            datos_actualizar.pop('numero_cotizacion', None) 
+            datos_actualizar.pop('cliente', None) 
+            datos_actualizar.pop('referencia_cliente', None)
+            datos_actualizar.pop('material', None)
+            datos_actualizar.pop('acabado', None)
+            datos_actualizar.pop('tipo_producto', None)
+            datos_actualizar.pop('forma_pago', None)
+            datos_actualizar.pop('perfil_comercial_info', None)
+            datos_actualizar.pop('tipo_grafado', None) 
+            datos_actualizar.pop('ajustes_modificados_admin', None) 
+            
+            if hasattr(cotizacion_model, 'material_adhesivo_id'):
+                 datos_actualizar['material_adhesivo_id'] = cotizacion_model.material_adhesivo_id
+                 datos_actualizar.pop('material_id', None)
             else:
-                 print("No hay nuevas escalas para guardar.")
+                 datos_actualizar['material_adhesivo_id'] = None
+                 datos_actualizar.pop('material_id', None)
 
-            # --- ACTUALIZAR calculos_escala ---
-            print(f"Actualizando datos de cálculo (calculos_escala) para cotización ID: {cotizacion_id}")
-            # 7. Eliminar datos de cálculo antiguos
-            success_del_calc = self.db.eliminar_calculos_escala(cotizacion_id)
-            if not success_del_calc:
-                # Considerar si es error fatal o warning
-                print(f"ADVERTENCIA: No se pudieron eliminar los datos de cálculo antiguos para {cotizacion_id}")
-                # return False, "Error al eliminar datos de cálculo antiguos."
+            # Convertir Decimal a float si es necesario
+            if isinstance(datos_actualizar.get('valor_troquel'), Decimal):
+                datos_actualizar['valor_troquel'] = float(datos_actualizar['valor_troquel'])
+            if isinstance(datos_actualizar.get('valor_plancha_separado'), Decimal):
+                datos_actualizar['valor_plancha_separado'] = float(datos_actualizar['valor_plancha_separado'])
+                
+            # Convertir datetime a string ISO 8601 para serialización JSON
+            if isinstance(datos_actualizar.get('ultima_modificacion_inputs'), datetime):
+                datos_actualizar['ultima_modificacion_inputs'] = datos_actualizar['ultima_modificacion_inputs'].isoformat()
+                
+            # Añadir IDs y flags calculados
+            datos_actualizar['referencia_cliente_id'] = referencia_id_final # ID de la referencia final (original o nueva)
+            datos_actualizar['ajustes_modificados_admin'] = flag_final_a_enviar 
+            datos_actualizar['identificador'] = identificador_nuevo 
+            
+            # Añadir datos del cálculo
+            datos_actualizar.update(datos_calculo) 
 
-            # 8. Guardar nuevos datos de cálculo
-            if datos_calculo: # Asegurarse que hay datos para guardar
-                # La función guardar_calculos_escala espera argumentos nombrados, no un dict.
-                # Desempacar el diccionario datos_calculo en argumentos nombrados.
-                try:
-                    print(f"Guardando nuevos datos de cálculo: {datos_calculo}")
-                    success_calc = self.db.guardar_calculos_escala(cotizacion_id=cotizacion_id, **datos_calculo)
-                    if not success_calc:
-                         return False, f"Error al guardar nuevos datos de cálculo"
-                except TypeError as te:
-                    print(f"Error de TypeError al llamar a guardar_calculos_escala: {te}")
-                    print("Verifique que las claves en 'datos_calculo' coincidan con los parámetros de la función.")
-                    return False, "Error interno al intentar guardar datos de cálculo (parámetros no coinciden)."
-            else:
-                print("ADVERTENCIA: No se proporcionaron 'datos_calculo' para actualizar.")
-            # -------------------------------------
-
-            print(f"Actualización completada para cotización ID: {cotizacion_id}")
-            return True, "✅ Cotización actualizada exitosamente"
-
+            print("\nDatos finales para la llamada RPC actualizar_cotizacion:")
+            valor_flag_enviado = datos_actualizar.get('ajustes_modificados_admin')
+            valor_identificador_enviado = datos_actualizar.get('identificador')
+            print(f"---> Valor para 'ajustes_modificados_admin' a enviar: {valor_flag_enviado} (Tipo: {type(valor_flag_enviado)}) ")
+            print(f"---> Valor para 'identificador' a enviar: {valor_identificador_enviado} ")
+            for k, v in datos_actualizar.items():
+                 if k not in ['ajustes_modificados_admin', 'identificador']:
+                      print(f"  {k}: {v}")
+            
+            # --- PASO 5: Llamar a RPC para actualizar --- 
+            try:
+                print("Llamando a RPC 'actualizar_cotizacion'...")
+                response = self.db.supabase.rpc(
+                    'actualizar_cotizacion', 
+                    {'p_cotizacion_id': cotizacion_id, 'datos': datos_actualizar}
+                ).execute()
+                if response.data:
+                    print(f"RPC actualizar_cotizacion exitosa. Respuesta: {response.data}")
+                    return True, "✅ Cotización actualizada exitosamente" 
+                else:
+                    error_info = getattr(response, 'error', None)
+                    error_msg = f"Error devuelto por RPC actualizar_cotizacion: {error_info}" if error_info else "La RPC de actualización no devolvió datos confirmatorios."
+                    print(error_msg)
+                    return False, f"❌ {error_msg}"
+            except Exception as e_rpc:
+                print(f"Error EXCEPCIONAL llamando a RPC actualizar_cotizacion: {e_rpc}")
+                traceback.print_exc()
+                return False, f"❌ Error técnico al actualizar: {e_rpc}"
+                
         except Exception as e:
-            print(f"Error en actualizar_cotizacion_existente: {e}")
+            # Captura errores de los pasos 0, 1, 3 o generales
+            print(f"Error general en actualizar_cotizacion_existente: {str(e)}")
             traceback.print_exc()
-            return False, f"Error inesperado al actualizar la cotización: {e}"
+            return False, f"❌ Error inesperado: {str(e)}"
 
     # --- Métodos Helper (si son necesarios) ---
     def _transformar_escalas(self, escalas_resultados: List[Dict]) -> List[Escala]:

@@ -6,53 +6,39 @@ import time
 
 # --- Helper Functions for Input Sections ---
 
-def _mostrar_escalas(datos_cargados: Optional[Dict] = None):
-    """Muestra y procesa el input de escalas."""
+def _mostrar_escalas(default_escalas: str):
+    """Muestra y procesa el input de escalas, usando el valor inicial provisto."""
     st.subheader("Cantidades a Cotizar")
     
-    # Valor inicial desde datos cargados o session state o default
-    default_escalas_list = []
-    if datos_cargados and 'escalas' in datos_cargados:
-        default_escalas_list = datos_cargados['escalas']
-    elif 'escalas_texto_value' in st.session_state:
-        try:
-            default_escalas_list = [int(e.strip()) for e in st.session_state['escalas_texto_value'].split(",") if e.strip()]
-        except ValueError:
-            default_escalas_list = []
-    else:
-        default_escalas_list = [1000, 2500, 5000] # Hardcoded default
-    
-    # Convertir lista a string para el input
-    default_escalas_texto = ", ".join(map(str, default_escalas_list))
-
+    # Usar el valor inicial pasado como argumento
     escalas_texto = st.text_input(
-        "Escalas (separadas por comas)",
-        value=default_escalas_texto,
+        "Escalas a cotizar (separadas por coma) *", 
+        value=default_escalas, # <-- USAR EL VALOR PASADO
         key="escalas_texto_input",
-        help="Ingrese múltiples cantidades separadas por comas. Ejemplo: 1000, 2500, 5000"
+        help="Ej: 1000, 2000, 5000, 10000. Mínimo 100 unidades."
     )
 
     try:
+        # Procesar el valor actual del input para validación y guardado en estado
         escalas_usuario = [int(e.strip()) for e in escalas_texto.split(",") if e.strip()]
-        escalas_usuario = sorted(list(set(escalas_usuario))) # Asegurar lista única y ordenada
-
-        # Guardar el valor en session_state si cambia (solo si no estamos cargando)
-        # if not datos_cargados and st.session_state.get('escalas_texto_value', "") != escalas_texto:
-        #     st.session_state['escalas_texto_value'] = escalas_texto
-            # Considerar si el rerun es necesario aquí o causa problemas en modo edición
-            # st.rerun() 
+        escalas_usuario = sorted(list(set(escalas_usuario))) 
 
         if not escalas_usuario:
              st.warning("Ingrese al menos una escala.")
+             # Limpiar estado si el input está vacío
+             if 'escalas' in st.session_state: del st.session_state['escalas']
         elif any(e < 100 for e in escalas_usuario):
             raise ValueError("Las escalas deben ser mayores o iguales a 100.")
         else:
+            # Guardar la lista procesada en el estado
             st.session_state['escalas'] = escalas_usuario
 
     except ValueError as e:
         st.error(f"Error en las escalas: {e}")
+        if 'escalas' in st.session_state: del st.session_state['escalas'] # Limpiar en error
     except Exception:
         st.error("Por favor ingrese las escalas como números enteros separados por comas.")
+        if 'escalas' in st.session_state: del st.session_state['escalas'] # Limpiar en error
 
 def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict] = None):
     """Muestra los inputs de dimensiones (ancho, avance, pistas) y número de tintas."""
@@ -471,39 +457,42 @@ def _mostrar_formas_pago(formas_pago: List[Any], datos_cargados: Optional[Dict] 
         st.session_state["forma_pago_id"] = None
 
 
-# --- RENOMBRADA Y SIMPLIFICADA --- 
-def mostrar_secciones_internas_formulario(es_manga: bool, initial_data: Dict, datos_cargados: Optional[Dict] = None) -> None:
-    """
-    Muestra las secciones del formulario que SÍ deben ir dentro del st.form.
-    (Dimensiones, Acabados/Empaque, Opciones Adicionales, Pago).
-    Los valores se leen/escriben directamente en st.session_state.
-
+# --- Función Principal Refactorizada --- 
+def mostrar_secciones_internas_formulario(
+    es_manga: bool, 
+    initial_data: Dict, 
+    datos_cargados: Optional[Dict] = None,
+    default_escalas: str = "" # <-- NUEVO PARÁMETRO con valor default
+) -> None:
+    """Muestra todas las secciones del formulario que dependen de la selección inicial.
     Args:
         es_manga: Boolean indicando si el producto es manga.
         initial_data: Diccionario con datos iniciales cacheados (tipos_grafado, acabados, etc.).
         datos_cargados: Diccionario con datos precargados para modo edición.
+        default_escalas (str): String formateado para el valor inicial del input de escalas.
     """
-    # Obtener listas necesarias de initial_data
-    # (Asegurarse que initial_data fue cargado correctamente antes de llamar esta función)
-    acabados = initial_data.get('acabados', [])
-    tipos_grafado = initial_data.get('tipos_grafado', [])
-    formas_pago = initial_data.get('formas_pago', [])
-    
-    # --- Renderizar SOLO las secciones internas --- 
-    # Ya no se muestra Material, Adhesivo, ni Grafado aquí
-    
-    # --- AÑADIDO: Mostrar sección de escalas ---
-    _mostrar_escalas(datos_cargados)
-    # -------------------------------------------
-    
+    st.markdown("--- Detalles de la Cotización ---")
+
+    # 1. Escalas (Pasar el valor inicial)
+    _mostrar_escalas(default_escalas=default_escalas)
     st.divider()
+
+    # 2. Dimensiones y Tintas
     _mostrar_dimensiones_y_tintas(es_manga, datos_cargados)
     st.divider()
+    
+    # 3. Acabados/Grafado y Empaque (dependiendo de es_manga)
+    tipos_grafado = initial_data.get('tipos_grafado', [])
+    acabados = initial_data.get('acabados', [])
     _mostrar_acabados_y_empaque(es_manga, tipos_grafado, acabados, datos_cargados)
     st.divider()
+    
+    # 4. Opciones Adicionales
     _mostrar_opciones_adicionales(es_manga, datos_cargados)
     st.divider()
+    
+    # 5. Forma de Pago
+    formas_pago = initial_data.get('formas_pago', [])
     _mostrar_formas_pago(formas_pago, datos_cargados)
-    st.divider()
 
 # --- FIN FUNCIÓN RENOMBRADA --- 
