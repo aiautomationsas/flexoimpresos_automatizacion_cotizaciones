@@ -265,7 +265,7 @@ class ReferenciaCliente:
 
 @dataclass
 class MotivoRechazo:
-    """Representa un motivo de rechazo de cotización"""
+    """Modelo para representar un motivo de rechazo de cotización."""
     id: int
     motivo: str
 

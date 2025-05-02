@@ -1004,75 +1004,71 @@ class DBManager:
             raise
 
     def crear_cliente(self, cliente: Cliente) -> Cliente:
-        """Crea un nuevo cliente en la base de datos."""
+        """
+        Crea un nuevo cliente en la base de datos.
+        """
+        print("\n=== INICIO CREAR CLIENTE ===")
+        print(f"Cliente recibido: {cliente.__dict__}")
+        
         try:
-            print("\n=== INICIO CREAR CLIENTE ===")
-            print(f"Cliente recibido: {cliente}")
+            # Validar campos requeridos
+            if not cliente.nombre or not cliente.nombre.strip():
+                raise Exception("El nombre del cliente es requerido")
+                
+            if not cliente.codigo:
+                raise Exception("El código (NIT/CC) del cliente es requerido")
+                
+            # Validar que el código sea numérico y limpiarlo
+            codigo_limpio = str(cliente.codigo).replace('-', '').replace('.', '')
+            if not codigo_limpio.isdigit():
+                raise Exception("El código (NIT/CC) debe contener solo números")
             
-            # Usar _limpiar_datos para preparar los datos
-            cliente_data = self._limpiar_datos(cliente.__dict__)
-            print("\nDatos limpios del cliente a insertar:")
-            for k, v in cliente_data.items():
-                print(f"  {k}: {v}")
+            # Convertir a bigint
+            try:
+                codigo_numerico = int(codigo_limpio)
+            except ValueError:
+                raise Exception(f"No se pudo convertir el código '{codigo_limpio}' a número")
+            
+            # Preparar datos para RPC
+            rpc_data = {
+                'p_nombre': cliente.nombre.strip(),
+                'p_codigo': codigo_numerico,  # Enviar como bigint
+                'p_persona_contacto': cliente.persona_contacto.strip() if cliente.persona_contacto else None,
+                'p_correo_electronico': cliente.correo_electronico.strip() if cliente.correo_electronico else None,
+                'p_telefono': cliente.telefono.strip() if cliente.telefono else None
+            }
+            
+            print("\nDatos que se enviarán:")
+            for k, v in rpc_data.items():
+                print(f"  {k}: {v} (tipo: {type(v)})")
             
             # Intentar insertar usando RPC
-            try:
-                print("\nPreparando datos para RPC:")
-                rpc_data = {
-                    'p_nombre': cliente_data['nombre'],
-                    'p_codigo': cliente_data.get('codigo'),
-                    'p_persona_contacto': cliente_data.get('persona_contacto'),
-                    'p_correo_electronico': cliente_data.get('correo_electronico'),
-                    'p_telefono': cliente_data.get('telefono')
-                }
-                print("Datos RPC preparados:")
-                for k, v in rpc_data.items():
-                    print(f"  {k}: {v}")
+            response = self.supabase.rpc(
+                'insertar_cliente',
+                rpc_data
+            ).execute()
+            
+            if not response.data:
+                raise Exception("No se pudo crear el cliente")
+            
+            nuevo_cliente = Cliente(**response.data[0])
+            return nuevo_cliente
                 
-                print("\nIniciando llamada RPC 'insertar_cliente'...")
-                response = self.supabase.rpc(
-                    'insertar_cliente',
-                    rpc_data
-                ).execute()
-                
-                print("\nRespuesta RPC recibida:")
-                print(f"Tipo de respuesta: {type(response)}")
-                print(f"Respuesta completa: {response}")
-                print(f"Datos en response: {response.data if hasattr(response, 'data') else 'Sin datos'}")
-                
-                if not response.data:
-                    raise Exception("No se pudo crear el cliente. Respuesta vacía.")
-                
-                print("\nCreando objeto Cliente con datos de respuesta:")
-                print(f"Datos para crear Cliente: {response.data[0]}")
-                nuevo_cliente = Cliente(**response.data[0])
-                print(f"Cliente creado exitosamente: {nuevo_cliente}")
-                
-                print("\nVerificando cliente en la base de datos...")
-                verify = self.supabase.table('clientes').select('*').eq('id', nuevo_cliente.id).execute()
-                print(f"Verificación: {verify.data}")
-                
-                print("\n=== FIN CREAR CLIENTE ===")
-                return nuevo_cliente
-                
-            except Exception as e:
-                print("\n!!! ERROR DURANTE LA INSERCIÓN !!!")
-                print(f"Tipo de error: {type(e)}")
-                print(f"Mensaje de error: {str(e)}")
-                print("Datos que se intentaron insertar:")
-                for k, v in rpc_data.items():
-                    print(f"  {k}: {v}")
-                print("\nStack trace completo:")
-                traceback.print_exc()
-                raise Exception(f"Error al crear cliente: {str(e)}")
-        
         except Exception as e:
-            print("\n!!! ERROR GENERAL EN CREAR_CLIENTE !!!")
+            print("\n!!! ERROR EN CREAR_CLIENTE !!!")
             print(f"Tipo de error: {type(e)}")
             print(f"Mensaje de error: {str(e)}")
+            
+            if 'rpc_data' in locals():
+                print("\nDatos que se intentaron insertar:")
+                for k, v in rpc_data.items():
+                    print(f"  {k}: {v} (tipo: {type(v)})")
+            
             print("\nStack trace completo:")
+            import traceback
             traceback.print_exc()
-            raise
+            
+            raise Exception(f"Error al crear cliente: {str(e)}")
 
     def get_referencias_cliente(self, cliente_id: int) -> List[ReferenciaCliente]:
         """Obtiene las referencias de un cliente que pertenecen al comercial actual.

@@ -5,6 +5,9 @@ from typing import Optional, Dict, Any, Tuple
 import pandas as pd
 import traceback # Import traceback for detailed error logging
 import math # <-- AÑADIR IMPORTACIÓN
+import time # <-- AÑADIR IMPORTACIÓN
+import sys # <-- AÑADIR IMPORTACIÓN
+import json # <-- AÑADIR IMPORTACIÓN
 
 # Luego las importaciones del proyecto, agrupadas por funcionalidad
 # Auth y DB
@@ -513,6 +516,7 @@ def show_navigation():
     options = {
         'calculator': "📝 Calculadora / Editar",
         'manage_quotes': "📂 Gestionar Cotizaciones",
+        'manage_clients': "👥 Gestionar Clientes",
         'reports': "📊 Reportes"
     }
 
@@ -973,17 +977,36 @@ def mostrar_calculadora():
                     # Acabado/Grafado
                     if datos_formulario_enviado['es_manga']:
                         grafado_obj = st.session_state.get('tipo_grafado_select')
-                        if grafado_obj: 
+                        if grafado_obj:
                             datos_formulario_enviado['tipo_grafado_id'] = grafado_obj.id
-                            datos_formulario_enviado['tipo_grafado_nombre'] = grafado_obj.nombre # Para handle_calculation
-                            if grafado_obj.id in [3, 4]: datos_formulario_enviado['altura_grafado'] = float(st.session_state.get('altura_grafado', 0.0))
-                            else: datos_formulario_enviado['altura_grafado'] = None
-                        else: validation_errors.append("Tipo de grafado no seleccionado.")
+                            datos_formulario_enviado['tipo_grafado_nombre'] = grafado_obj.nombre
+
+                            # --- Validación de altura_grafado ---
+                            if grafado_obj.id in [3, 4]: # IDs que requieren altura
+                                altura_grafado_value = st.session_state.get('altura_grafado')
+                                if altura_grafado_value is not None:
+                                    try:
+                                        # Intentar convertir a float solo si no es None
+                                        datos_formulario_enviado['altura_grafado'] = float(altura_grafado_value)
+                                    except (ValueError, TypeError):
+                                        validation_errors.append("Altura de grafado debe ser un número válido.")
+                                        datos_formulario_enviado['altura_grafado'] = None
+                                else:
+                                    # Es requerido, así que si es None, es un error
+                                    validation_errors.append("Altura de grafado es requerida para este tipo de grafado.")
+                                    datos_formulario_enviado['altura_grafado'] = None
+                            # --- Fin Validación ---
+                            else: # Si el tipo de grafado no requiere altura
+                                datos_formulario_enviado['altura_grafado'] = None
+                        else:
+                            validation_errors.append("Tipo de grafado no seleccionado.")
                         datos_formulario_enviado['acabado_id'] = None
                     else: # Etiqueta
                         acabado_obj = st.session_state.get('acabado_select')
-                        if acabado_obj: datos_formulario_enviado['acabado_id'] = acabado_obj.id
-                        else: validation_errors.append("Acabado no seleccionado.")
+                        if acabado_obj:
+                            datos_formulario_enviado['acabado_id'] = acabado_obj.id
+                        else:
+                            validation_errors.append("Acabado no seleccionado.")
                         datos_formulario_enviado['tipo_grafado_id'] = None
                         datos_formulario_enviado['altura_grafado'] = None
 
@@ -1030,6 +1053,126 @@ def mostrar_calculadora():
                     for error in validation_errors: st.error(error)
                     st.warning("No se pudo calcular debido a errores en los datos ingresados.")
         # --- FIN MOVIMIENTO BOTÓN ---
+
+def show_manage_clients():
+    """Muestra la vista para gestionar clientes."""
+    st.title("Gestión de Clientes")
+    
+    # Botón para crear nuevo cliente
+    if st.button("➕ Crear Nuevo Cliente"):
+        st.session_state.current_view = 'crear_cliente'
+        st.rerun()
+        return
+        
+    # Mostrar lista de clientes existentes
+    db_manager = st.session_state.db
+    user_role = st.session_state.usuario_rol
+    
+    try:
+        clientes = db_manager.get_clientes()
+        if clientes:
+            # Crear DataFrame para mostrar los clientes
+            df_clientes = pd.DataFrame([{
+                'NIT': c.codigo,
+                'Nombre': c.nombre,
+                'Contacto': c.persona_contacto or '',
+                'Correo': c.correo_electronico or '',
+                'Teléfono': c.telefono or ''
+            } for c in clientes])
+            
+            st.dataframe(
+                df_clientes,
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info("No hay clientes registrados.")
+    except Exception as e:
+        st.error(f"Error al cargar los clientes: {str(e)}")
+
+def show_create_client():
+    """Muestra el formulario para crear un nuevo cliente."""
+    st.title("Crear Nuevo Cliente")
+    
+    # Botón para volver a la lista de clientes
+    if st.button("← Volver a la lista de clientes"):
+        st.session_state.current_view = 'manage_clients'
+        st.rerun()
+        return
+
+    # Formulario de creación de cliente
+    with st.form("crear_cliente_form"):
+        st.write("### Información del Cliente")
+        
+        # Campos del formulario
+        nit = st.text_input("NIT/CC *", 
+                           help="Identificador único del cliente (solo números)")
+        nombre = st.text_input("Nombre del Cliente *",
+                             help="Nombre completo o razón social")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            contacto = st.text_input("Persona de Contacto",
+                                   help="Nombre de la persona de contacto")
+            telefono = st.text_input("Teléfono",
+                                   help="Número de teléfono del cliente")
+        
+        with col2:
+            email = st.text_input("Correo Electrónico",
+                                help="Correo electrónico de contacto",
+                                key="email_input")
+        
+        # Botón de submit
+        submitted = st.form_submit_button("Crear Cliente")
+        
+        if submitted:
+            # Validaciones básicas
+            if not nit or not nombre:
+                st.error("Los campos NIT y Nombre son obligatorios.")
+                return
+                
+            # Validar que el NIT sea numérico
+            if not nit.isdigit():
+                st.error("El NIT debe contener solo números.")
+                return
+            
+            # Validar formato de correo si se proporciona
+            if email and '@' not in email:
+                st.error("Por favor ingrese un correo electrónico válido.")
+                return
+                
+            try:
+                # Crear objeto Cliente
+                nuevo_cliente = Cliente(
+                    id=None,  # El ID será asignado por la base de datos
+                    codigo=nit,
+                    nombre=nombre,
+                    persona_contacto=contacto if contacto else None,
+                    correo_electronico=email if email else None,
+                    telefono=telefono if telefono else None
+                )
+                
+                # Intentar crear el cliente
+                db = st.session_state.db
+                cliente_creado = db.crear_cliente(nuevo_cliente)
+                
+                if cliente_creado:
+                    st.success("¡Cliente creado exitosamente!")
+                    # Esperar un momento y redirigir
+                    time.sleep(2)
+                    st.session_state.current_view = 'manage_clients'
+                    st.rerun()
+                else:
+                    st.error("No se pudo crear el cliente. Por favor, intente nuevamente.")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                if "duplicate key" in error_msg.lower():
+                    st.error(f"Ya existe un cliente con el NIT {nit}.")
+                else:
+                    st.error(f"Error al crear el cliente: {error_msg}")
+                if st.session_state.get('usuario_rol') == 'administrador':
+                    st.exception(e)
 
 def main():
     """Función principal que orquesta el flujo de la aplicación"""
@@ -1113,6 +1256,10 @@ def main():
         show_quote_results()
     elif st.session_state.current_view == 'manage_quotes':
         show_manage_quotes()
+    elif st.session_state.current_view == 'manage_clients':
+        show_manage_clients()
+    elif st.session_state.current_view == 'crear_cliente':
+        show_create_client()
     elif st.session_state.current_view == 'reports':
         show_reports()
 
@@ -1296,12 +1443,15 @@ def show_quote_results():
                                         st.success(message)
                                         st.session_state.cotizacion_guardada = True
                                         st.session_state.cotizacion_id = cotizacion_id_a_actualizar
-                                        st.session_state.modo_edicion = False
-                                        st.session_state.cotizacion_a_editar_id = None
-                                        st.session_state.datos_cotizacion_editar = None
+                                        # --- INICIO: Limpieza adicional post-actualización ---
+                                        st.session_state.modo_edicion = False 
+                                        st.session_state.cotizacion_id_editar = None 
+                                        st.session_state.datos_cotizacion_editar = None 
+                                        st.session_state.cotizacion_model = None # Limpiar modelo
                                         st.session_state.current_calculation = None 
+                                        # --- FIN: Limpieza adicional post-actualización ---
                                         SessionManager.reset_calculator_widgets()
-                                        st.rerun() # <-- DESCOMENTADO
+                                        st.rerun()
                                     else:
                                         st.error(f"Error al actualizar: {message}")
                             else:
@@ -1321,9 +1471,15 @@ def show_quote_results():
                                     st.success(message)
                                     st.session_state.cotizacion_guardada = True
                                     st.session_state.cotizacion_id = cotizacion_id
-                                    st.session_state.cotizacion_model.id = cotizacion_id 
+                                    # --- INICIO: Limpieza adicional post-guardado --- 
+                                    # st.session_state.cotizacion_model.id = cotizacion_id # Modelo ya se limpiará
+                                    st.session_state.cotizacion_model = None # Limpiar modelo
                                     st.session_state.current_calculation = None
-                                    st.rerun() # <-- DESCOMENTADO
+                                    st.session_state.datos_cotizacion_editar = None # Asegurar limpieza
+                                    st.session_state.modo_edicion = False # Asegurar limpieza
+                                    st.session_state.cotizacion_id_editar = None # Asegurar limpieza
+                                    # --- FIN: Limpieza adicional post-guardado --- 
+                                    st.rerun() 
                                 else:
                                     st.error(f"Error al guardar: {message}")
                     except CotizacionManagerError as cme:
@@ -1341,7 +1497,7 @@ def show_quote_results():
         st.session_state.cotizacion_model = None
         st.session_state.current_calculation = None
         st.session_state.modo_edicion = False
-        st.session_state.cotizacion_a_editar_id = None
+        st.session_state.cotizacion_id_editar = None # <-- Corregido typo
         st.session_state.datos_cotizacion_editar = None
         SessionManager.reset_calculator_widgets() # Resetear widgets
         st.rerun()
@@ -1368,152 +1524,198 @@ def show_manage_quotes():
             # --- END DEBUG ---
             cotizaciones = db_manager.get_all_cotizaciones_overview()
         elif user_role == 'comercial':
-            comercial_id = user_id
             # --- DEBUG PRINT ---
-            print(f"DEBUG: show_manage_quotes - Calling db_manager.get_cotizaciones_overview_by_comercial(comercial_id='{comercial_id}')")
+            print(f"DEBUG: show_manage_quotes - Calling db_manager.get_cotizaciones_overview_by_comercial({user_id})")
             # --- END DEBUG ---
-            if comercial_id:
-                cotizaciones = db_manager.get_cotizaciones_overview_by_comercial(comercial_id)
-            else:
-                st.warning("No se pudo identificar el ID del comercial.")
-                cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
+            cotizaciones = db_manager.get_cotizaciones_overview_by_comercial(user_id)
         else:
-             st.warning("Rol de usuario no reconocido para esta vista.")
-             cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
+            st.error("No tiene permisos para ver cotizaciones.")
+            return
+
+        # --- DEBUG PRINT ---
+        print(f"DEBUG: show_manage_quotes - Retrieved {len(cotizaciones)} quotes")
+        if cotizaciones:
+            print("DEBUG: show_manage_quotes - Structure of first quote received:")
+            print(json.dumps(cotizaciones[0], indent=2, default=str)) # Print first item structure
+        # --- END DEBUG ---
+
+
+        if not cotizaciones:
+            st.info("No hay cotizaciones disponibles.")
+            return
+
+        # Crear DataFrame para mostrar las cotizaciones
+        try:
+            print("DEBUG: show_manage_quotes - Attempting to create DataFrame...") # DEBUG
+            df = pd.DataFrame(cotizaciones)
+            print("DEBUG: show_manage_quotes - DataFrame created successfully.") # DEBUG
+            print("DEBUG: show_manage_quotes - DataFrame columns before rename:", df.columns.tolist()) # DEBUG Columns
+            
+            # --- RENOMBRAR COLUMNA --- 
+            if 'cliente_nombre' in df.columns:
+                df.rename(columns={'cliente_nombre': 'cliente'}, inplace=True)
+                print("DEBUG: show_manage_quotes - Renamed 'cliente_nombre' to 'cliente'.")
+            else:
+                 print("DEBUG: show_manage_quotes - Column 'cliente_nombre' not found for renaming.")
+            # --------------------------
+            
+            print("DEBUG: show_manage_quotes - DataFrame columns after rename:", df.columns.tolist()) # DEBUG Columns
+            print("DEBUG: show_manage_quotes - DataFrame info:") # DEBUG Info
+            df.info(verbose=True, buf=sys.stdout) # DEBUG Info
+        except KeyError as ke:
+            print(f"ERROR: show_manage_quotes - KeyError during DataFrame creation/rename: {ke}") # DEBUG Error
+            st.error(f"Error al procesar los datos de cotizaciones (KeyError): {ke}")
+            st.exception(ke) # Show full traceback in UI for admin
+            return
+        except Exception as e_df:
+            print(f"ERROR: show_manage_quotes - Exception during DataFrame creation/rename: {e_df}") # DEBUG Error
+            st.error(f"Error al crear la tabla de cotizaciones: {e_df}")
+            st.exception(e_df) # Show full traceback in UI for admin
+            return
+
+        
+        # Convertir fechas a formato legible
+        if 'fecha_creacion' in df.columns:
+            df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion']).dt.strftime('%Y-%m-%d %H:%M')
+
+        # Mostrar cotizaciones en una tabla y sección de acciones
+        st.write("### Cotizaciones")
+        try:
+            print("DEBUG: show_manage_quotes - Attempting to display DataFrame...") # DEBUG
+            st.dataframe(
+                df, # Use the DataFrame potentially with renamed 'cliente' column
+            hide_index=True,
+            use_container_width=True
+        )
+            print("DEBUG: show_manage_quotes - DataFrame displayed successfully.") # DEBUG
+            
+            # --- INICIO: Sección de Acciones (Editar / Cambiar Estado) --- 
+            st.divider()
+            st.write("**Seleccione una cotización para ver acciones:**")
+            
+            # Crear opciones para el selectbox (ID, Texto a mostrar)
+            opciones_accion = [(row['id'], f"#{row['numero_cotizacion']} - {row['cliente']} - {row['referencia']}") 
+                             for index, row in df.iterrows()]
+                             
+            # Añadir opción placeholder
+            opciones_display_accion = [(None, "-- Elija una cotización --")] + opciones_accion
+            
+            selected_option_tuple_accion = st.selectbox(
+                "Cotización para Acciones",
+                options=opciones_display_accion,
+                format_func=lambda x: x[1], # Mostrar el texto formateado
+                key="selectbox_accion_cotizacion",
+                label_visibility="collapsed" # Ocultar label redundante
+            )
+            
+            # Obtener el ID seleccionado
+            selected_cotizacion_id = selected_option_tuple_accion[0] if selected_option_tuple_accion else None
+            
+            # --- Mostrar acciones si se selecciona una cotización --- 
+            if selected_cotizacion_id is not None:
+                # --- Obtener datos y determinar deshabilitación --- 
+                selected_quote_data = df.loc[df['id'] == selected_cotizacion_id].iloc[0]
+                ajustes_admin_flag = selected_quote_data['ajustes_modificados_admin']
+                estado_actual_id = selected_quote_data['estado_id']
+                user_role = st.session_state.usuario_rol
+                ID_ESTADO_APROBADO = 2
+                
+                disable_edit_button = False
+                disable_edit_reason = ""
+                disable_status_change = False
+                disable_status_reason = ""
+                
+                if user_role == 'comercial':
+                    if ajustes_admin_flag:
+                        disable_edit_button = True
+                        disable_edit_reason = "🔒 Edición deshabilitada: Ajustes modificados por administrador."
+                    elif estado_actual_id == ID_ESTADO_APROBADO:
+                        disable_edit_button = True
+                        disable_edit_reason = "🔒 Edición deshabilitada: Cotización ya aprobada."
+                        # También deshabilitar cambio de estado si está aprobada y es comercial
+                        disable_status_change = True
+                        disable_status_reason = "🔒 Estado Aprobado no modificable por comercial."
+                
+                # --- Sección de Botón Editar --- 
+                cols_accion_display = st.columns(2)
+                with cols_accion_display[0]:
+                    st.write("**Editar Cotización:**")
+                    if st.button(f"✏️ Editar #{selected_quote_data['numero_cotizacion']}", 
+                                 key="confirm_edit_button", 
+                                 use_container_width=True,
+                                 disabled=disable_edit_button):
+                        print(f"DEBUG: Edit button clicked for Cotizacion ID: {selected_cotizacion_id}")
+                        st.session_state.modo_edicion = True
+                        st.session_state.cotizacion_id_editar = selected_cotizacion_id
+                        st.session_state.datos_cotizacion_editar = None
+                        st.session_state.current_view = 'calculator'
+                        SessionManager.reset_calculator_widgets()
+                        st.rerun()
+                    if disable_edit_button:
+                        st.caption(disable_edit_reason)
+                        
+                # --- Sección de Actualizar Estado --- 
+                with cols_accion_display[1]:
+                    st.write("**Cambiar Estado:**")
+                    # Obtener listas de estados y motivos
+                    estados_db = st.session_state.initial_data.get('estados_cotizacion', [])
+                    motivos_db = st.session_state.db.get_motivos_rechazo()
+                    opciones_estado = [(e.id, e.estado) for e in estados_db]
+                    opciones_motivo = [(None, "-- Seleccione Motivo --")] + [(m.id, m.motivo) for m in motivos_db]
+                    try:
+                        current_status_index = next(i for i, (id, _) in enumerate(opciones_estado) if id == estado_actual_id)
+                    except StopIteration:
+                        current_status_index = 0
+                        
+                    nuevo_estado_tupla = st.selectbox("Nuevo Estado",
+                        options=opciones_estado, format_func=lambda x: x[1],
+                        index=current_status_index, key=f"estado_select_{selected_cotizacion_id}",
+                        disabled=disable_status_change, label_visibility="collapsed")
+                    nuevo_estado_id = nuevo_estado_tupla[0] if nuevo_estado_tupla else None
+                    
+                    motivo_rechazo_id = None
+                    show_motivo_selector = (nuevo_estado_id == 3) # ID 3 = Rechazado
+                    disable_motivo_selector = disable_status_change or not show_motivo_selector
+                    if show_motivo_selector:
+                        motivo_rechazo_tupla = st.selectbox("Motivo Rechazo *",
+                            options=opciones_motivo, format_func=lambda x: x[1],
+                            key=f"motivo_select_{selected_cotizacion_id}", 
+                            disabled=disable_motivo_selector, label_visibility="collapsed")
+                        if not disable_motivo_selector:
+                            motivo_rechazo_id = motivo_rechazo_tupla[0] if motivo_rechazo_tupla else None
+                    
+                    if st.button("🔄 Actualizar Estado", key=f"update_status_button_{selected_cotizacion_id}", 
+                                 use_container_width=True, disabled=disable_status_change):
+                        if nuevo_estado_id == 3 and motivo_rechazo_id is None:
+                            st.error("Debe seleccionar un motivo de rechazo.")
+                        elif nuevo_estado_id is not None:
+                            with st.spinner("Actualizando..."):
+                                success = st.session_state.db.actualizar_estado_cotizacion(
+                                    selected_cotizacion_id, nuevo_estado_id, motivo_rechazo_id)
+                                if success:
+                                    st.success(f"Estado cotización #{selected_quote_data['numero_cotizacion']} actualizado.")
+                                    st.rerun()
+                                else:  # Este else pertenece al if success
+                                    st.error("No se pudo actualizar estado.")
+                        else: # Este else pertenece al if nuevo_estado_id is not None
+                             st.warning("Estado no válido.")
+                             
+                    if disable_status_change: # Este if está al mismo nivel que el if st.button
+                        st.caption(disable_status_reason)
+                        
+            # --- Fin Mostrar acciones --- 
+            
+        except Exception as e_st: # Este except pertenece al try que empieza antes de st.dataframe
+            print(f"ERROR: show_manage_quotes - Exception during st.dataframe display or actions: {e_st}") 
+            st.error(f"Error al mostrar tabla o acciones: {e_st}")
+            st.exception(e_st)
 
     except Exception as e:
-        st.error(f"Error al cargar las cotizaciones: {e}")
-        traceback.print_exc()
-        cotizaciones = [] # Asegurar que cotizaciones es una lista vacía
-        
-    # --- Convertir a DataFrame para mostrar en tabla ---
-    if cotizaciones:
-        try:
-            # Crear el DataFrame
-            df = pd.DataFrame(cotizaciones)
-            
-            # Asegurar que columnas esperadas existen, añadir las que falten con valores default
-            required_cols = ['id', 'numero_cotizacion', 'referencia', 'cliente', 
-                             'fecha_creacion', 'estado_id', 'ajustes_modificados_admin'] # <-- AÑADIDO aquí
-            for col in required_cols:
-                if col not in df.columns:
-                    df[col] = None if col != 'ajustes_modificados_admin' else False # Default False para el nuevo campo
-
-            # Mapear estado_id a nombres
-            estados_dict = {estado.id: estado.estado for estado in st.session_state.initial_data['estados_cotizacion']}
-            df['Estado'] = df['estado_id'].map(estados_dict).fillna('Desconocido')
-
-            # Formatear fecha_creacion (manejar posibles errores o NaT)
-            df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion'], errors='coerce')
-            df['Fecha Creación'] = df['fecha_creacion'].dt.strftime('%Y-%m-%d %H:%M').fillna('Fecha inválida')
-            
-            # Renombrar y seleccionar columnas para mostrar (NO incluir ajustes_modificados_admin aquí)
-            df_display = df[['id', 'numero_cotizacion', 'referencia', 'cliente', 'Fecha Creación', 'Estado']].copy()
-            df_display.rename(columns={
-                'id': 'ID',
-                'numero_cotizacion': 'Consecutivo',
-                'referencia': 'Referencia',
-                'cliente': 'Cliente'
-            }, inplace=True)
-
-            # --- Mostrar tabla y botones ---
-            st.markdown("### Cotizaciones Existentes")
-            
-            # Usar st.columns para poner botones al lado de la tabla o encima/debajo
-            # cols = st.columns(len(df_display)) # No necesitamos una columna por fila
-            
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-            # Añadir botones de acción (Editar, Ver PDF) - Ejemplo conceptual
-            st.write("--- Acciones ---")
-            
-            selected_quote_id = st.selectbox("Selecciona una cotización para ver acciones:", 
-                                             options=df_display['ID'].tolist(),
-                                             format_func=lambda x: f"ID: {x} - {df_display[df_display['ID'] == x]['Consecutivo'].iloc[0]}" if not df_display[df_display['ID'] == x].empty else f"ID: {x}",
-                                             index=None, # No seleccionar nada por defecto
-                                             placeholder="Elige una cotización...")
-
-            if selected_quote_id:
-                col1, col2, col3 = st.columns(3)
-                
-                # --- Obtener la info de la cotización seleccionada del DF original ---
-                selected_quote_info = df[df['id'] == selected_quote_id].iloc[0] if not df[df['id'] == selected_quote_id].empty else None
-                admin_modified = False # Default
-                if selected_quote_info is not None:
-                    admin_modified = selected_quote_info.get('ajustes_modificados_admin', False)
-                # ----------------------------------------------------------------------
-                
-                with col1:
-                    # Determinar si el botón editar debe estar deshabilitado
-                    disable_edit = (user_role == 'comercial' and admin_modified)
-                    edit_tooltip = "No editable: modificada por administrador." if disable_edit else "Editar cotización seleccionada"
-                    
-                    if st.button("✏️ Editar", key=f"edit_{selected_quote_id}", 
-                                 disabled=disable_edit, help=edit_tooltip): # <-- AÑADIDO disabled y help
-                        if not disable_edit: # Doble chequeo por si acaso
-                            # --- Lógica para entrar en modo edición ---
-                            st.session_state.modo_edicion = True
-                            st.session_state.cotizacion_id_editar = selected_quote_id
-                            st.session_state.current_view = 'calculator' # <--- Correcto
-                            # Limpiar posibles datos de cálculo anterior
-                            # (Se limpia al entrar en modo edición en mostrar_calculadora)
-                            st.rerun() # Forzar recarga para navegar y entrar en modo edición
-                        # Si está deshabilitado, el click no hace nada
-
-                with col2:
-                    # Botón para generar PDF (sin cambios en la lógica de deshabilitado)
-                    try:
-                        # Obtener datos completos para el PDF seleccionado
-                        datos_pdf = db_manager.get_datos_completos_cotizacion(selected_quote_id)
-                        if datos_pdf:
-                            
-                            # --- INICIO CAMBIO: Usar la nueva función --- 
-                            pdf_bytes = generar_bytes_pdf_cotizacion(datos_pdf) 
-                            # --- FIN CAMBIO ---                            
-                            
-                            # --- Solo mostrar botón si se generó el PDF --- 
-                            if pdf_bytes:
-                                # Crear nombre de archivo
-                                identificador_pdf = datos_pdf.get('identificador', f"cotizacion_{selected_quote_id}")
-                                filename = f"{identificador_pdf}.pdf"
-                                
-                                st.download_button(
-                                    label="📄 Ver PDF",
-                                    data=pdf_bytes,
-                                    file_name=filename,
-                                    mime="application/pdf",
-                                    key=f"pdf_{selected_quote_id}"
-                                )
-                            else:
-                                 st.warning("No se generaron datos PDF (revisar logs).")
-                        else:
-                             st.warning("No se pudieron cargar los datos completos para el PDF.")
-                             
-                    except Exception as pdf_error:
-                         st.error(f"Error generando PDF: {pdf_error}")
-                         traceback.print_exc()
-                
-                # Podríamos añadir más botones (ej: Eliminar, Marcar como aprobada, etc.) aquí
-                # with col3:
-                #     if st.button("🗑️ Eliminar", key=f"delete_{selected_quote_id}"):
-                #         # Lógica para eliminar cotización (con confirmación)
-                #         st.warning(f"Funcionalidad de eliminar cotización {selected_quote_id} no implementada.")
-
-
-        except KeyError as ke:
-             st.error(f"Error: Falta una columna esperada en los datos de cotización: {ke}")
-             print("--- ERROR DATAFRAME ---")
-             print("Columnas recibidas:", cotizaciones[0].keys() if cotizaciones else "N/A")
-             print("Columnas esperadas:", required_cols)
-             traceback.print_exc()
-        except Exception as df_error:
-             st.error(f"Error al procesar y mostrar las cotizaciones: {df_error}")
-             traceback.print_exc()
-             
-    else:
-        st.info("No se encontraron cotizaciones.")
-        
-# --- Fin de la función show_manage_quotes ---
+        # --- DEBUG PRINT ---
+        print(f"ERROR: show_manage_quotes - General exception: {e}")
+        import traceback
+        print(traceback.format_exc())
+        # --- END DEBUG ---\n        st.error(f"Error al cargar las cotizaciones: {e}")\n\n
 
 def show_reports():
     """Muestra la sección de reportes"""

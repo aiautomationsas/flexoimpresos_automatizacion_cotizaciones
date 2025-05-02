@@ -336,36 +336,57 @@ def crear_datos_cotizacion(
 
 def crear_cliente():
     """Función para crear un nuevo cliente"""
+    # Verificar permisos
+    if 'usuario_rol' not in st.session_state or st.session_state.usuario_rol not in ['administrador', 'comercial']:
+        st.error("No tiene permisos para crear clientes.")
+        return
+        
     st.title("Crear Nuevo Cliente")
     
     with st.form("formulario_cliente"):
         # Campos requeridos
         nombre = st.text_input("Nombre del Cliente *", help="Campo obligatorio")
-        codigo = st.text_input("NIT *", help="Campo obligatorio")
+        codigo = st.text_input("NIT *", help="Campo obligatorio. Debe ser un número válido sin puntos ni guiones.")
         
         # Campos opcionales
         telefono = st.text_input("Teléfono", help="Número de contacto")
         persona_contacto = st.text_input("Persona de Contacto", help="Nombre de la persona de contacto")
-        correo_electronico = st.text_input("Correo Electrónico", help="Correo de contacto")
+        correo_electronico = st.text_input("Correo Electrónico", help="Debe ser un correo electrónico válido (ejemplo@dominio.com)")
         
         submitted = st.form_submit_button("Guardar Cliente")
         
         if submitted:
+            # Validar campos requeridos
             if not nombre or not codigo:
                 st.error("El nombre y el NIT son campos obligatorios")
                 return
-            
+                
+            # Validar que el código sea numérico
+            try:
+                codigo_numerico = float(codigo.replace('-', '').replace('.', ''))
+            except ValueError:
+                st.error("El NIT debe ser un número válido. No use puntos ni guiones.")
+                return
+                
+            # Validar formato de correo electrónico si se proporciona
+            if correo_electronico:
+                import re
+                patron_correo = r'^[^@]+@[^@]+\.[^@]+$'
+                if not re.match(patron_correo, correo_electronico.strip()):
+                    st.error("El formato del correo electrónico no es válido. Debe ser similar a: ejemplo@dominio.com")
+                    return
+                
             try:
                 # Inicializar la base de datos
                 db = DBManager(st.session_state.supabase)
                 
                 # Crear el objeto Cliente con los datos del formulario
                 nuevo_cliente = Cliente(
-                    nombre=nombre,
-                    codigo=codigo,
-                    telefono=telefono,
-                    persona_contacto=persona_contacto,
-                    correo_electronico=correo_electronico
+                    nombre=nombre.strip(),
+                    codigo=codigo_numerico,
+                    telefono=telefono.strip() if telefono else None,
+                    persona_contacto=persona_contacto.strip() if persona_contacto else None,
+                    correo_electronico=correo_electronico.strip() if correo_electronico else None
                 )
                 
                 # Guardar el cliente en la base de datos
@@ -380,9 +401,15 @@ def crear_cliente():
                     st.error("No se pudo guardar el cliente. Verifique los datos e intente nuevamente.")
                     
             except Exception as e:
-                st.error(f"Error al guardar el cliente: {str(e)}")
-                import traceback
-                st.error(traceback.format_exc())
+                error_msg = str(e).lower()
+                if "duplicate" in error_msg and "codigo" in error_msg:
+                    st.error(f"Ya existe un cliente con el NIT {codigo}. Por favor verifique el número.")
+                elif "correo electrónico no es válido" in error_msg:
+                    st.error("El formato del correo electrónico no es válido. Debe ser similar a: ejemplo@dominio.com")
+                else:
+                    st.error(f"Error al guardar el cliente: {str(e)}")
+                    if st.session_state.usuario_rol == 'administrador':
+                        st.exception(e)
 
 def mostrar_actualizar_cotizacion():
     """Función para mostrar la interfaz de actualización de cotización"""
