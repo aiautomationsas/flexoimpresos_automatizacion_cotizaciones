@@ -3,8 +3,18 @@ from typing import Dict, Any, Optional
 import streamlit as st # Importar streamlit para acceder a session_state
 import markdown
 import base64
-from weasyprint import HTML, CSS
 import io
+import sys
+import os
+import traceback
+
+# Eliminar importación y verificación de WeasyPrint
+# Importar solo ReportLab
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListItem, ListFlowable
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 from src.config.constants import GAP_AVANCE_MANGAS, GAP_AVANCE_ETIQUETAS
 # Importar DBManager si es necesario para type hinting, aunque lo usemos de session_state
@@ -182,7 +192,8 @@ def generar_informe_tecnico_markdown(
 
 def markdown_a_pdf(markdown_text: str, filename: str) -> Optional[str]:
     """
-    Convierte texto Markdown a un archivo PDF y devuelve el enlace para descarga.
+    Convierte texto Markdown a un archivo PDF usando ReportLab
+    y devuelve el enlace para descarga.
     
     Args:
         markdown_text: Texto en formato Markdown
@@ -192,33 +203,169 @@ def markdown_a_pdf(markdown_text: str, filename: str) -> Optional[str]:
         str: Enlace HTML para descargar el PDF o None si hay error
     """
     try:
-        # Convertir Markdown a HTML
-        html_text = markdown.markdown(markdown_text)
-        
-        # Envolver el HTML en una estructura básica con estilos
-        html_completo = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Informe Técnico</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-                h2 {{ color: #2C3E50; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-                h3 {{ color: #3498DB; margin-top: 25px; }}
-                h4 {{ color: #2980B9; margin-top: 20px; }}
-                ul {{ padding-left: 20px; }}
-            </style>
-        </head>
-        <body>
-            {html_text}
-        </body>
-        </html>
-        """
-        
+        # Usar directamente la implementación de ReportLab
+        return _generar_pdf_reportlab(markdown_text, filename)
+    except Exception as e:
+        print(f"Error generando PDF: {e}")
+        traceback.print_exc()
+        return None
+
+def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
+    """
+    Implementación usando ReportLab para generar PDF.
+    
+    Esta función convierte el Markdown a formato ReportLab simplificado.
+    No es una conversión completa pero funciona para informes básicos.
+    """
+    try:
         # Crear un buffer para guardar el PDF
         buffer = io.BytesIO()
-        HTML(string=html_completo).write_pdf(buffer)
+        
+        # Configurar el documento PDF
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            title="Informe Técnico",
+            author="Sistema de Cotización Flexo Impresos"
+        )
+        
+        # Obtener los estilos base y modificarlos en lugar de intentar agregarlos
+        styles = getSampleStyleSheet()
+        
+        # Modificar el estilo Heading2 existente
+        styles['Heading2'].fontSize = 14
+        styles['Heading2'].textColor = colors.HexColor('#2C3E50')
+        styles['Heading2'].spaceAfter = 10
+        styles['Heading2'].borderColor = colors.HexColor('#EEEEEE')
+        styles['Heading2'].borderWidth = 1
+        styles['Heading2'].borderPadding = (0, 0, 5, 0)
+
+        # Modificar el estilo Heading3 existente
+        styles['Heading3'].fontSize = 12
+        styles['Heading3'].textColor = colors.HexColor('#3498DB')
+        styles['Heading3'].spaceAfter = 8
+        styles['Heading3'].spaceBefore = 15
+        
+        # Modificar el estilo Heading4 existente
+        styles['Heading4'].fontSize = 10
+        styles['Heading4'].textColor = colors.HexColor('#2980B9')
+        styles['Heading4'].spaceAfter = 6
+        styles['Heading4'].spaceBefore = 12
+        
+        # Modificar el estilo Normal existente
+        styles['Normal'].fontSize = 10
+        styles['Normal'].leading = 14
+        
+        # Crear un nuevo estilo para elementos de lista
+        styles.add(ParagraphStyle(
+            name='ListItemStyle',  # Nombre único para evitar conflictos
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=14,
+            leftIndent=20
+        ))
+        
+        # Procesar el markdown línea por línea para convertirlo a elementos ReportLab
+        elements = []
+        
+        # Procesar el Markdown de forma básica
+        lines = markdown_text.split('\n')
+        in_list = False
+        list_items = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                # Espacio en blanco
+                if in_list:
+                    # Finalizar lista anterior
+                    list_flowable = ListFlowable(
+                        list_items,
+                        bulletType='bullet',
+                        leftIndent=20
+                    )
+                    elements.append(list_flowable)
+                    list_items = []
+                    in_list = False
+                elements.append(Spacer(1, 10))
+                continue
+                
+            # Procesar encabezados
+            if line.startswith('## '):
+                if in_list:
+                    # Finalizar lista anterior
+                    list_flowable = ListFlowable(
+                        list_items,
+                        bulletType='bullet',
+                        leftIndent=20
+                    )
+                    elements.append(list_flowable)
+                    list_items = []
+                    in_list = False
+                    
+                text = line[3:]
+                elements.append(Paragraph(text, styles['Heading2']))
+            elif line.startswith('### '):
+                if in_list:
+                    # Finalizar lista anterior
+                    list_flowable = ListFlowable(
+                        list_items,
+                        bulletType='bullet',
+                        leftIndent=20
+                    )
+                    elements.append(list_flowable)
+                    list_items = []
+                    in_list = False
+                    
+                text = line[4:]
+                elements.append(Paragraph(text, styles['Heading3']))
+            elif line.startswith('#### '):
+                if in_list:
+                    # Finalizar lista anterior
+                    list_flowable = ListFlowable(
+                        list_items,
+                        bulletType='bullet',
+                        leftIndent=20
+                    )
+                    elements.append(list_flowable)
+                    list_items = []
+                    in_list = False
+                    
+                text = line[5:]
+                elements.append(Paragraph(text, styles['Heading4']))
+            # Procesar elementos de lista
+            elif line.startswith('- '):
+                text = line[2:]
+                # Convertir formato markdown para negrita en rich text reportlab
+                text = text.replace('**', '<b>', 1)
+                text = text.replace('**', '</b>', 1)
+                list_items.append(ListItem(Paragraph(text, styles['ListItemStyle'])))
+                in_list = True
+            else:
+                if in_list:
+                    # Finalizar lista anterior
+                    list_flowable = ListFlowable(
+                        list_items,
+                        bulletType='bullet',
+                        leftIndent=20
+                    )
+                    elements.append(list_flowable)
+                    list_items = []
+                    in_list = False
+                # Párrafo normal
+                elements.append(Paragraph(line, styles['Normal']))
+        
+        # Verificar si hay una lista pendiente al final
+        if in_list and list_items:
+            list_flowable = ListFlowable(
+                list_items,
+                bulletType='bullet',
+                leftIndent=20
+            )
+            elements.append(list_flowable)
+        
+        # Construir el documento
+        doc.build(elements)
         
         # Obtener bytes del PDF y codificar en base64
         pdf_data = buffer.getvalue()
@@ -230,9 +377,8 @@ def markdown_a_pdf(markdown_text: str, filename: str) -> Optional[str]:
         href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="{filename}.pdf" target="_blank">Descargar Informe Técnico PDF</a>'
         
         return href
-    
+        
     except Exception as e:
-        print(f"Error generando PDF: {e}")
-        import traceback
+        print(f"Error generando PDF con ReportLab: {e}")
         traceback.print_exc()
         return None

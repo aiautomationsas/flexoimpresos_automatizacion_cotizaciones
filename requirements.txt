@@ -71,4 +71,4 @@ yarl==1.18.3
 plotly>=5.18.0
 psycopg2-binary>=2.9.9
 markdown>=3.5.2
-weasyprint>=60.2
+
