@@ -23,7 +23,8 @@ class DBManager:
         'es_manga', 'tipo_grafado_id', 'valor_troquel', 'valor_plancha_separado',
         'estado_id', 'id_motivo_rechazo', 'planchas_x_separado', 'existe_troquel',
         'numero_pistas', 'tipo_producto_id', 'ancho', 'avance', 'forma_pago_id',
-        'altura_grafado', 'es_recotizacion', 'ajustes_modificados_admin'
+        'altura_grafado', 'es_recotizacion', 'ajustes_modificados_admin',
+        'identificador'  # <--- AÑADIR ESTA LÍNEA
         # Nota: modificado_por y fecha_modificacion se añaden aparte
     }
     # --- FIN DEFINICIÓN CAMPOS ACTUALIZABLES ---

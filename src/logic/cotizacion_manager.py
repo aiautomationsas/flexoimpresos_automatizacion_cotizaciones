@@ -593,11 +593,10 @@ class CotizacionManager:
             
             # --- ELIMINADO: No añadir datos_calculo directamente aquí --- 
 
-            print("\nDatos finales para la llamada RPC actualizar_cotizacion:")
-            valor_flag_enviado = datos_actualizar.get('ajustes_modificados_admin')
-            valor_identificador_enviado = datos_actualizar.get('identificador')
-            print(f"  ajustes_modificados_admin: {valor_flag_enviado}")
-            print(f"  identificador: {valor_identificador_enviado}")
+            print("\nDEBUG CotizacionManager: datos_actualizar ANTES de enviar a DBManager:")
+            for k, v in datos_actualizar.items():
+                print(f"  {k}: {v}")
+            print(f"DEBUG CotizacionManager: Identificador específico en datos_actualizar: {datos_actualizar.get('identificador')}")
             
             # --- PASO 5: Actualizar la cotización en la BD --- 
             success_main, msg_main = self.db.actualizar_cotizacion(cotizacion_id, datos_actualizar)

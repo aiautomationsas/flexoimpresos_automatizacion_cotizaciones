@@ -13,7 +13,7 @@ def show_login() -> None:
     """
     Muestra la interfaz de inicio de sesión y maneja el proceso de autenticación.
     """
-    st.title("Bienvenido al Sistema de Cotización")
+    st.title("📊 Cotizador Flexo Impresos")
     
     # Crear columnas para centrar el formulario
     _, col2, _ = st.columns([1, 2, 1])
