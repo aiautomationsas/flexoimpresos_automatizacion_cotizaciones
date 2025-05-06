@@ -358,18 +358,34 @@ class DBManager:
 
 
             # 5. Actualizar la cotización con el identificador generado
+            """
             if identificador_final:
                 print(f"\\nActualizando cotización {cotizacion_id} con el identificador final...")
                 try:
-                    update_response = self.supabase.from_('cotizaciones') \
-                        .update({'identificador': identificador_final}) \
-                        .eq('id', cotizacion_id) \
-                        .execute()
+                    print(f"DEBUG - Intentando actualizar identificador. Cotización ID: {cotizacion_id}, Identificador: {identificador_final}")
+                    update_response = self.supabase.table('cotizaciones').update({"identificador": identificador_final}).eq('id', cotizacion_id).execute()
+                    print(f"DEBUG - Respuesta completa: {update_response}")
+                    
+                    # --- Verificar si hubo error explícito ---
+                    update_successful = True # Asumir éxito por defecto
+                    update_error = None
+                    if hasattr(update_response, 'error') and update_response.error:
+                         update_successful = False
+                         update_error = update_response.error
+                         print(f"Error DETECTADO en respuesta de Supabase: {update_error}")
+                    # Comprobación adicional por si la estructura cambia o el error está en data
+                    elif not update_response.data and (not hasattr(update_response, 'status_code') or update_response.status_code < 200 or update_response.status_code >= 300):
+                         update_successful = False
+                         print(f"Error: Respuesta sin datos y con código de estado de error: {getattr(update_response, 'status_code', 'N/A')}")
+                    # Ausencia de error explícito se considera éxito.
 
-                    if not update_response.data:
+                    if not update_successful:
                         print(f"Error: No se pudo actualizar la cotización {cotizacion_id} con el identificador.")
-                        # Considerar si esto es un error crítico o solo una advertencia
-                        st.warning(f"Cotización {cotizacion_id} creada, pero falló la actualización del identificador.")
+                        # Imprimir más detalles de diagnóstico
+                        if update_error: # Usar el error capturado
+                            print(f"Error detallado: {update_error}")
+                        # Usar logging en lugar de st.warning
+                        logging.warning(f"Cotización {cotizacion_id} creada, pero falló la actualización del identificador. Error: {update_error}") 
                     else:
                         print("Identificador actualizado correctamente.")
                         # Actualizar el diccionario de datos devuelto para que incluya el identificador
@@ -380,6 +396,7 @@ class DBManager:
                     st.warning(f"Cotización {cotizacion_id} creada, pero falló la actualización del identificador. Error: {e}")
             
             # 6. Devolver los datos de la cotización creada (incluyendo id y numero_cotizacion_final)
+            """
             return cotizacion_creada_data
 
         try:

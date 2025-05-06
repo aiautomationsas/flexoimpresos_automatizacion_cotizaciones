@@ -377,7 +377,7 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
         href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="{filename}.pdf" target="_blank">Descargar Informe Técnico PDF</a>'
         
         return href
-        
+    
     except Exception as e:
         print(f"Error generando PDF con ReportLab: {e}")
         traceback.print_exc()
