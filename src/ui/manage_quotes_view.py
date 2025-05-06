@@ -286,7 +286,7 @@ def show_manage_quotes_ui():
     st.divider()
 
     # --- Sección de Acciones (Editar / Cambiar Estado) ---
-    st.subheader("Acciones sobre Cotización")
+    st.subheader("Editar / Cambiar Estado de Cotización")
 
     # Crear opciones para selectbox de acciones (ID -> Texto formateado)
     opciones_accion = {}
@@ -305,7 +305,7 @@ def show_manage_quotes_ui():
 
     if opciones_accion:
         selected_cotizacion_id_accion = st.selectbox(
-            "Seleccione Cotización para Acciones:",
+            "Seleccione Cotización para Editar / Cambiar Estado:",
             options=[None] + list(opciones_accion.keys()), # Añadir opción None
             format_func=lambda x: "-- Elija una cotización --" if x is None else opciones_accion[x],
             key="selectbox_accion_cotizacion_manage"

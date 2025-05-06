@@ -395,17 +395,34 @@ def show_dashboard():
         col_cli_tot, col_cli_tasa = st.columns(2)
         with col_cli_tot:
             # Top 5 Clientes por Total Cotizaciones
-            top_clientes_total = df_filtrado['cliente_nombre'].value_counts().nlargest(5)
+            clientes_counts = df_filtrado['cliente_nombre'].value_counts()
+            top_clientes_total = clientes_counts.nlargest(5)
+            
             if not top_clientes_total.empty:
-                fig_cli_total = px.bar(top_clientes_total, x=top_clientes_total.index, y=top_clientes_total.values,
-                                     title='Top 5 Clientes (Total Cotizaciones)',
+                fig_cli_total_top = px.bar(top_clientes_total, x=top_clientes_total.index, y=top_clientes_total.values,
+                                     title='Top 5 Clientes (Mayor Total Cotizaciones)',
                                      labels={'index': 'Cliente', 'y': 'Cantidad'},
                                      color_discrete_sequence=['#2ecc71'])
-                fig_cli_total.update_layout(showlegend=False)
-                # TODO: Aplicar CHART_THEME
-                st.plotly_chart(fig_cli_total, use_container_width=True)
+                fig_cli_total_top.update_layout(showlegend=False)
+                st.plotly_chart(fig_cli_total_top, use_container_width=True)
             else:
-                st.info("No hay suficientes datos de clientes.")
+                st.info("No hay suficientes datos para el top de clientes por total de cotizaciones.")
+
+            st.markdown("---") # Separador visual
+
+            # Bottom 5 Clientes por Total Cotizaciones (con > 0 cotizaciones)
+            clientes_counts_gt_zero = clientes_counts[clientes_counts > 0]
+            bottom_clientes_total = clientes_counts_gt_zero.nsmallest(5)
+
+            if not bottom_clientes_total.empty:
+                fig_cli_total_bottom = px.bar(bottom_clientes_total, x=bottom_clientes_total.index, y=bottom_clientes_total.values,
+                                     title='Bottom 5 Clientes (Menor Total Cotizaciones > 0)',
+                                     labels={'index': 'Cliente', 'y': 'Cantidad'},
+                                     color_discrete_sequence=['#E67E22']) # Color diferente para el bottom
+                fig_cli_total_bottom.update_layout(showlegend=False)
+                st.plotly_chart(fig_cli_total_bottom, use_container_width=True)
+            else:
+                st.info("No hay suficientes datos para el bottom de clientes por total de cotizaciones (con > 0 cotizaciones).")
 
         with col_cli_tasa:
             # Top 5 Clientes por Tasa de Aprobación (con min 2 cotizaciones)
@@ -413,23 +430,36 @@ def show_dashboard():
                 total_cotizaciones=('id', 'count'),
                 aprobadas=('estado_nombre', lambda x: (x == 'Aprobada').sum())
             ).reset_index()
-            cliente_stats = cliente_stats[cliente_stats['total_cotizaciones'] >= 2]
-            if not cliente_stats.empty:
-                 cliente_stats['tasa_aprobacion'] = (cliente_stats['aprobadas'] / cliente_stats['total_cotizaciones'] * 100)
-                 top_clientes_tasa = cliente_stats.nlargest(5, 'tasa_aprobacion')
+            cliente_stats_filtrado = cliente_stats[cliente_stats['total_cotizaciones'] >= 2].copy() # Evitar SettingWithCopyWarning
+            
+            if not cliente_stats_filtrado.empty:
+                 cliente_stats_filtrado['tasa_aprobacion'] = (cliente_stats_filtrado['aprobadas'] / cliente_stats_filtrado['total_cotizaciones'] * 100)
+                 top_clientes_tasa = cliente_stats_filtrado.nlargest(5, 'tasa_aprobacion')
+                 bottom_clientes_tasa = cliente_stats_filtrado.nsmallest(5, 'tasa_aprobacion') # <-- BOTTOM 5
 
                  if not top_clientes_tasa.empty:
-                     fig_cli_tasa = px.bar(top_clientes_tasa, x='cliente_nombre', y='tasa_aprobacion',
-                                          title='Top 5 Clientes (Tasa Aprobación > 1 cot.)',
+                     fig_cli_tasa_top = px.bar(top_clientes_tasa, x='cliente_nombre', y='tasa_aprobacion',
+                                          title='Top 5 Clientes (Mejor Tasa Aprobación > 1 cot.)',
                                           labels={'cliente_nombre': 'Cliente', 'tasa_aprobacion': 'Tasa Aprob. (%)'},
                                           color_discrete_sequence=['#5DADE2'])
-                     fig_cli_tasa.update_layout(yaxis_ticksuffix="%", showlegend=False)
-                     # TODO: Aplicar CHART_THEME
-                     st.plotly_chart(fig_cli_tasa, use_container_width=True)
+                     fig_cli_tasa_top.update_layout(yaxis_ticksuffix="%", showlegend=False)
+                     st.plotly_chart(fig_cli_tasa_top, use_container_width=True)
                  else:
-                      st.info("No hay clientes con >= 2 cotizaciones para calcular tasa.")
+                      st.info("No hay clientes con >= 2 cotizaciones para calcular el top de tasa de aprobación.")
+                 
+                 st.markdown("---") # Separador visual
+
+                 if not bottom_clientes_tasa.empty:
+                     fig_cli_tasa_bottom = px.bar(bottom_clientes_tasa, x='cliente_nombre', y='tasa_aprobacion',
+                                          title='Bottom 5 Clientes (Peor Tasa Aprobación > 1 cot.)',
+                                          labels={'cliente_nombre': 'Cliente', 'tasa_aprobacion': 'Tasa Aprob. (%)'},
+                                          color_discrete_sequence=['#E74C3C']) # Color diferente para el bottom
+                     fig_cli_tasa_bottom.update_layout(yaxis_ticksuffix="%", showlegend=False)
+                     st.plotly_chart(fig_cli_tasa_bottom, use_container_width=True)
+                 else:
+                      st.info("No hay clientes con >= 2 cotizaciones para calcular el bottom de tasa de aprobación.")
             else:
-                 st.info("No hay clientes con >= 2 cotizaciones para calcular tasa.")
+                 st.info("No hay clientes con >= 2 cotizaciones para calcular tasas de aprobación.")
         st.divider()
     else:
         st.warning("Columna 'cliente_nombre' no encontrada para análisis.")
@@ -438,7 +468,7 @@ def show_dashboard():
     # --- INICIO: KPIs Adicionales ---
     st.markdown("### KPIs Adicionales")
     if not df_filtrado.empty and 'fecha_creacion' in df_filtrado.columns:
-        col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+        col_kpi1, col_kpi2 = st.columns(2)
 
         with col_kpi1:
             # Promedio de cotizaciones por día
@@ -456,33 +486,12 @@ def show_dashboard():
                 st.metric("Promedio Diario Cot.", "N/A")
 
         with col_kpi2:
-            # Tiempo promedio de decisión (simplificado: duración del periodo para decididas)
-            # Una métrica más precisa requeriría fecha de decisión
-            df_decididas = df_filtrado[df_filtrado['estado_nombre'] != 'En Negociación']
-            # Excluimos también 'Anulada' para el rango de decisión
-            estados_finales_excluir = ['En Negociación', 'Anulada']
-            df_decididas = df_filtrado[~df_filtrado['estado_nombre'].isin(estados_finales_excluir)]
-            if not df_decididas.empty and len(df_decididas['fecha_creacion']) > 0:
-                min_date_dec = df_decididas['fecha_creacion'].min().date()
-                max_date_dec = df_decididas['fecha_creacion'].max().date()
-                tiempo_decision_aprox = (max_date_dec - min_date_dec).days
-                st.metric(
-                    "Rango Decisión (aprox)",
-                    f"{tiempo_decision_aprox} días",
-                    help="Rango de días entre la primera y última cotización decidida (Aprob/Rechaz) en el período."
-                )
-            else:
-                st.metric("Rango Decisión (aprox)", "N/A")
-
-        with col_kpi3:
             # Efectividad del comercial (si aplica)
             # Solo se muestra si se filtró por un comercial específico
             if user_role == 'administrador' and comercial_seleccionado_id:
                 aprobadas_comercial = len(df_filtrado[df_filtrado['estado_nombre'] == 'Aprobada'])
                 total_comercial = len(df_filtrado)
                 efectividad = (aprobadas_comercial / total_comercial * 100) if total_comercial > 0 else 0
-                # Obtener nombre del comercial para el título (opcional, requiere consulta extra o pasarlo)
-                # comercial_nombre_sel = opciones_comercial.get(comercial_seleccionado_id, "Seleccionado")
                 st.metric(
                     f"Efectividad Comercial",
                     f"{efectividad:.1f}%",
@@ -497,7 +506,7 @@ def show_dashboard():
                     f"{efectividad_prop:.1f}%",
                     help="% de mis cotizaciones que fueron aprobadas."
                  )
-            # else: # No mostrar si es admin viendo 'Todos'
+            # else: # No mostrar si es admin viendo 'Todos' o si col_kpi3 no existe
             #     st.metric("Efectividad Comercial", "N/A", help="Filtre por un comercial específico.")
 
         st.divider()
@@ -593,121 +602,6 @@ def show_dashboard():
 
     st.divider()
     # --- FIN: Análisis de Descartes ---
-
-    st.subheader("📊 Análisis de Cotizaciones Perdidas")
-
-    perdidas_df = df_filtrado[df_filtrado['estado_nombre'] == 'Perdida'].copy()
-    motivos_counts = pd.Series(dtype='int') # <-- INICIALIZAR AQUÍ
-
-    if perdidas_df.empty:
-        st.info("No hay cotizaciones perdidas para analizar en el período seleccionado.")
-    else:
-        col_perd1, col_perd2 = st.columns(2)
-        
-        with col_perd1:
-            # Verificar que tenemos la columna necesaria
-            if 'motivo_rechazo_nombre' in perdidas_df.columns:
-                # Mapeo correcto de motivos de rechazo (completamos el mapa durante la carga de datos)
-                motivos_counts = perdidas_df['motivo_rechazo_nombre'].fillna('No especificado').value_counts()
-                
-                if not motivos_counts.empty:
-                    fig_perd_pie = px.pie(values=motivos_counts.values, names=motivos_counts.index,
-                                       title='Distribución Motivos de Pérdida',
-                                       color_discrete_sequence=px.colors.qualitative.Set2,
-                                       hole=0.4)
-                    fig_perd_pie.update_traces(textposition='inside', textinfo='percent+label',
-                                          hovertemplate='%{label}<br>%{value}<br>%{percent}')
-                    st.plotly_chart(fig_perd_pie, use_container_width=True)
-                else:
-                    st.info("No hay datos de motivos de pérdida disponibles.")
-            elif 'id_motivo_rechazo' in perdidas_df.columns:
-                # Intentar usar id_motivo_rechazo directamente si está disponible
-                try:
-                    motivos_db = db.get_motivos_rechazo()
-                    motivos_map = {m.id: m.motivo for m in motivos_db}
-                    
-                    # Crear la columna temporal para el gráfico
-                    perdidas_df['temp_motivo'] = perdidas_df['id_motivo_rechazo'].map(motivos_map).fillna('No especificado')
-                    motivos_counts = perdidas_df['temp_motivo'].value_counts()
-                    
-                    if not motivos_counts.empty:
-                        fig_perd_pie = px.pie(values=motivos_counts.values, names=motivos_counts.index,
-                                          title='Distribución Motivos de Pérdida',
-                                          color_discrete_sequence=px.colors.qualitative.Set2,
-                                          hole=0.4)
-                        fig_perd_pie.update_traces(textposition='inside', textinfo='percent+label',
-                                              hovertemplate='%{label}<br>%{value}<br>%{percent}')
-                        st.plotly_chart(fig_perd_pie, use_container_width=True)
-                    else:
-                        st.info("No hay datos de motivos de pérdida disponibles.")
-                except Exception as e:
-                    st.warning(f"Error al generar gráfico de motivos de pérdida: {e}")
-            else:
-                st.warning("No se encuentra la columna para motivos de pérdida.")
-
-            # Tasa de Pérdida General
-            if total_cotizaciones > 0:
-                tasa_perdida_gen = (len(perdidas_df) / total_cotizaciones) * 100
-                st.metric(
-                    "Tasa de Cotizaciones Perdidas",
-                    f"{tasa_perdida_gen:.1f}%",
-                    delta_color="inverse",
-                    help="% de cotizaciones perdidas sobre el total filtrado."
-                )
-            else:
-                st.metric("Tasa de Cotizaciones Perdidas", "0.0%", delta_color="inverse")
-
-        with col_perd2:
-            # Cliente con más pérdidas
-            if 'cliente_nombre' in perdidas_df.columns:
-                perdidas_por_cliente = perdidas_df['cliente_nombre'].value_counts()
-                if not perdidas_por_cliente.empty:
-                     cliente_mas_perdidas = perdidas_por_cliente.idxmax()
-                     num_mas_perdidas = perdidas_por_cliente.max()
-                     st.metric("Cliente con Más Pérdidas", cliente_mas_perdidas, f"{num_mas_perdidas} casos")
-                else:
-                     st.caption("No hay datos de clientes con cotizaciones perdidas.")
-
-            # Motivo más común de pérdida
-            if 'motivo_rechazo_nombre' in perdidas_df.columns and not motivos_counts.empty:
-                motivo_comun = motivos_counts.idxmax()
-                num_motivo_comun = motivos_counts.max()
-                st.metric("Motivo de Pérdida Más Común", motivo_comun, f"{num_motivo_comun} casos")
-            else:
-                 st.caption("No hay datos de motivos de pérdida.")
-                 
-        # Tendencia temporal de cotizaciones perdidas
-        st.subheader("Tendencia de Cotizaciones Perdidas")
-        if 'fecha_creacion' in perdidas_df.columns and not perdidas_df.empty:
-            # Agrupar por mes
-            perdidas_df['mes'] = perdidas_df['fecha_creacion'].dt.strftime('%Y-%m')
-            tendencia_mensual = perdidas_df.groupby('mes')['id'].count().reset_index(name='cantidad')
-            
-            fig_tendencia = px.line(tendencia_mensual, x='mes', y='cantidad', 
-                                 title='Evolución Mensual de Cotizaciones Perdidas',
-                                 markers=True,
-                                 color_discrete_sequence=['#FF5733'])
-            fig_tendencia.update_layout(xaxis_title="Mes", yaxis_title="Número de Cotizaciones")
-            st.plotly_chart(fig_tendencia, use_container_width=True)
-            
-        # Top clientes con cotizaciones perdidas
-        if 'cliente_nombre' in perdidas_df.columns and not perdidas_df.empty:
-            st.subheader("Top Clientes con Cotizaciones Perdidas")
-            top_perdidas_clientes = perdidas_df['cliente_nombre'].value_counts().nlargest(5)
-            
-            if not top_perdidas_clientes.empty:
-                fig_cli_perdidas = px.bar(top_perdidas_clientes, 
-                                       x=top_perdidas_clientes.index, 
-                                       y=top_perdidas_clientes.values,
-                                       title='Top 5 Clientes con Más Cotizaciones Perdidas',
-                                       labels={'index': 'Cliente', 'y': 'Cantidad'},
-                                       color_discrete_sequence=['#FF5733'])
-                fig_cli_perdidas.update_layout(showlegend=False)
-                st.plotly_chart(fig_cli_perdidas, use_container_width=True)
-            else:
-                st.info("No hay suficientes datos para mostrar clientes con cotizaciones perdidas.")
-
-    st.divider()  # Separador visual
 
 
 # Para pruebas locales (opcional)
