@@ -46,12 +46,16 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
     col1, col2 = st.columns(2)
     
     # Obtener valores por defecto desde datos cargados o session state o hardcoded
-    default_ancho = datos_cargados.get('ancho', st.session_state.get("ancho", 100.0)) if datos_cargados else st.session_state.get("ancho", 100.0)
-    default_avance = datos_cargados.get('avance', st.session_state.get("avance", 150.0)) if datos_cargados else st.session_state.get("avance", 150.0)
-    default_pistas = datos_cargados.get('pistas', st.session_state.get("num_pistas_otro", 1)) if datos_cargados else st.session_state.get("num_pistas_otro", 1)
-    if es_manga:
-        default_pistas = datos_cargados.get('pistas', st.session_state.get("num_pistas_manga", 1)) if datos_cargados else st.session_state.get("num_pistas_manga", 1)
-    default_tintas = datos_cargados.get('num_tintas', st.session_state.get("num_tintas", 3)) if datos_cargados else st.session_state.get("num_tintas", 3)
+    default_ancho = datos_cargados.get('ancho', st.session_state.get('ancho', 50.0)) if datos_cargados else st.session_state.get('ancho', 50.0)
+    default_avance = datos_cargados.get('avance', st.session_state.get('avance', 50.0)) if datos_cargados else st.session_state.get('avance', 50.0)
+    
+    # CORREGIDO: Usar 'numero_pistas' que es la clave correcta de la base de datos
+    default_pistas = datos_cargados.get('numero_pistas', st.session_state.get('numero_pistas', 1)) if datos_cargados else st.session_state.get('numero_pistas', 1)
+    
+    # CORREGIDO: Clave correcta de base de datos
+    default_tintas = datos_cargados.get('num_tintas', st.session_state.get('num_tintas', 0)) if datos_cargados else st.session_state.get('num_tintas', 0)
+    
+
     
     with col1:
         # El valor se guarda en st.session_state.ancho via key
@@ -92,7 +96,7 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
 
         # --- Tintas ---
         # El valor se guarda en st.session_state.num_tintas via key
-        st.number_input("Número de tintas", min_value=0, step=1, key="num_tintas", value=int(default_tintas))
+        st.number_input("Número de tintas", min_value=0, max_value=7, step=1, key="num_tintas", value=int(default_tintas))
 
 def _mostrar_material(es_manga: bool, materiales: List[Any], datos_cargados: Optional[Dict] = None):
     """
@@ -389,8 +393,16 @@ def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabad
 
     with col2:
         # --- Empaque --- 
-        empaque_label = "Unidades por paquete" if es_manga else "Etiquetas por rollo"
-        st.number_input(empaque_label, min_value=1, step=1, key="num_paquetes", value=int(default_num_paquetes))
+        if es_manga:
+            # Para mangas, mostrar valor fijo de 100 unidades por paquete y no permitir edición
+            st.markdown('<label style="font-size: 0.875rem; color: #555;">Unidades por paquete</label>', unsafe_allow_html=True)
+            st.markdown('<div style="padding: 0.5rem 0; color: #333; font-weight: bold;">100</div>', unsafe_allow_html=True)
+            # Asegurar que el valor en session_state sea 100
+            st.session_state.num_paquetes = 100
+        else:
+            # Para etiquetas, mantener campo editable
+            empaque_label = "Etiquetas por rollo"
+            st.number_input(empaque_label, min_value=1, step=1, key="num_paquetes", value=int(default_num_paquetes))
 
 
 def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict] = None):
@@ -399,12 +411,12 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
     
     # Valores por defecto
     # Usar nombres de campo consistentes con datos_cargados
-    default_tiene_troquel = datos_cargados.get('existe_troquel', st.session_state.get("tiene_troquel", False)) if datos_cargados else st.session_state.get("tiene_troquel", False)
+    default_tiene_troquel = datos_cargados.get('existe_troquel', st.session_state.get("tiene_troquel", True)) if datos_cargados else st.session_state.get("tiene_troquel", True)
     default_planchas_sep = datos_cargados.get('planchas_x_separado', st.session_state.get("planchas_separadas", False)) if datos_cargados else st.session_state.get("planchas_separadas", False)
 
     if not es_manga:
         # El valor bool se guarda en st.session_state.tiene_troquel
-        st.checkbox("¿Cliente tiene troquel?", key="tiene_troquel", value=bool(default_tiene_troquel))
+        st.checkbox("¿Existe troquel?", key="tiene_troquel", value=bool(default_tiene_troquel))
     else:
         # Asegurar que el estado es False si es manga
         if st.session_state.get("tiene_troquel") is not False:
@@ -414,7 +426,7 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
     if st.session_state.get('usuario_rol') == 'administrador':
         # El valor bool se guarda en st.session_state.planchas_separadas
         st.checkbox(
-            "¿Cobrar planchas por separado?", 
+            "¿Planchas por separado?", 
             key="planchas_separadas", 
             value=bool(default_planchas_sep),
             help="Si se marca, el costo de las planchas se mostrará como un ítem separado en la cotización."
@@ -437,6 +449,7 @@ def _mostrar_formas_pago(formas_pago: List[Any], datos_cargados: Optional[Dict] 
     st.subheader("Condiciones Comerciales")
     
     default_forma_pago_id = datos_cargados.get('forma_pago_id', st.session_state.get("forma_pago_id", 1)) if datos_cargados else st.session_state.get("forma_pago_id", 1) # Default a ID 1
+
 
     try:
         index_fp = next(i for i, fp in enumerate(formas_pago) if fp.id == default_forma_pago_id)

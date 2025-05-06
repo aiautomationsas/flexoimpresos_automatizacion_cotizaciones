@@ -113,6 +113,22 @@ class SessionManager:
         return None
 
     @staticmethod
+    def clear_pdf_data(quote_id) -> None:
+        """
+        Limpia los datos del PDF generado para una cotización específica.
+        
+        Args:
+            quote_id: ID de la cotización cuyos datos de PDF se desean limpiar
+        """
+        bytes_key = f'pdf_bytes_{quote_id}'
+        filename_key = f'pdf_filename_{quote_id}'
+        if bytes_key in st.session_state:
+            del st.session_state[bytes_key]
+        if filename_key in st.session_state:
+            del st.session_state[filename_key]
+            print(f"Limpiando datos PDF para quote_id {quote_id}") # Mensaje de debug
+
+    @staticmethod
     def verify_role(allowed_roles: List[str]) -> bool:
         """
         Verifica si el rol del usuario actual está en la lista de roles permitidos.

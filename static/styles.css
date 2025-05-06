@@ -237,3 +237,27 @@ h1, h2, h3, h4, h5, h6 {
         --color-text-light: #CED4DA;
     }
 }
+
+/* --- NUEVOS ESTILOS PARA NAVEGACIÓN --- */
+
+/* Ocultar el círculo del radio button en la navegación del sidebar */
+/* [data-testid="stSidebar"] [data-testid="stRadio"] input[type="radio"] {
+    display: none !important;
+} */
+
+/* Ocultar pseudo-elementos que Streamlit pueda usar para el círculo */
+/* [data-testid="stSidebar"] [data-testid="stRadio"] label > div[data-baseweb="radio"] > div {
+    display: none !important;
+} */
+
+/* Quitar el borde del contenedor de cada opción de radio en el sidebar */
+[data-testid="stSidebar"] [data-testid="stRadio"] label > div {
+    border: none !important;
+    box-shadow: none !important; /* Quitar también sombras si las hubiera */
+}
+
+/* Ajustar padding y añadir margen inferior */
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    padding-left: 0 !important; /* Mantener ajuste de padding */
+    margin-bottom: 0.5rem !important; /* Añadir espacio debajo de cada opción */
+}

@@ -1,5 +1,0 @@
-[theme]
-primaryColor = "#0F4C81"         # Color del círculo seleccionado
-backgroundColor = "#FFFFFF"      # Fondo de la aplicación
-secondaryBackgroundColor = "#F8F9FA" # Fondo secundario
-textColor = "#212121"            # Color del texto 

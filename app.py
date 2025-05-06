@@ -1,13 +1,18 @@
-from datetime import datetime
 import streamlit as st
 from supabase import create_client
 from typing import Optional, Dict, Any, Tuple
 import pandas as pd
 import traceback # Import traceback for detailed error logging
-import math # <-- AÑADIR IMPORTACIÓN
-import time # <-- AÑADIR IMPORTACIÓN
-import sys # <-- AÑADIR IMPORTACIÓN
-import json # <-- AÑADIR IMPORTACIÓN
+import math
+import time
+from datetime import datetime # <-- AÑADIR IMPORTACIÓN
+
+# Configuración de página - MOVER AL INICIO
+st.set_page_config(
+    page_title="Sistema de Cotización - Flexo Impresos",
+    page_icon="🏭",
+    layout="wide"
+)
 
 # Luego las importaciones del proyecto, agrupadas por funcionalidad
 # Auth y DB
@@ -36,23 +41,34 @@ from src.pdf.pdf_generator import generar_bytes_pdf_cotizacion, CotizacionPDF # 
 # Calculadoras
 from src.logic.calculators.calculadora_costos_escala import CalculadoraCostosEscala, DatosEscala
 from src.logic.calculators.calculadora_litografia import CalculadoraLitografia
+# --- NUEVO: Importar generador de informe ---
+from src.logic.report_generator import generar_informe_tecnico_markdown, markdown_a_pdf
+# --------------------------------------------
 
 # UI Components - mover estas importaciones al final
 from src.ui.auth_ui import handle_authentication, show_login, show_logout_button
-from src.ui.calculator_view import show_calculator, show_quote_results, show_quote_summary
-from src.ui.calculator.client_section import mostrar_seccion_cliente
+from src.ui.calculator_view import show_calculator, show_quote_results # Mantener solo los usados
 # MODIFICADO: Importar funciones específicas
 from src.ui.calculator.product_section import (_mostrar_material, _mostrar_adhesivo, 
                                              _mostrar_grafado_altura, mostrar_secciones_internas_formulario)
+# --- NUEVO: Importar vista de gestión y dashboard ---
+from src.ui.manage_quotes_view import show_manage_quotes
+from src.ui.manage_clients_view import show_manage_clients, show_create_client
+from src.ui.dashboard_view import show_dashboard
+# ------------------------------------------------
 # --- INICIO CAMBIO ---
 # ... (resto de importaciones sin cambios) ...
 
 # Configuración de página
-st.set_page_config(
-    page_title="Sistema de Cotización - Flexo Impresos",
-    page_icon="🏭",
-    layout="wide"
-)
+# --- ELIMINAR ESTE BLOQUE COMENTADO ---
+# # --- ELIMINAR ESTE BLOQUE DUPLICADO ---
+# # st.set_page_config(
+# #     page_title="Sistema de Cotización - Flexo Impresos",
+# #     page_icon="🏭",
+# #     layout="wide"
+# # )
+# # -------------------------------------
+# -------------------------------------
 
 # Cargar CSS
 try:
@@ -104,7 +120,7 @@ def initialize_services():
         st.error(f"Error crítico inicializando servicios: {e}")
         st.stop()
 
-@st.cache_data
+@st.cache_resource
 def load_initial_data() -> Dict[str, Any]:
     """
     Carga los datos iniciales necesarios para la calculadora.
@@ -514,10 +530,10 @@ def show_navigation():
 
     # Define las claves y los nombres para mostrar
     options = {
-        'calculator': "📝 Calculadora / Editar",
+        'calculator': "📝 Cotizador",
         'manage_quotes': "📂 Gestionar Cotizaciones",
         'manage_clients': "👥 Gestionar Clientes",
-        'reports': "📊 Reportes"
+        'dashboard': "📊 Dashboard" # Nueva opción
     }
 
     # Obtener la vista actual o default a 'calculator'
@@ -559,8 +575,12 @@ def show_navigation():
         if 'cotizacion_guardada' in st.session_state: del st.session_state['cotizacion_guardada']
         if 'modo_edicion' in st.session_state: 
              st.session_state.modo_edicion = False # Salir de modo edición si navegamos fuera
-             st.session_state.cotizacion_a_editar_id = None
-             st.session_state.datos_cotizacion_editar = None
+             st.session_state.cotizacion_id_editar = None # <-- Corregido nombre de clave
+             st.session_state.datos_cotizacion_editar = None # <-- Limpiar datos cargados
+        # --- INICIO: Limpiar también recotizacion_info --- 
+        if 'recotizacion_info' in st.session_state: 
+             del st.session_state['recotizacion_info']
+        # --- FIN: Limpiar también recotizacion_info --- 
         SessionManager.reset_calculator_widgets() # Resetear widgets también
         st.rerun() 
 
@@ -593,7 +613,7 @@ def get_filtered_clients():
 def _mostrar_ajustes_admin():
     """Muestra la sección de ajustes avanzados para administradores (fuera del form)."""
     if st.session_state.usuario_rol == 'administrador':
-        with st.expander("⚙️ Ajustes Avanzados (Admin)", expanded=True):
+        with st.expander("⚙️ Ajustes Avanzados (Admin)"):
             st.markdown("##### Sobrescribir Valores Calculados")
             st.caption("Marque la casilla para activar el ajuste e ingrese el nuevo valor.")
             
@@ -687,6 +707,11 @@ def mostrar_calculadora():
                     datos_cargados = db.get_full_cotizacion_details(cotizacion_id_editar)
                     if datos_cargados:
                         st.session_state.datos_cotizacion_editar = datos_cargados
+                        
+                        # --- INICIO DIAGNÓSTICO TEMPORAL ---
+                        st.warning(f"DEBUG - Datos Cargados: numero_pistas={datos_cargados.get('numero_pistas')} (tipo: {type(datos_cargados.get('numero_pistas', '')).__name__}), forma_pago_id={datos_cargados.get('forma_pago_id')} (tipo: {type(datos_cargados.get('forma_pago_id', '')).__name__})")
+                        # --- FIN DIAGNÓSTICO TEMPORAL ---
+                        
                         # Forzar tipo producto ANTES de mostrar selector
                         tipo_producto_id_cargado = datos_cargados.get('tipo_producto_id')
                         if tipo_producto_id_cargado:
@@ -925,10 +950,13 @@ def mostrar_calculadora():
 
             # --- El botón Calcular/Actualizar se mueve abajo --- 
                 
-        # --- MOVER AJUSTES ADMIN AQUÍ (DESPUÉS DEL FORM) --- 
+            # --- MOVER AJUSTES ADMIN AQUÍ (SOLO DESPUÉS DE SELECCIONAR TIPO PRODUCTO) --- 
         st.divider() # Añadir un divisor antes de los ajustes
         _mostrar_ajustes_admin() # Llamar a la función de ajustes aquí
-        st.divider() # Añadir un divisor después de los ajustes
+        # --- NO MOSTRAR AJUSTES ADMIN AQUÍ SI NO SE HA SELECCIONADO TIPO PRODUCTO --- 
+        # st.divider()
+        # _mostrar_ajustes_admin()
+        # st.divider()
 
         # --- MOVER BOTÓN CALCULAR/ACTUALIZAR AQUÍ --- 
         if tipo_producto_seleccionado_id: # Solo mostrar si hay tipo producto
@@ -1250,25 +1278,43 @@ def main():
     # --------------------------------------------
 
     # Mostrar la vista actual
-    if st.session_state.current_view == 'calculator':
+    current_view = st.session_state.get('current_view', 'calculator') # Obtener vista actual
+
+    if current_view == 'calculator':
         mostrar_calculadora()
-    elif st.session_state.current_view == 'quote_results':
+    elif current_view == 'quote_results':
         show_quote_results()
-    elif st.session_state.current_view == 'manage_quotes':
+    elif current_view == 'manage_quotes':
+        # --- MODIFICACIÓN: Llamar a la función importada --- 
         show_manage_quotes()
-    elif st.session_state.current_view == 'manage_clients':
+        # --------------------------------------------------
+    elif current_view == 'manage_clients':
+        # --- MODIFICACIÓN: Llamar a la función importada --- 
         show_manage_clients()
-    elif st.session_state.current_view == 'crear_cliente':
+        # --------------------------------------------------
+    elif current_view == 'crear_cliente':
+        # --- MODIFICACIÓN: Llamar a la función importada --- 
         show_create_client()
-    elif st.session_state.current_view == 'reports':
-        show_reports()
+        # --------------------------------------------------
+    # --- MODIFICACIÓN: Llamar a la función importada --- 
+    elif current_view == 'dashboard':
+        show_dashboard()
+    # --------------------------------------------------
+    # elif st.session_state.current_view == 'reports': # Ya no se usa directamente
+    #     show_reports()
+    else:
+        # Si la vista no coincide con ninguna opción, volver a la calculadora
+        st.warning(f"Vista desconocida: {current_view}. Volviendo a la calculadora.")
+        st.session_state.current_view = 'calculator'
+        st.rerun()
 
 def show_quote_results():
     """Muestra los resultados de la cotización calculada."""
+    # --- MOSTRAR INFORME SI YA ESTÁ GUARDADA ---
     if st.session_state.get('cotizacion_guardada', False) and st.session_state.get('cotizacion_id') is not None:
         st.success(f"Cotización #{st.session_state.cotizacion_id} guardada ✓")
         
-        # --- Botones de PDF y Nueva Cotización (lógica sin cambios, dependen de estado) ---
+        # --- Botones de PDF y Nueva Cotización ---
         col_pdf, col_new = st.columns(2)
         with col_pdf:
              # --- Lógica para botón Generar PDF --- 
@@ -1276,18 +1322,19 @@ def show_quote_results():
                   with st.spinner("Generando PDF..."):
                       try:
                           # Obtener datos completos usando el ID guardado
-                          datos_pdf = st.session_state.db.get_datos_completos_cotizacion(st.session_state.cotizacion_id)
-                          if datos_pdf:
+                        cotizacion_id = st.session_state.cotizacion_id
+                        datos_pdf = st.session_state.db.get_datos_completos_cotizacion(cotizacion_id)
+                        if datos_pdf:
                               pdf_gen = CotizacionPDF()
                               pdf_bytes = pdf_gen.generar_pdf(datos_pdf)
                               # Ofrecer descarga
                               st.download_button(
                                   label="Descargar PDF Ahora",
                                   data=pdf_bytes,
-                                  file_name=f"Cotizacion_{datos_pdf.get('consecutivo', 'N')}.pdf",
+                                file_name=f"Cotizacion_{datos_pdf.get('numero_cotizacion', 'N')}.pdf",
                                   mime="application/pdf"
                               )
-                          else:
+                        else:
                               st.error("No se pudieron obtener los datos completos para generar el PDF.")
                       except Exception as e_pdf:
                           st.error(f"Error generando PDF: {e_pdf}")
@@ -1295,14 +1342,53 @@ def show_quote_results():
         
         with col_new:
             if st.button("Nueva Cotización", key="new_quote_button_saved"):
+                # Resetear todo para una nueva cotización
                 st.session_state.current_view = 'calculator'
                 st.session_state.cotizacion_guardada = False
                 st.session_state.referencia_guardar = ""
                 st.session_state.cotizacion_model = None
                 st.session_state.current_calculation = None
+                st.session_state.modo_edicion = False
+                st.session_state.cotizacion_id_editar = None
+                st.session_state.datos_cotizacion_editar = None
+                if 'recotizacion_info' in st.session_state:
+                    del st.session_state['recotizacion_info']
+                if 'informe_tecnico_md' in st.session_state: # Limpiar informe anterior
+                    del st.session_state['informe_tecnico_md']
+                SessionManager.reset_calculator_widgets()
                 st.rerun()
+                
+        # --- MOSTRAR INFORME TÉCNICO (SI EXISTE) ---
+        st.divider() # Separador visual
+        st.subheader("Informe Técnico para Impresión")
+        informe_md = st.session_state.get("informe_tecnico_md", "*El informe técnico se genera al guardar la cotización.*")
+        st.markdown(informe_md)
+        
+        # Botón para descargar el informe en PDF
+        if 'cotizacion_guardada' in st.session_state and st.session_state.cotizacion_guardada and informe_md and informe_md != "*El informe técnico se genera al guardar la cotización.*":
+            try:
+                # Generar nombre de archivo usando número de cotización o identificador
+                id_para_archivo = st.session_state.get('cotizacion_id', 'informe')
+                nombre_cliente = ''
+                if 'datos_completos_cot' in st.session_state and st.session_state.datos_completos_cot:
+                    nombre_cliente = st.session_state.datos_completos_cot.get('cliente_nombre', '').replace(' ', '_')
+                    numero_cotizacion = st.session_state.datos_completos_cot.get('numero_cotizacion', id_para_archivo)
+                    id_para_archivo = f"{numero_cotizacion}_{nombre_cliente}"
+                
+                nombre_archivo = f"Informe_Tecnico_{id_para_archivo}"
+                
+                # Generar enlace de descarga
+                pdf_download_link = markdown_a_pdf(informe_md, nombre_archivo)
+                if pdf_download_link:
+                    st.markdown(pdf_download_link, unsafe_allow_html=True)
+                else:
+                    st.error("No se pudo generar el PDF para descarga.")
+            except Exception as e_pdf:
+                st.error(f"Error al preparar PDF para descarga: {e_pdf}")
+        # -----------------------------------------
         return # Terminar aquí si ya está guardada
 
+    # --- Lógica si la cotización AÚN NO está guardada ---
     if 'current_calculation' not in st.session_state or not st.session_state.current_calculation:
         st.error("No hay resultados para mostrar. Por favor, realice un cálculo primero.")
         if st.button("Volver a Calcular", key="back_to_calc_no_results"):
@@ -1339,10 +1425,9 @@ def show_quote_results():
     
     # Mostrar resultados para cada escala
     st.markdown("### Resultados por Escala")
-    
-    # Crear tabla de resultados (sin cambios aquí)
     resultados_df = pd.DataFrame(calc['results'])
     st.dataframe(resultados_df)
+    st.divider()
     
     # --- Formulario y Lógica de Guardado --- 
     is_edit_mode = st.session_state.get('modo_edicion', False)
@@ -1352,20 +1437,19 @@ def show_quote_results():
     
     default_referencia = ""
     if is_edit_mode and 'datos_cotizacion_editar' in st.session_state and st.session_state.datos_cotizacion_editar:
-        # Usar la descripción de la cotización que se está editando
         default_referencia = st.session_state.datos_cotizacion_editar.get('referencia_descripcion', "")
     elif 'referencia_guardar' in st.session_state:
-        # Usar lo que se haya ingresado previamente en esta sesión (si no estamos editando)
         default_referencia = st.session_state.referencia_guardar
     
     with st.form("guardar_cotizacion_form"):
         referencia_desc = st.text_input(
-            "Referencia / Descripción para guardar *",
+            "Descripción de la referencia *",
             value=default_referencia,
             key="referencia_guardar_input", 
             help="Ingrese un nombre o descripción única para esta cotización (Ej: Etiqueta XYZ V1)"
         )
         
+        # Selección de Comercial (Solo Admin)
         selected_comercial_id = None 
         if st.session_state.get('usuario_rol') == 'administrador':
             try:
@@ -1398,7 +1482,11 @@ def show_quote_results():
         guardar = st.form_submit_button(button_label, type="primary")
         
         if guardar:
+            # --- INICIO DEBUG ---
+            print("--- DEBUG: Botón Guardar presionado ---")
+            # --- FIN DEBUG ---
             error_guardado = False
+            # Validaciones
             if not referencia_desc.strip():
                 st.error("Debe ingresar una Referencia / Descripción para guardar la cotización.")
                 error_guardado = True
@@ -1414,22 +1502,77 @@ def show_quote_results():
             else:
                 comercial_id_para_guardar = st.session_state.user_id 
             
+            # --- INICIO DEBUG ---
+            print(f"--- DEBUG: Validaciones pasadas: {not error_guardado} ---")
+            # --- FIN DEBUG ---
+
+            # Proceso de Guardado/Actualización
             if not error_guardado:
                 st.session_state.referencia_guardar = referencia_desc 
                 spinner_text = "Actualizando cotización..." if is_edit_mode else "Guardando cotización..."
+                # --- INICIO DEBUG ---
+                print(f"--- DEBUG: Intentando guardar/actualizar. Modo edición: {is_edit_mode} ---")
+                # --- FIN DEBUG ---
                 with st.spinner(spinner_text):
                     try:
-                        # Usar cliente del cálculo actual (no puede cambiar en edit mode)
                         cliente_id = calc['cliente'].id 
                         if not comercial_id_para_guardar or not cliente_id or not datos_calculo_persistir:
                              st.error("Error interno: Faltan datos (cliente, comercial o cálculos).")
+                             # --- INICIO DEBUG ---
+                             print(f"--- DEBUG: Faltan datos! Comercial: {comercial_id_para_guardar}, Cliente: {cliente_id}, Datos Calculo: {'Sí' if datos_calculo_persistir else 'No'} ---")
+                             # --- FIN DEBUG ---
                         else:
                             manager = st.session_state.cotizacion_manager
+                            success = False
+                            message = ""
+                            cotizacion_id_final = None
+
+                            # --- INICIO DEBUG ---
+                            print(f"--- DEBUG: Llamando al manager. Modo edición: {is_edit_mode} ---")
+                            # --- FIN DEBUG ---
                             if is_edit_mode:
                                 cotizacion_id_a_actualizar = st.session_state.get('cotizacion_id_editar')
                                 if not cotizacion_id_a_actualizar:
                                      st.error("Error: ID de cotización a editar no encontrado.")
                                 else:
+                                    es_recotizacion = False
+                                    recotizacion_info_actual = st.session_state.get('recotizacion_info')
+                                    if recotizacion_info_actual and recotizacion_info_actual['id'] == cotizacion_id_a_actualizar:
+                                        es_recotizacion = True
+                                    
+                                    # --- DETECCIÓN DE AJUSTES ADMIN --- 
+                                    admin_ajustes_activos = False
+                                    if st.session_state.get('usuario_rol') == 'administrador':
+                                        # Verificar todas las posibles formas de ajuste
+                                        rentabilidad_ajustada = st.session_state.get('rentabilidad_ajustada')
+                                        
+                                        # --- DIAGNÓSTICO ESPECÍFICO DE RENTABILIDAD ---
+                                        rentabilidad_modificada = st.session_state.get('ajustar_rentabilidad') or (rentabilidad_ajustada is not None and rentabilidad_ajustada > 0)
+                                        # --- INICIO DEBUG: Diagnóstico Rentabilidad ---
+                                        if rentabilidad_modificada:
+                                            print(f"⚠️ DEBUG: Admin modificó rentabilidad. ajustar_rentabilidad={st.session_state.get('ajustar_rentabilidad')}, rentabilidad_ajustada={rentabilidad_ajustada}")
+                                        # --- FIN DEBUG ---
+                                        # --- FIN DIAGNÓSTICO ESPECÍFICO ---
+                                        
+                                        if (st.session_state.get('ajustar_rentabilidad') or 
+                                            st.session_state.get('ajustar_material') or 
+                                            st.session_state.get('ajustar_troquel') or 
+                                            st.session_state.get('ajustar_planchas') or
+                                            (rentabilidad_ajustada is not None and rentabilidad_ajustada > 0)):
+                                            admin_ajustes_activos = True
+                                            # --- INICIO DEBUG: Ajustes Admin ---
+                                            print(f"--- DEBUG: AJUSTES ADMIN DETECTADOS ---")
+                                            print(f"  ajustar_rentabilidad: {st.session_state.get('ajustar_rentabilidad')}")
+                                            print(f"  rentabilidad_ajustada: {rentabilidad_ajustada}")
+                                            print(f"  ajustar_material: {st.session_state.get('ajustar_material')}")
+                                            print(f"  ajustar_troquel: {st.session_state.get('ajustar_troquel')}")
+                                            print(f"  ajustar_planchas: {st.session_state.get('ajustar_planchas')}")
+                                            # --- FIN DEBUG ---
+                                    # --- FIN DETECCIÓN --- 
+                                    
+                                    # --- INICIO DEBUG: Antes de llamar actualizar ---
+                                    print(f"--- DEBUG: Llamando manager.actualizar_cotizacion_existente(cotizacion_id={cotizacion_id_a_actualizar}, ...) ---")
+                                    # --- FIN DEBUG ---
                                     success, message = manager.actualizar_cotizacion_existente(
                                         cotizacion_id=cotizacion_id_a_actualizar,
                                         cotizacion_model=cotizacion_preparada, 
@@ -1437,58 +1580,113 @@ def show_quote_results():
                                         referencia_descripcion=referencia_desc,
                                         comercial_id=comercial_id_para_guardar,
                                         datos_calculo=datos_calculo_persistir,
-                                        modificado_por=st.session_state.user_id
+                                        modificado_por=st.session_state.user_id,
+                                        es_recotizacion=es_recotizacion,
+                                        admin_ajustes_activos=admin_ajustes_activos  # Pasar el nuevo parámetro
                                     )
-                                    if success:
-                                        st.success(message)
-                                        st.session_state.cotizacion_guardada = True
-                                        st.session_state.cotizacion_id = cotizacion_id_a_actualizar
-                                        # --- INICIO: Limpieza adicional post-actualización ---
-                                        st.session_state.modo_edicion = False 
-                                        st.session_state.cotizacion_id_editar = None 
-                                        st.session_state.datos_cotizacion_editar = None 
-                                        st.session_state.cotizacion_model = None # Limpiar modelo
-                                        st.session_state.current_calculation = None 
-                                        # --- FIN: Limpieza adicional post-actualización ---
-                                        SessionManager.reset_calculator_widgets()
-                                        st.rerun()
-                                    else:
-                                        st.error(f"Error al actualizar: {message}")
+                                    # --- INICIO DEBUG: Después de llamar actualizar ---
+                                    print(f"--- DEBUG: Resultado manager.actualizar: success={success}, message='{message}' ---")
+                                    # --- FIN DEBUG ---
+                                    if success: 
+                                        cotizacion_id_final = cotizacion_id_a_actualizar
+                                        # --- INICIO DEBUG ---
+                                        print(f"--- DEBUG: Después de actualizar, cotizacion_id_final={cotizacion_id_final}")
+                                        # --- FIN DEBUG ---
                             else:
-                                # --- CREACIÓN NUEVA: Obtener flag de admin_ajustes_activos --- 
+                                # --- INICIO DEBUG: Antes de llamar guardar nueva ---
+                                print(f"--- DEBUG: Llamando manager.guardar_nueva_cotizacion(...) ---")
+                                # --- FIN DEBUG ---
                                 admin_ajustes_activos = calc.get('admin_ajustes_activos', False)
-                                print(f"-- Pasando admin_ajustes_activos = {admin_ajustes_activos} a guardar_nueva_cotizacion --")
-                                # -------------------------------------------------------------
                                 success, message, cotizacion_id = manager.guardar_nueva_cotizacion(
                                     cotizacion_preparada, 
                                     cliente_id,
                                     referencia_desc,
                                     comercial_id_para_guardar,
                                     datos_calculo_persistir, 
-                                    admin_ajustes_activos # <-- PASAR POSICIONALMENTE
+                                    admin_ajustes_activos 
                                 )
-                                if success:
-                                    st.success(message)
-                                    st.session_state.cotizacion_guardada = True
-                                    st.session_state.cotizacion_id = cotizacion_id
-                                    # --- INICIO: Limpieza adicional post-guardado --- 
-                                    # st.session_state.cotizacion_model.id = cotizacion_id # Modelo ya se limpiará
-                                    st.session_state.cotizacion_model = None # Limpiar modelo
-                                    st.session_state.current_calculation = None
-                                    st.session_state.datos_cotizacion_editar = None # Asegurar limpieza
-                                    st.session_state.modo_edicion = False # Asegurar limpieza
-                                    st.session_state.cotizacion_id_editar = None # Asegurar limpieza
-                                    # --- FIN: Limpieza adicional post-guardado --- 
-                                    st.rerun() 
-                                else:
-                                    st.error(f"Error al guardar: {message}")
+                                # --- INICIO DEBUG: Después de llamar guardar nueva ---
+                                print(f"--- DEBUG: Resultado manager.guardar_nueva: success={success}, message='{message}', cotizacion_id={cotizacion_id} ---")
+                                # --- FIN DEBUG ---
+                                if success: 
+                                    cotizacion_id_final = cotizacion_id
+                                    # --- INICIO DEBUG ---
+                                    print(f"--- DEBUG: Después de guardar nueva, cotizacion_id_final={cotizacion_id_final}")
+                                    # --- FIN DEBUG ---
+
+                            # --- SI EL GUARDADO/ACTUALIZACIÓN FUE EXITOSO (código para ambos casos) --- 
+                            if success and cotizacion_id_final:
+                                # --- INICIO DEBUG ---
+                                print(f"--- DEBUG: Guardado/Actualización exitoso (ID: {cotizacion_id_final}). Generando informe y limpiando... ---")
+                                # --- FIN DEBUG ---
+                                st.success(message)
+                                st.session_state.cotizacion_guardada = True
+                                st.session_state.cotizacion_id = cotizacion_id_final
+                                
+                                # --- GENERAR INFORME TÉCNICO AQUÍ --- 
+                                try:
+                                    # --- INICIO DEBUG ---
+                                    print(f"--- DEBUG: Intentando generar informe para Cotización ID: {cotizacion_id_final}")
+                                    # --- FIN DEBUG ---
+                                    # Obtener datos completos y frescos de la cotización recién guardada/actualizada
+                                    datos_completos_cot = st.session_state.db.get_full_cotizacion_details(cotizacion_id_final)
+                                    if datos_completos_cot:
+                                        st.session_state.datos_completos_cot = datos_completos_cot
+                                        # Generar el markdown usando la función importada
+                                        informe_md = generar_informe_tecnico_markdown(
+                                            cotizacion_data=datos_completos_cot,
+                                            calculos_guardados=datos_calculo_persistir # Usar los datos que se guardaron
+                                        )
+                                        st.session_state.informe_tecnico_md = informe_md
+                                        # --- INICIO DEBUG ---
+                                        print("--- DEBUG: Informe técnico generado y guardado en session_state. ---")
+                                        # --- FIN DEBUG ---
+                                    else:
+                                        st.warning("Cotización guardada, pero no se pudieron obtener datos completos para generar el informe técnico.")
+                                        st.session_state.informe_tecnico_md = "Error al obtener datos completos para el informe."
+                                        # --- INICIO DEBUG ---
+                                        print("--- DEBUG: Error al obtener datos completos para informe. ---")
+                                        # --- FIN DEBUG ---
+                                except Exception as e_report:
+                                    st.warning(f"Cotización guardada, pero ocurrió un error al generar el informe técnico: {e_report}")
+                                    traceback.print_exc()
+                                    st.session_state.informe_tecnico_md = f"Error generando informe: {e_report}"
+                                    # --- INICIO DEBUG ---
+                                    print(f"--- DEBUG: Excepción generando informe: {e_report} ---")
+                                    # --- FIN DEBUG ---
+                                
+                                # --- Limpieza post-éxito ---
+                                st.session_state.modo_edicion = False 
+                                st.session_state.cotizacion_id_editar = None 
+                                st.session_state.datos_cotizacion_editar = None 
+                                st.session_state.cotizacion_model = None # Limpiar modelo
+                                st.session_state.current_calculation = None
+                                if 'recotizacion_info' in st.session_state:
+                                    del st.session_state['recotizacion_info']
+                                SessionManager.reset_calculator_widgets()
+                                # --- INICIO DEBUG ---
+                                print(f"--- DEBUG: Rerun después de éxito. ---")
+                                # --- FIN DEBUG ---
+                                st.rerun() # Rerun para mostrar estado guardado y informe
+                            elif not success:
+                                st.error(f"Error al guardar/actualizar: {message}")
+                                # --- INICIO DEBUG ---
+                                print(f"--- DEBUG: Error reportado por el manager: {message} ---")
+                                # --- FIN DEBUG ---
                     except CotizacionManagerError as cme:
                         st.error(f"Error en guardado/actualización: {cme}")
+                        # --- INICIO DEBUG ---
+                        print(f"--- DEBUG: CotizacionManagerError: {cme} ---")
+                        # --- FIN DEBUG ---
                     except Exception as e_save:
                         st.error(f"Error inesperado: {e_save}")
                         traceback.print_exc()
+                        # --- INICIO DEBUG ---
+                        print(f"--- DEBUG: Excepción inesperada en guardado: {e_save} ---")
+                        # --- FIN DEBUG ---
                                 
     # Botón Nueva Cotización 
+    st.divider()
     if st.button("Nueva Cotización", key="new_quote_button_results"):
         # Resetear todo para una nueva cotización
         st.session_state.current_view = 'calculator'
@@ -1497,228 +1695,20 @@ def show_quote_results():
         st.session_state.cotizacion_model = None
         st.session_state.current_calculation = None
         st.session_state.modo_edicion = False
-        st.session_state.cotizacion_id_editar = None # <-- Corregido typo
-        st.session_state.datos_cotizacion_editar = None
-        SessionManager.reset_calculator_widgets() # Resetear widgets
+        st.session_state.cotizacion_id_editar = None 
+        st.session_state.datos_cotizacion_editar = None 
+        if 'recotizacion_info' in st.session_state:
+            del st.session_state['recotizacion_info']
+        if 'informe_tecnico_md' in st.session_state: # Limpiar informe anterior
+            del st.session_state['informe_tecnico_md']
+        SessionManager.reset_calculator_widgets()
         st.rerun()
 
-def show_manage_quotes():
-    """Muestra la vista para gestionar (ver y modificar) cotizaciones."""
-    st.title("Gestión de Cotizaciones")
-
-    # Recuperar datos necesarios
-    db_manager = st.session_state.db
-    user_role = st.session_state.usuario_rol
-    user_id = st.session_state.user_id
-
-    # --- DEBUG PRINT ---
-    print(f"DEBUG: show_manage_quotes - User Role: {user_role}")
-    print(f"DEBUG: show_manage_quotes - User ID: {user_id}")
-    # --- END DEBUG ---
-
-    cotizaciones = []
-    try:
-        if user_role == 'administrador':
-            # --- DEBUG PRINT ---
-            print("DEBUG: show_manage_quotes - Calling db_manager.get_all_cotizaciones_overview()")
-            # --- END DEBUG ---
-            cotizaciones = db_manager.get_all_cotizaciones_overview()
-        elif user_role == 'comercial':
-            # --- DEBUG PRINT ---
-            print(f"DEBUG: show_manage_quotes - Calling db_manager.get_cotizaciones_overview_by_comercial({user_id})")
-            # --- END DEBUG ---
-            cotizaciones = db_manager.get_cotizaciones_overview_by_comercial(user_id)
-        else:
-            st.error("No tiene permisos para ver cotizaciones.")
-            return
-
-        # --- DEBUG PRINT ---
-        print(f"DEBUG: show_manage_quotes - Retrieved {len(cotizaciones)} quotes")
-        if cotizaciones:
-            print("DEBUG: show_manage_quotes - Structure of first quote received:")
-            print(json.dumps(cotizaciones[0], indent=2, default=str)) # Print first item structure
-        # --- END DEBUG ---
-
-
-        if not cotizaciones:
-            st.info("No hay cotizaciones disponibles.")
-            return
-
-        # Crear DataFrame para mostrar las cotizaciones
-        try:
-            print("DEBUG: show_manage_quotes - Attempting to create DataFrame...") # DEBUG
-            df = pd.DataFrame(cotizaciones)
-            print("DEBUG: show_manage_quotes - DataFrame created successfully.") # DEBUG
-            print("DEBUG: show_manage_quotes - DataFrame columns before rename:", df.columns.tolist()) # DEBUG Columns
-            
-            # --- RENOMBRAR COLUMNA --- 
-            if 'cliente_nombre' in df.columns:
-                df.rename(columns={'cliente_nombre': 'cliente'}, inplace=True)
-                print("DEBUG: show_manage_quotes - Renamed 'cliente_nombre' to 'cliente'.")
-            else:
-                 print("DEBUG: show_manage_quotes - Column 'cliente_nombre' not found for renaming.")
-            # --------------------------
-            
-            print("DEBUG: show_manage_quotes - DataFrame columns after rename:", df.columns.tolist()) # DEBUG Columns
-            print("DEBUG: show_manage_quotes - DataFrame info:") # DEBUG Info
-            df.info(verbose=True, buf=sys.stdout) # DEBUG Info
-        except KeyError as ke:
-            print(f"ERROR: show_manage_quotes - KeyError during DataFrame creation/rename: {ke}") # DEBUG Error
-            st.error(f"Error al procesar los datos de cotizaciones (KeyError): {ke}")
-            st.exception(ke) # Show full traceback in UI for admin
-            return
-        except Exception as e_df:
-            print(f"ERROR: show_manage_quotes - Exception during DataFrame creation/rename: {e_df}") # DEBUG Error
-            st.error(f"Error al crear la tabla de cotizaciones: {e_df}")
-            st.exception(e_df) # Show full traceback in UI for admin
-            return
-
-        
-        # Convertir fechas a formato legible
-        if 'fecha_creacion' in df.columns:
-            df['fecha_creacion'] = pd.to_datetime(df['fecha_creacion']).dt.strftime('%Y-%m-%d %H:%M')
-
-        # Mostrar cotizaciones en una tabla y sección de acciones
-        st.write("### Cotizaciones")
-        try:
-            print("DEBUG: show_manage_quotes - Attempting to display DataFrame...") # DEBUG
-            st.dataframe(
-                df, # Use the DataFrame potentially with renamed 'cliente' column
-            hide_index=True,
-            use_container_width=True
-        )
-            print("DEBUG: show_manage_quotes - DataFrame displayed successfully.") # DEBUG
-            
-            # --- INICIO: Sección de Acciones (Editar / Cambiar Estado) --- 
-            st.divider()
-            st.write("**Seleccione una cotización para ver acciones:**")
-            
-            # Crear opciones para el selectbox (ID, Texto a mostrar)
-            opciones_accion = [(row['id'], f"#{row['numero_cotizacion']} - {row['cliente']} - {row['referencia']}") 
-                             for index, row in df.iterrows()]
-                             
-            # Añadir opción placeholder
-            opciones_display_accion = [(None, "-- Elija una cotización --")] + opciones_accion
-            
-            selected_option_tuple_accion = st.selectbox(
-                "Cotización para Acciones",
-                options=opciones_display_accion,
-                format_func=lambda x: x[1], # Mostrar el texto formateado
-                key="selectbox_accion_cotizacion",
-                label_visibility="collapsed" # Ocultar label redundante
-            )
-            
-            # Obtener el ID seleccionado
-            selected_cotizacion_id = selected_option_tuple_accion[0] if selected_option_tuple_accion else None
-            
-            # --- Mostrar acciones si se selecciona una cotización --- 
-            if selected_cotizacion_id is not None:
-                # --- Obtener datos y determinar deshabilitación --- 
-                selected_quote_data = df.loc[df['id'] == selected_cotizacion_id].iloc[0]
-                ajustes_admin_flag = selected_quote_data['ajustes_modificados_admin']
-                estado_actual_id = selected_quote_data['estado_id']
-                user_role = st.session_state.usuario_rol
-                ID_ESTADO_APROBADO = 2
-                
-                disable_edit_button = False
-                disable_edit_reason = ""
-                disable_status_change = False
-                disable_status_reason = ""
-                
-                if user_role == 'comercial':
-                    if ajustes_admin_flag:
-                        disable_edit_button = True
-                        disable_edit_reason = "🔒 Edición deshabilitada: Ajustes modificados por administrador."
-                    elif estado_actual_id == ID_ESTADO_APROBADO:
-                        disable_edit_button = True
-                        disable_edit_reason = "🔒 Edición deshabilitada: Cotización ya aprobada."
-                        # También deshabilitar cambio de estado si está aprobada y es comercial
-                        disable_status_change = True
-                        disable_status_reason = "🔒 Estado Aprobado no modificable por comercial."
-                
-                # --- Sección de Botón Editar --- 
-                cols_accion_display = st.columns(2)
-                with cols_accion_display[0]:
-                    st.write("**Editar Cotización:**")
-                    if st.button(f"✏️ Editar #{selected_quote_data['numero_cotizacion']}", 
-                                 key="confirm_edit_button", 
-                                 use_container_width=True,
-                                 disabled=disable_edit_button):
-                        print(f"DEBUG: Edit button clicked for Cotizacion ID: {selected_cotizacion_id}")
-                        st.session_state.modo_edicion = True
-                        st.session_state.cotizacion_id_editar = selected_cotizacion_id
-                        st.session_state.datos_cotizacion_editar = None
-                        st.session_state.current_view = 'calculator'
-                        SessionManager.reset_calculator_widgets()
-                        st.rerun()
-                    if disable_edit_button:
-                        st.caption(disable_edit_reason)
-                        
-                # --- Sección de Actualizar Estado --- 
-                with cols_accion_display[1]:
-                    st.write("**Cambiar Estado:**")
-                    # Obtener listas de estados y motivos
-                    estados_db = st.session_state.initial_data.get('estados_cotizacion', [])
-                    motivos_db = st.session_state.db.get_motivos_rechazo()
-                    opciones_estado = [(e.id, e.estado) for e in estados_db]
-                    opciones_motivo = [(None, "-- Seleccione Motivo --")] + [(m.id, m.motivo) for m in motivos_db]
-                    try:
-                        current_status_index = next(i for i, (id, _) in enumerate(opciones_estado) if id == estado_actual_id)
-                    except StopIteration:
-                        current_status_index = 0
-                        
-                    nuevo_estado_tupla = st.selectbox("Nuevo Estado",
-                        options=opciones_estado, format_func=lambda x: x[1],
-                        index=current_status_index, key=f"estado_select_{selected_cotizacion_id}",
-                        disabled=disable_status_change, label_visibility="collapsed")
-                    nuevo_estado_id = nuevo_estado_tupla[0] if nuevo_estado_tupla else None
-                    
-                    motivo_rechazo_id = None
-                    show_motivo_selector = (nuevo_estado_id == 3) # ID 3 = Rechazado
-                    disable_motivo_selector = disable_status_change or not show_motivo_selector
-                    if show_motivo_selector:
-                        motivo_rechazo_tupla = st.selectbox("Motivo Rechazo *",
-                            options=opciones_motivo, format_func=lambda x: x[1],
-                            key=f"motivo_select_{selected_cotizacion_id}", 
-                            disabled=disable_motivo_selector, label_visibility="collapsed")
-                        if not disable_motivo_selector:
-                            motivo_rechazo_id = motivo_rechazo_tupla[0] if motivo_rechazo_tupla else None
-                    
-                    if st.button("🔄 Actualizar Estado", key=f"update_status_button_{selected_cotizacion_id}", 
-                                 use_container_width=True, disabled=disable_status_change):
-                        if nuevo_estado_id == 3 and motivo_rechazo_id is None:
-                            st.error("Debe seleccionar un motivo de rechazo.")
-                        elif nuevo_estado_id is not None:
-                            with st.spinner("Actualizando..."):
-                                success = st.session_state.db.actualizar_estado_cotizacion(
-                                    selected_cotizacion_id, nuevo_estado_id, motivo_rechazo_id)
-                                if success:
-                                    st.success(f"Estado cotización #{selected_quote_data['numero_cotizacion']} actualizado.")
-                                    st.rerun()
-                                else:  # Este else pertenece al if success
-                                    st.error("No se pudo actualizar estado.")
-                        else: # Este else pertenece al if nuevo_estado_id is not None
-                             st.warning("Estado no válido.")
-                             
-                    if disable_status_change: # Este if está al mismo nivel que el if st.button
-                        st.caption(disable_status_reason)
-                        
-            # --- Fin Mostrar acciones --- 
-            
-        except Exception as e_st: # Este except pertenece al try que empieza antes de st.dataframe
-            print(f"ERROR: show_manage_quotes - Exception during st.dataframe display or actions: {e_st}") 
-            st.error(f"Error al mostrar tabla o acciones: {e_st}")
-            st.exception(e_st)
-
-    except Exception as e:
-        # --- DEBUG PRINT ---
-        print(f"ERROR: show_manage_quotes - General exception: {e}")
-        import traceback
-        print(traceback.format_exc())
-        # --- END DEBUG ---\n        st.error(f"Error al cargar las cotizaciones: {e}")\n\n
+# La implementación de show_manage_quotes se ha movido a src/ui/manage_quotes_view.py
+# y se importa al inicio del archivo como: from src.ui.manage_quotes_view import show_manage_quotes
 
 def show_reports():
-    """Muestra la sección de reportes"""
+    """Muestra la vista de reportes."""
     st.title("Reportes")
     st.write("Funcionalidad de reportes en desarrollo.")
     # Aquí se implementará la lógica para mostrar reportes
