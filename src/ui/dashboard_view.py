@@ -267,11 +267,12 @@ def show_dashboard():
 
     # Seleccionar columnas relevantes y renombrar si es necesario
     columnas_mostrar = ['numero_cotizacion', 'fecha_creacion', 'estado_nombre',
-                        'cliente_nombre', 'comercial_nombre', 'motivo_rechazo_nombre']
+                        'cliente_nombre', 'comercial_nombre', 'es_recotizacion', 'motivo_rechazo_nombre']
     columnas_existentes = [col for col in columnas_mostrar if col in df_filtrado.columns]
 
     if columnas_existentes:
         df_display = df_filtrado[columnas_existentes].copy()
+        
         # Formatear fecha si existe
         if 'fecha_creacion' in df_display.columns:
             df_display['fecha_creacion'] = pd.to_datetime(df_display['fecha_creacion']).dt.strftime('%Y-%m-%d')
@@ -280,9 +281,42 @@ def show_dashboard():
         if 'motivo_rechazo_nombre' in df_display.columns:
              df_display['motivo_rechazo_nombre'] = df_display['motivo_rechazo_nombre'].fillna('-')
 
+        # Preparar la columna de Recotización y el DataFrame final para la tabla
+        df_for_streamlit_table = df_display.copy()
+
+        if 'es_recotizacion' in df_for_streamlit_table.columns:
+            df_for_streamlit_table['Recotización'] = df_for_streamlit_table['es_recotizacion'].map({True: 'Sí', False: 'No'}).fillna('N/A')
+
+        # Definir el orden final de las columnas y seleccionar solo las que existen
+        final_column_order_preference = [
+            'numero_cotizacion', 'fecha_creacion', 'estado_nombre',
+            'cliente_nombre', 'comercial_nombre', 'Recotización', 'motivo_rechazo_nombre'
+        ]
+        
+        columns_to_show_in_table = []
+        for col_name in final_column_order_preference:
+            if col_name == 'Recotización': # Columna transformada
+                if 'Recotización' in df_for_streamlit_table.columns:
+                    columns_to_show_in_table.append('Recotización')
+            elif col_name in df_for_streamlit_table.columns: # Columnas originales deseadas
+                columns_to_show_in_table.append(col_name)
+        
         # Ordenar por fecha más reciente
-        sort_col = 'fecha_creacion' if 'fecha_creacion' in df_display.columns else columnas_existentes[0]
-        st.dataframe(df_display.sort_values(by=sort_col, ascending=False), hide_index=True, use_container_width=True)
+        # sort_col se basa en las columnas originales de df_display, lo cual es correcto.
+        if 'fecha_creacion' in df_display.columns:
+            sort_col = 'fecha_creacion'
+        else:
+            # Si entramos aquí, es porque 'fecha_creacion' no está en df_display.
+            # El bloque if externo 'if columnas_existentes:' ya aseguró que
+            # columnas_existentes está definida y no está vacía.
+            sort_col = columnas_existentes[0]
+
+        if columns_to_show_in_table and sort_col and sort_col in df_for_streamlit_table.columns:
+            st.dataframe(df_for_streamlit_table[columns_to_show_in_table].sort_values(by=sort_col, ascending=False), hide_index=True, use_container_width=True)
+        elif columns_to_show_in_table: # Si sort_col no es válida pero hay columnas
+            st.dataframe(df_for_streamlit_table[columns_to_show_in_table], hide_index=True, use_container_width=True)
+        else:
+            st.warning("No hay columnas suficientes para mostrar el detalle.")
 
         # Botón de descarga con clave única y más específica
         st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
