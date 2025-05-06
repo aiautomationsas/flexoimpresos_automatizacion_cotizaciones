@@ -1414,15 +1414,7 @@ def show_quote_results():
     
     st.markdown("## Resultados de la Cotización")
     
-    # Información básica
-    st.markdown("### Información General")
-    col1_info, col2_info = st.columns(2)
-    with col1_info:
-        st.write(f"**Tipo de Producto:** {'Manga' if calc['is_manga'] else 'Etiqueta'}")
-        # Mostrar Referencia ingresada (aún no guardada)
-        st.write(f"**Referencia (a guardar):** {st.session_state.get('referencia_guardar', '(Ingrese abajo)')}") 
-        st.write(f"**Fecha Cálculo:** {datetime.fromisoformat(calc['timestamp']).strftime('%Y-%m-%d %H:%M')}")
-    
+
     # Mostrar resultados para cada escala
     st.markdown("### Resultados por Escala")
     resultados_df = pd.DataFrame(calc['results'])
