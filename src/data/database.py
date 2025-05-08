@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from src.data.models import (
     Cotizacion, Material, Acabado, Cliente, Escala, ReferenciaCliente,
     TipoProducto, PrecioEscala, TipoGrafado, EstadoCotizacion, MotivoRechazo,
-    FormaPago, Adhesivo
+    FormaPago, Adhesivo, TipoFoil
 )
 import os
 import logging
@@ -19,13 +19,12 @@ import math
 class DBManager:
     # --- INICIO DEFINICIÓN CAMPOS ACTUALIZABLES ---
     CAMPOS_COTIZACION_ACTUALIZABLES = {
-        'material_adhesivo_id', 'acabado_id', 'num_tintas', 'num_paquetes_rollos',
+        'material_adhesivo_id', 'acabado_id', 'tipo_foil_id', 'num_tintas', 'num_paquetes_rollos',
         'es_manga', 'tipo_grafado_id', 'valor_troquel', 'valor_plancha_separado',
         'estado_id', 'id_motivo_rechazo', 'planchas_x_separado', 'existe_troquel',
         'numero_pistas', 'tipo_producto_id', 'ancho', 'avance', 'forma_pago_id',
         'altura_grafado', 'es_recotizacion', 'ajustes_modificados_admin',
         'identificador'  # <--- AÑADIR ESTA LÍNEA
-        # Nota: modificado_por y fecha_modificacion se añaden aparte
     }
     # --- FIN DEFINICIÓN CAMPOS ACTUALIZABLES ---
     
@@ -35,53 +34,124 @@ class DBManager:
     def _generar_identificador(self, tipo_producto: str, material_code: str, ancho: float, avance: float,
                            num_pistas: int, num_tintas: int, acabado_code: str, num_paquetes_rollos: int,
                            cliente: str, referencia: str, numero_cotizacion: int) -> str:
-        """Genera un identificador único para la cotización con el siguiente formato:
-        TIPO MATERIAL ANCHO_x_AVANCE TINTAS [ACABADO] [RX/MX_PAQUETES] CLIENTE REFERENCIA NUMERO_COTIZACION"""
+        """
+        NOTA: Esta función está marcada como legacy/deprecated para la creación de nuevas cotizaciones.
+        La generación del identificador para NUEVAS cotizaciones ahora se maneja en la función RPC 'crear_cotizacion'.
+        Esta función se mantiene para:
+        1. Soporte de actualizaciones de cotizaciones existentes
+        2. Referencia de la lógica de generación de identificadores
+        3. Propósitos de depuración y pruebas
+
+        Genera un identificador único para la cotización con el siguiente formato:
+        TIPO MATERIAL ANCHO_x_AVANCE TINTAS [ACABADO] [RX/MX_PAQUETES] CLIENTE REFERENCIA NUMERO_COTIZACION
+
+        Ejemplos:
+        - Etiqueta normal: ET PELB 50X50MM 0T LAM RX1000 ENSAYO VLAMOS 150
+        - Etiqueta con FOIL: ET PELB 50X50MM 0T+FOIL LAM RX1000 ENSAYO VLAMOS 150
+        - Manga: MT PELB 50X50MM 0T MX1000 ENSAYO VLAMOS 150
+
+        Args:
+            tipo_producto (str): Nombre del tipo de producto (debe contener 'MANGA' si es manga)
+            material_code (str): Código del material (ej: 'PELB')
+            ancho (float): Ancho del producto
+            avance (float): Avance del producto
+            num_pistas (int): Número de pistas
+            num_tintas (int): Número de tintas
+            acabado_code (str): Código del acabado (ej: 'LAM', 'FOIL+LAM')
+            num_paquetes_rollos (int): Número de paquetes o rollos
+            cliente (str): Nombre del cliente
+            referencia (str): Descripción de la referencia
+            numero_cotizacion (int): Número de cotización
+
+        Returns:
+            str: Identificador único generado
+        """
         # 1. Tipo de producto
         es_manga = "MANGA" in tipo_producto.upper()
         tipo = "MT" if es_manga else "ET"  # Usar MT para mangas, ET para etiquetas
         
-
-        
-
         dimensiones = f"{ancho:.0f}x{avance:.0f}MM"
         
-     
-        tintas = f"{num_tintas}T"
-        
+        # Inicializar las cadenas para tintas y acabado
+        tintas_str_final = f"{num_tintas}T"
+        acabado_para_id = "" # Código del acabado que irá en el identificador
 
-        cliente_limpio = cliente.split('(')[0].strip().upper() if cliente else ""
-        
-        # 8. Referencia (descripción completa, eliminando texto entre paréntesis)
-        referencia_limpia = referencia.split('(')[0].strip().upper() if referencia else ""
-        
-        # 9. Número de cotización
-        num = f"{numero_cotizacion}"
-        
-        # Construir el identificador según sea manga o etiqueta
-        if es_manga:
-            # Para mangas: TIPO MATERIAL ANCHO_x_AVANCE TINTAS MX_PAQUETES CLIENTE REFERENCIA NUMERO_COTIZACION
-            paquetes = f"MX{num_paquetes_rollos}"
-            identificador = f"{tipo} {material_code} {dimensiones} {tintas} {paquetes} {cliente_limpio} {referencia_limpia} {num}"
-        else:
-            # Para etiquetas: TIPO MATERIAL ANCHO_x_AVANCE TINTAS ACABADO RX_PAQUETES CLIENTE REFERENCIA NUMERO_COTIZACION
-            # Extraer solo la parte antes del guión para el acabado
-            acabado_code_limpio = ""
+        print(f"--- DEBUG IDENTIFICADOR ---")
+        print(f"Input tipo_producto: {tipo_producto}")
+        print(f"Input material_code: {material_code}")
+        print(f"Input ancho: {ancho}, avance: {avance}")
+        print(f"Input num_tintas: {num_tintas}")
+        print(f"Input acabado_code: '{acabado_code}'") # Mostrar comillas para ver espacios
+        print(f"Input es_manga: {es_manga}")
+
+        if not es_manga: # Lógica de acabado y modificación de tintas solo para etiquetas
             if acabado_code:
-                acabado_code_limpio = acabado_code.split('-')[0].strip()
+                acabado_code_upper = acabado_code.upper()
+                print(f"acabado_code_upper: '{acabado_code_upper}'")
+                
+                is_foil_with_base = "FOIL" in acabado_code_upper and "+" in acabado_code_upper
+                is_just_foil = acabado_code_upper == "FOIL"
+                print(f"is_foil_with_base: {is_foil_with_base}")
+                print(f"is_just_foil: {is_just_foil}")
+
+                if is_foil_with_base:
+                    print("Branch: is_foil_with_base")
+                    parts = acabado_code_upper.split('+')
+                    print(f"parts: {parts}")
+                    # Extraer las partes del código que no son "FOIL"
+                    base_code_parts = [p.strip() for p in parts if p.strip() != "FOIL"]
+                    print(f"base_code_parts: {base_code_parts}")
+                    
+                    if base_code_parts:
+                        tintas_str_final = f"{num_tintas}T+FOIL"
+                        acabado_para_id = "+".join(base_code_parts) # ej. "LAMMAT"
+                    else: # Podría ser si el código era "FOIL+" o "FOIL+FOIL" (base vacía)
+                        tintas_str_final = f"{num_tintas}T+FOIL"
+                        acabado_para_id = "" # No hay código de acabado base para mostrar
+                elif is_just_foil:
+                    print("Branch: is_just_foil")
+                    tintas_str_final = f"{num_tintas}T+FOIL"
+                    acabado_para_id = "" # No hay nombre de acabado, solo el efecto foil
+                else: # Acabado normal (no FOIL o no sigue los patrones FOIL especiales)
+                    print("Branch: acabado_normal")
+                    acabado_para_id = acabado_code.split('-')[0].strip()
+            else:
+                print("No acabado_code para etiqueta.")
+        else:
+            print("Es manga, no se aplica lógica de FOIL para identificador de acabado/tintas.")
+        
+        print(f"Intermedio tintas_str_final: {tintas_str_final}")
+        print(f"Intermedio acabado_para_id: '{acabado_para_id}'")
+        
+        # Obtener partes limpias de cliente y referencia (como en el código original)
+        cliente_limpio = cliente.split('(')[0].strip().upper() if cliente else ""
+        referencia_limpia = referencia.split('(')[0].strip().upper() if referencia else ""
+        num = f"{numero_cotizacion}" # Nombre de variable como en el código original
+        
+        # Construir el identificador pieza por pieza
+        identificador_parts = [tipo, material_code, dimensiones, tintas_str_final]
+
+        if es_manga:
+            paquetes = f"MX{num_paquetes_rollos}"
+            identificador_parts.append(paquetes)
+        else: # Es etiqueta
+            if acabado_para_id: # Solo añadir la parte del acabado si existe
+                identificador_parts.append(acabado_para_id)
             
             paquetes = f"RX{num_paquetes_rollos}"
-            
-            # Si hay código de acabado, incluirlo en el identificador
-            if acabado_code_limpio:
-                identificador = f"{tipo} {material_code} {dimensiones} {tintas} {acabado_code_limpio} {paquetes} {cliente_limpio} {referencia_limpia} {num}"
-            else:
-                # Si no hay código de acabado, omitirlo completamente
-                identificador = f"{tipo} {material_code} {dimensiones} {tintas} {paquetes} {cliente_limpio} {referencia_limpia} {num}"
+            identificador_parts.append(paquetes)
+
+        # Añadir las partes comunes restantes
+        identificador_parts.extend([cliente_limpio, referencia_limpia, num])
         
-        # Convertir a mayúsculas
+        # Unir todas las partes con un espacio, filtrando las que puedan ser None o vacías
+        identificador = " ".join(filter(None, identificador_parts)) 
+        
+        # Convertir a mayúsculas (como en el código original)
         identificador_final = identificador.upper()
-        print(f"Identificador generado: {identificador_final}")
+        print(f"Partes finales del identificador antes de unir: {identificador_parts}")
+        print(f"Identificador generado: {identificador_final}") # Mantener el print del código original
+        print(f"--- FIN DEBUG IDENTIFICADOR ---")
         
         return identificador_final
     
@@ -156,7 +226,7 @@ class DBManager:
         - Convierte tipos si es necesario.
         """
         campos_booleanos = {'es_manga', 'existe_troquel', 'es_recotizacion', 'planchas_x_separado', 'ajustes_modificados_admin'}
-        campos_enteros = {'material_adhesivo_id', 'acabado_id', 'num_tintas', 'num_paquetes_rollos',
+        campos_enteros = {'material_adhesivo_id', 'acabado_id', 'tipo_foil_id', 'num_tintas', 'num_paquetes_rollos',
                          'tipo_grafado_id', 'estado_id', 'id_motivo_rechazo', 'numero_pistas',
                          'tipo_producto_id', 'forma_pago_id'}
         campos_numericos = {'valor_troquel', 'valor_plancha_separado', 'ancho', 'avance', 'altura_grafado'}
@@ -944,7 +1014,7 @@ class DBManager:
             if not response.data:
                 print("No se encontraron tipos de grafado para mangas (vía RPC)") # Mensaje actualizado
                 return []
-            
+             
             tipos_grafado = []
             for item in response.data:
                 try:
@@ -976,6 +1046,15 @@ class DBManager:
             print(f"Error al obtener tipos de grafado para mangas (RPC): {e}") # Mensaje actualizado
             traceback.print_exc()
             raise # O return [] si prefieres no detener la app
+
+    def get_tipos_foil(self) -> List[TipoFoil]:
+        """Obtiene la lista de tipos de foil disponibles."""
+        def _operation():
+            response = self.supabase.table('tipos_foil').select('*').execute()
+            if response.data:
+                return [TipoFoil.from_dict(item) for item in response.data]
+            return []
+        return self._retry_operation("get_tipos_foil", _operation)
 
     def get_tipos_grafado_id_by_name(self, grafado_name: str) -> Optional[int]:
         """Obtiene el ID de un tipo de grafado por su nombre."""
@@ -1592,6 +1671,9 @@ class DBManager:
                 'valor_material': valor_material,
                 'valor_acabado': valor_acabado,
                 'valor_troquel': valor_troquel,
+                # --- NUEVO: Añadir nombre de Tipo Foil ---
+                'tipo_foil_nombre': cotizacion.tipo_foil.nombre if cotizacion.tipo_foil else None,
+                # -----------------------------------------
                 # Información adicional de impresión
                 'ancho': calculos.get('ancho', 0) if calculos else 0,
                 'avance': calculos.get('avance', 0) if calculos else 0,
@@ -1856,6 +1938,7 @@ class DBManager:
                 'referencia_cliente_id': cotizacion.referencia_cliente_id,
                 'material_id': cotizacion.material_id,
                 'acabado_id': cotizacion.acabado_id,
+                'tipo_foil_id': cotizacion.tipo_foil_id,  # Agregado campo tipo_foil_id
                 'num_tintas': cotizacion.num_tintas,
                 'num_paquetes_rollos': cotizacion.num_paquetes_rollos,
                 'es_manga': cotizacion.es_manga,
@@ -2357,6 +2440,7 @@ class DBManager:
                 referencia_cliente_id=details.get('referencia_cliente_id'),
                 material_adhesivo_id=details.get('material_adhesivo_id'), # Guardamos el ID de la tabla combinada
                 acabado_id=details.get('acabado_id'),
+                tipo_foil_id=details.get('tipo_foil_id'),  # Agregado campo tipo_foil_id
                 tipo_producto_id=details.get('tipo_producto_id'),
                 forma_pago_id=details.get('forma_pago_id'),
                 tipo_grafado_id=details.get('tipo_grafado_id'),
@@ -2390,6 +2474,7 @@ class DBManager:
                 acabado=acabado_obj,
                 tipo_producto=tipo_prod_obj,
                 forma_pago=forma_pago_obj,
+                tipo_foil=TipoFoil(id=details.get('tipo_foil_id'), nombre=details.get('tipo_foil_nombre', 'N/A')) if details.get('tipo_foil_id') else None,  # Agregado objeto tipo_foil
                 # tipo_grafado=tipo_grafado_obj, # ID es suficiente
             )
             
@@ -3222,6 +3307,7 @@ class DBManager:
                 referencia_cliente_id=details.get('referencia_cliente_id'),
                 material_adhesivo_id=details.get('material_adhesivo_id'), # Guardamos el ID de la tabla combinada
                 acabado_id=details.get('acabado_id'),
+                tipo_foil_id=details.get('tipo_foil_id'),  # Agregado campo tipo_foil_id
                 tipo_producto_id=details.get('tipo_producto_id'),
                 forma_pago_id=details.get('forma_pago_id'),
                 tipo_grafado_id=details.get('tipo_grafado_id'),
@@ -3255,6 +3341,7 @@ class DBManager:
                 acabado=acabado_obj,
                 tipo_producto=tipo_prod_obj,
                 forma_pago=forma_pago_obj,
+                tipo_foil=TipoFoil(id=details.get('tipo_foil_id'), nombre=details.get('tipo_foil_nombre', 'N/A')) if details.get('tipo_foil_id') else None,  # Agregado objeto tipo_foil
                 # tipo_grafado=tipo_grafado_obj, # ID es suficiente
             )
             
@@ -3526,5 +3613,190 @@ class DBManager:
             # Captura errores inesperados en _operation
             print(f"Excepción final buscando referencia por detalles: {e}")
             return None
+
+    #@st.cache_data
+    
+    # --- MÉTODOS PARA GESTIÓN DE MATERIALES-ADHESIVOS Y ACABADOS ---
+    def get_materiales_adhesivos_table(self) -> List[Dict]:
+        """
+        Obtiene todas las combinaciones de material-adhesivo con sus valores.
+        
+        Returns:
+            Lista de diccionarios con la información completa de material-adhesivo.
+        """
+        try:
+            # Consulta con join para obtener nombres de material y adhesivo
+            response = (self.supabase.from_('material_adhesivo')
+                .select('id, material_id, adhesivo_id, valor, code, materiales(nombre), adhesivos(tipo)')
+                .execute())
+                
+            if not response.data:
+                return []
+                
+            # Transformar los resultados para que sean más fáciles de usar
+            result = []
+            for item in response.data:
+                # Crear un diccionario plano con toda la información
+                entry = {
+                    'id': item['id'],
+                    'material_id': item['material_id'],
+                    'adhesivo_id': item['adhesivo_id'],
+                    'valor': item['valor'],
+                    'code': item.get('code', ''),
+                    'material_nombre': item['materiales']['nombre'] if item.get('materiales') else 'Desconocido',
+                    'adhesivo_tipo': item['adhesivos']['tipo'] if item.get('adhesivos') else 'Desconocido'
+                }
+                result.append(entry)
+                
+            return result
+                
+        except Exception as e:
+            print(f"Error obteniendo tabla material_adhesivo: {e}")
+            logging.error(f"Error obteniendo tabla material_adhesivo: {e}", exc_info=True)
+            return []
+    
+    def actualizar_material_adhesivo_valor(self, material_adhesivo_id: int, nuevo_valor: float) -> bool:
+        """
+        Actualiza el valor de una combinación material-adhesivo específica.
+        
+        Args:
+            material_adhesivo_id: ID de la entrada en la tabla material_adhesivo.
+            nuevo_valor: Nuevo valor (precio) a establecer.
+            
+        Returns:
+            bool: True si la actualización fue exitosa, False en caso contrario.
+        """
+        try:
+            # Validar el ID y el nuevo valor
+            if material_adhesivo_id is None or material_adhesivo_id <= 0:
+                print(f"ID de material_adhesivo inválido: {material_adhesivo_id}")
+                return False
+                
+            if nuevo_valor is None or nuevo_valor < 0:
+                print(f"Valor inválido para material_adhesivo: {nuevo_valor}")
+                return False
+            
+            # El campo 'valor' en la base de datos es de tipo INTEGER, convertir a entero
+            nuevo_valor_int = int(round(float(nuevo_valor)))
+            
+            # Actualizar el valor con el valor entero
+            print(f"Actualizando material_adhesivo ID {material_adhesivo_id} con valor {nuevo_valor_int} (entero)")
+            response = self.supabase.table('material_adhesivo').update(
+                {"valor": nuevo_valor_int}
+            ).eq('id', material_adhesivo_id).execute()
+            
+            # Verificar la respuesta
+            if hasattr(response, 'error') and response.error:
+                print(f"Error actualizando material_adhesivo: {response.error}")
+                return False
+            
+            # Verificar que haya datos en la respuesta
+            if not response.data:
+                print("No se recibieron datos de respuesta en la actualización")
+                # En este caso, aún podríamos considerar éxito dependiendo del API
+                # Si el API retorna array vacío cuando no hay cambios
+                
+            print(f"Actualización exitosa para material_adhesivo ID {material_adhesivo_id}")
+            print(f"Respuesta de API: {response.data}")
+            return True
+                
+        except Exception as e:
+            print(f"Error en actualizar_material_adhesivo_valor: {e}")
+            logging.error(f"Error en actualizar_material_adhesivo_valor para ID {material_adhesivo_id}: {e}", exc_info=True)
+            traceback.print_exc()  # Añadir stacktrace para mejor diagnóstico
+            return False
+
+    def actualizar_acabado_valor(self, acabado_id: int, nuevo_valor: float) -> bool:
+        """
+        Actualiza el valor de un acabado específico.
+        
+        Args:
+            acabado_id: ID del acabado.
+            nuevo_valor: Nuevo valor (precio) a establecer.
+            
+        Returns:
+            bool: True si la actualización fue exitosa, False en caso contrario.
+        """
+        try:
+            # Validar el ID y el nuevo valor
+            if acabado_id is None or acabado_id <= 0:
+                print(f"ID de acabado inválido: {acabado_id}")
+                return False
+                
+            if nuevo_valor is None or nuevo_valor < 0:
+                print(f"Valor inválido para acabado: {nuevo_valor}")
+                return False
+            
+            # El campo 'valor' en la base de datos probablemente también es INTEGER
+            nuevo_valor_int = int(round(float(nuevo_valor)))
+            
+            # Actualizar el valor con el valor entero
+            print(f"Actualizando acabado ID {acabado_id} con valor {nuevo_valor_int} (entero)")
+            response = self.supabase.table('acabados').update(
+                {"valor": nuevo_valor_int}
+            ).eq('id', acabado_id).execute()
+            
+            # Verificar la respuesta
+            if hasattr(response, 'error') and response.error:
+                print(f"Error actualizando acabado: {response.error}")
+                return False
+            
+            # Verificar que haya datos en la respuesta
+            if not response.data:
+                print("No se recibieron datos de respuesta en la actualización")
+                # En este caso, aún podríamos considerar éxito dependiendo del API
+            
+            print(f"Actualización exitosa para acabado ID {acabado_id}")
+            print(f"Respuesta de API: {response.data}")
+            return True
+                
+        except Exception as e:
+            print(f"Error en actualizar_acabado_valor: {e}")
+            logging.error(f"Error en actualizar_acabado_valor para ID {acabado_id}: {e}", exc_info=True)
+            traceback.print_exc()  # Añadir stacktrace para mejor diagnóstico
+            return False
+    # --- FIN MÉTODOS PARA GESTIÓN DE MATERIALES-ADHESIVOS Y ACABADOS ---
+
+    # --- NUEVO MÉTODO ---
+    def get_material_adhesivo_entry(self, material_id: int, adhesivo_id: int) -> Optional[Dict]:
+        """
+        Obtiene la fila completa de la tabla material_adhesivo para una combinación específica.
+
+        Args:
+            material_id: ID del material.
+            adhesivo_id: ID del adhesivo.
+
+        Returns:
+            Un diccionario representando la fila encontrada (incluyendo su 'id') o None si no se encuentra o hay error.
+        """
+        def _operation():
+            if material_id is None or adhesivo_id is None:
+                print("Error: material_id y adhesivo_id son requeridos para get_material_adhesivo_entry")
+                return None
+            try:
+                print(f"Querying material_adhesivo for entry: material_id={material_id}, adhesivo_id={adhesivo_id}")
+                response = (self.supabase.table('material_adhesivo')
+                    .select('*') # Seleccionar todas las columnas, incluyendo el 'id' de esta tabla
+                    .eq('material_id', material_id)
+                    .eq('adhesivo_id', adhesivo_id)
+                    .limit(1)
+                    .execute())
+
+                if response.data:
+                    entry = response.data[0]
+                    print(f"Found material_adhesivo entry: {entry}")
+                    return entry
+                else:
+                    print("No matching material_adhesivo entry found.")
+                    return None # No combination found
+            except Exception as e:
+                print(f"Error fetching material_adhesivo entry: {e}")
+                logging.error(f"Error fetching material_adhesivo entry for material={material_id}, adhesivo={adhesivo_id}: {e}", exc_info=True)
+                return None # Return None on error to allow retry or indicate failure
+
+        # Retry the operation
+        result = self._retry_operation(f"fetching material_adhesivo entry ({material_id}/{adhesivo_id})", _operation)
+        return result
+    # --- FIN NUEVO MÉTODO ---
 
     #@st.cache_data

@@ -42,7 +42,7 @@ def _mostrar_escalas(default_escalas: str):
 
 def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict] = None):
     """Muestra los inputs de dimensiones (ancho, avance, pistas) y número de tintas."""
-    st.subheader("Dimensiones y Colores")
+    st.subheader("Dimensiones y Tintas")
     col1, col2 = st.columns(2)
     
     # Obtener valores por defecto desde datos cargados o session state o hardcoded
@@ -59,7 +59,7 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
     
     with col1:
         # El valor se guarda en st.session_state.ancho via key
-        st.number_input("Ancho (mm)", min_value=1.00, format="%.2f", key="ancho", value=float(default_ancho))
+        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, format="%.2f", key="ancho", value=float(default_ancho))
         # El valor se guarda en st.session_state.avance via key
         st.number_input("Avance (mm)", min_value=1.00, format="%.2f", key="avance", value=float(default_avance))
     with col2:
@@ -110,9 +110,9 @@ def _mostrar_material(es_manga: bool, materiales: List[Any], datos_cargados: Opt
     st.subheader("Material")
 
     if es_manga:
-        materiales_filtrados = [m for m in materiales if m.id in [13, 14]] 
+        materiales_filtrados = [m for m in materiales if m.id in [13, 14]]  # Solo PVC y PETG para mangas
     else:
-        materiales_filtrados = materiales
+        materiales_filtrados = [m for m in materiales if m.id not in [13, 14]]  # Excluir PVC y PETG para etiquetas
 
     previous_material_id = st.session_state.get("material_id", None)
     selected_material_id = previous_material_id 
@@ -364,11 +364,11 @@ def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabad
     """
     st.subheader("Acabados y Empaque")
     col1, col2 = st.columns(2)
-    # No acceder a st.session_state.db aquí
 
     # Valores por defecto
     default_acabado_id = datos_cargados.get('acabado_id', st.session_state.get("acabado_seleccionado_id")) if datos_cargados else st.session_state.get("acabado_seleccionado_id")
     default_num_paquetes = datos_cargados.get('num_paquetes_rollos', st.session_state.get("num_paquetes", 1000)) if datos_cargados else st.session_state.get("num_paquetes", 1000)
+    default_tipo_foil_id = datos_cargados.get('tipo_foil_id', st.session_state.get("tipo_foil_id")) if datos_cargados else st.session_state.get("tipo_foil_id")
 
     with col1:
         if not es_manga:
@@ -379,17 +379,47 @@ def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabad
             except StopIteration:
                 index_acabado = 0
                 
-            st.selectbox(
+            acabado_seleccionado = st.selectbox(
                 "Acabado",
                 options=acabados,
                 format_func=lambda ac: ac.nombre,
                 key="acabado_select",
                 index=index_acabado
             )
+
+            # Obtener el ID del acabado seleccionado
+            acabado_id = acabado_seleccionado.id if acabado_seleccionado else None
+            
+            # Si el acabado seleccionado es 5 o 6, mostrar selector de tipo de foil
+            if acabado_id in [5, 6]:
+                # Obtener tipos de foil de la base de datos
+                db = st.session_state.db
+                tipos_foil = db.get_tipos_foil()
+                
+                try:
+                    index_foil = next(i for i, tf in enumerate(tipos_foil) if tf.id == default_tipo_foil_id)
+                except StopIteration:
+                    index_foil = 0
+
+                tipo_foil_seleccionado = st.selectbox(
+                    "Tipo de Foil",
+                    options=tipos_foil,
+                    format_func=lambda tf: tf.nombre,
+                    key="tipo_foil_select",
+                    index=index_foil
+                )
+                
+                if tipo_foil_seleccionado:
+                    st.session_state["tipo_foil_id"] = tipo_foil_seleccionado.id
+                else:
+                    st.session_state["tipo_foil_id"] = None
+            else:
+                # Limpiar el tipo de foil si no es acabado 5 o 6
+                st.session_state["tipo_foil_id"] = None
         else:
             # Para mangas, no mostrar acabado, usar espacio para equilibrio
             st.write("Sin acabado (manga)")
-
+            st.session_state["tipo_foil_id"] = None
 
     with col2:
         # --- Empaque --- 
@@ -484,8 +514,6 @@ def mostrar_secciones_internas_formulario(
         datos_cargados: Diccionario con datos precargados para modo edición.
         default_escalas (str): String formateado para el valor inicial del input de escalas.
     """
-    st.markdown("--- Detalles de la Cotización ---")
-
     # 1. Escalas (Pasar el valor inicial)
     _mostrar_escalas(default_escalas=default_escalas)
     st.divider()

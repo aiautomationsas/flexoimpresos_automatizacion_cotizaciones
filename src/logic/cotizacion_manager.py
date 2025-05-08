@@ -60,6 +60,7 @@ class CotizacionManager:
             # cotizacion.material_id = kwargs.get('material_id') # Ya no se usa material_id directamente
             cotizacion.material_adhesivo_id = kwargs.get('material_adhesivo_id') # Usar el ID de material_adhesivo
             cotizacion.acabado_id = kwargs.get('acabado_id')
+            cotizacion.tipo_foil_id = kwargs.get('tipo_foil_id')  # Agregado campo tipo_foil_id
             cotizacion.num_tintas = int(kwargs.get('num_tintas', 0))
             cotizacion.num_paquetes_rollos = int(kwargs.get('num_paquetes_rollos', 0))
             cotizacion.es_manga = bool(kwargs.get('es_manga', False))
@@ -131,15 +132,15 @@ class CotizacionManager:
         cotizacion = cotizacion_existente # Trabajar sobre la instancia existente
         
         try:
-            # Actualizar campos básicos desde kwargs si están presentes
-            # Usar .get(key, cotizacion.existing_value) para mantener valor anterior si no se provee
+            # Actualizar campos básicos desde kwargs, manteniendo valores existentes como default
             cotizacion.material_adhesivo_id = kwargs.get('material_adhesivo_id', cotizacion.material_adhesivo_id)
             cotizacion.acabado_id = kwargs.get('acabado_id', cotizacion.acabado_id)
+            cotizacion.tipo_foil_id = kwargs.get('tipo_foil_id', cotizacion.tipo_foil_id)  # Agregado campo tipo_foil_id
             cotizacion.num_tintas = int(kwargs.get('num_tintas', cotizacion.num_tintas))
             cotizacion.num_paquetes_rollos = int(kwargs.get('num_paquetes_rollos', cotizacion.num_paquetes_rollos))
             cotizacion.es_manga = bool(kwargs.get('es_manga', cotizacion.es_manga))
-            cotizacion.valor_troquel = Decimal(str(kwargs.get('valor_troquel', cotizacion.valor_troquel)))
-            cotizacion.valor_plancha_separado = Decimal(str(kwargs.get('valor_plancha_separado'))) if kwargs.get('valor_plancha_separado') is not None else cotizacion.valor_plancha_separado
+            cotizacion.valor_troquel = Decimal(str(kwargs.get('valor_troquel', cotizacion.valor_troquel or 0.0)))
+            cotizacion.valor_plancha_separado = Decimal(str(kwargs.get('valor_plancha_separado', cotizacion.valor_plancha_separado))) if kwargs.get('valor_plancha_separado') is not None else cotizacion.valor_plancha_separado
             cotizacion.planchas_x_separado = bool(kwargs.get('planchas_x_separado', cotizacion.planchas_x_separado))
             cotizacion.existe_troquel = bool(kwargs.get('existe_troquel', cotizacion.existe_troquel))
             cotizacion.numero_pistas = int(kwargs.get('numero_pistas', cotizacion.numero_pistas))
@@ -147,9 +148,8 @@ class CotizacionManager:
             cotizacion.ancho = float(kwargs.get('ancho', cotizacion.ancho))
             cotizacion.avance = float(kwargs.get('avance', cotizacion.avance))
             cotizacion.forma_pago_id = kwargs.get('forma_pago_id', cotizacion.forma_pago_id)
-            cotizacion.altura_grafado = float(kwargs.get('altura_grafado')) if kwargs.get('altura_grafado') is not None else cotizacion.altura_grafado
-            cotizacion.ultima_modificacion_inputs = datetime.now() # Siempre actualizar timestamp
-            # cotizacion.modificado_por = st.session_state.get('user_id') # Actualizar quién modificó
+            cotizacion.altura_grafado = float(kwargs.get('altura_grafado', cotizacion.altura_grafado)) if kwargs.get('altura_grafado') is not None else cotizacion.altura_grafado
+            cotizacion.ultima_modificacion_inputs = datetime.now()
             cotizacion.modificado_por = kwargs.get('modificado_por', st.session_state.get('user_id')) # Permitir pasar explícitamente
 
             # Campos que usualmente no se editan directamente aquí 
@@ -206,8 +206,32 @@ class CotizacionManager:
         Ahora incluye un flag para saber si admin aplicó ajustes durante el cálculo.
         """
         print("\n=== Iniciando guardado de NUEVA cotización ===")
+        # *** DEBUG: Imprimir valores clave del modelo recibido ***
+        print(f"---> DEBUG MANAGER: Modelo Recibido - Acabado ID: {cotizacion_model.acabado_id}, Foil ID: {cotizacion_model.tipo_foil_id}")
+        # *** FIN DEBUG ***
         cotizacion_id = None # Inicializar ID
         try:
+            # *** INICIO VALIDACIÓN ACABADO/FOIL ***
+            acabado_id_check = cotizacion_model.acabado_id
+            tipo_foil_id_check = cotizacion_model.tipo_foil_id # Ya debería ser int o None por preparar_nueva/actualizar
+
+            print(f"Validando combinación Acabado ID: {acabado_id_check}, Foil ID: {tipo_foil_id_check}")
+
+            if acabado_id_check in (5, 6): # Acabados que requieren foil
+                if tipo_foil_id_check is None or tipo_foil_id_check <= 0: # Asumiendo que los IDs de foil son > 0
+                    error_msg = f"❌ Se requiere un Tipo de Foil válido cuando el acabado es {acabado_id_check}."
+                    print(error_msg)
+                    return False, error_msg, None # Devolver False, mensaje de error, y None para cotizacion_id
+            elif tipo_foil_id_check is not None: # Acabados que NO deben tener foil
+                 error_msg = f"❌ No se debe seleccionar un Tipo de Foil cuando el acabado es {acabado_id_check}."
+                 print(error_msg)
+                 # También limpiar el ID en el modelo por si acaso antes de continuar (opcional, mejor fallar)
+                 # cotizacion_model.tipo_foil_id = None
+                 return False, error_msg, None # Devolver False, mensaje de error, y None para cotizacion_id
+            
+            print("Combinación Acabado/Foil válida.")
+            # *** FIN VALIDACIÓN ACABADO/FOIL ***
+
             # 1. Obtener o crear la referencia
             referencia_id = self._obtener_o_crear_referencia(cliente_id, referencia_descripcion, comercial_id)
             if referencia_id is None:
@@ -231,6 +255,17 @@ class CotizacionManager:
             datos_bd.pop('forma_pago', None)
             datos_bd.pop('perfil_comercial_info', None) # Eliminar este campo si existe
             datos_bd.pop('tipo_grafado', None) # Eliminar el nombre, ya tenemos el ID
+            
+            # Asegurar que tipo_foil_id sea entero o None
+            if 'tipo_foil_id' in datos_bd:
+                if datos_bd['tipo_foil_id'] == '' or datos_bd['tipo_foil_id'] is None:
+                    datos_bd['tipo_foil_id'] = None
+                else:
+                    try:
+                        datos_bd['tipo_foil_id'] = int(datos_bd['tipo_foil_id'])
+                    except ValueError:
+                        print(f"Advertencia: No se pudo convertir tipo_foil_id '{datos_bd['tipo_foil_id']}' a entero. Se establecerá a None.")
+                        datos_bd['tipo_foil_id'] = None
             
             # CORRECCIÓN: Asegurar que se usa 'material_adhesivo_id' si existe en el modelo
             # y que se obtiene del modelo correcto

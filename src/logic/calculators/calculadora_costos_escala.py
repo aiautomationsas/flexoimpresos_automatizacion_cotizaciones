@@ -263,15 +263,33 @@ Cálculo:
             else:
                 MO_y_Maq = MO_Troquelado * t(h)
         """
+        # Debug adicional para rastrear parámetros
+        print(f"\n=== DEBUG CÁLCULO MO_Y_MAQ ===")
+        print(f"Tiempo horas: {tiempo_horas:.2f}")
+        print(f"Número tintas: {num_tintas}")
+        print(f"Es manga: {es_manga}")
+        
         if not es_manga:
             # Cálculo para etiquetas
+            if num_tintas > 0:
+                # Si hay tintas, usar MO_Impresion
+                base_mo = datos.mo_impresion
+                resultado = base_mo if tiempo_horas < 1 else base_mo * tiempo_horas
+                print(f"Etiqueta con tintas > 0: base_mo={base_mo:.2f}, resultado={resultado:.2f}")
+            else:
+                # Si no hay tintas (tintas = 0), usar MO_Troquelado
+                base_mo = datos.mo_troquelado
+                resultado = base_mo if tiempo_horas < 1 else base_mo * tiempo_horas
+                print(f"Etiqueta con tintas = 0: base_mo={base_mo:.2f}, resultado={resultado:.2f}")
+            return resultado
+        else:
+            # Cálculo para mangas
+            # Se requiere agregar MO_SELLADO y MO_CORTE
             base_mo = datos.mo_impresion if num_tintas > 0 else datos.mo_troquelado
-            return base_mo if tiempo_horas < 1 else base_mo * tiempo_horas
-        
-        # Cálculo para mangas (mantener lógica existente)
-        base_mo = datos.mo_impresion if num_tintas > 0 else datos.mo_troquelado
-        total_mo = base_mo + MO_SELLADO + MO_CORTE
-        return total_mo if tiempo_horas < 1 else total_mo * tiempo_horas
+            total_mo = base_mo + MO_SELLADO + MO_CORTE
+            resultado = total_mo if tiempo_horas < 1 else total_mo * tiempo_horas
+            print(f"Manga: base_mo={base_mo:.2f}, + sellado/corte -> total_mo={total_mo:.2f}, resultado={resultado:.2f}")
+            return resultado
 
     def calcular_tintas(self, escala: int, num_tintas: int, area_etiqueta: float, datos: DatosEscala) -> float:
         if area_etiqueta <= 0 or num_tintas <= 0:
@@ -750,11 +768,12 @@ Cálculo:
         valor_material: float,
         valor_acabado: float,
         es_manga: bool = False,
-        tipo_grafado_id: Optional[int] = None # Added tipo_grafado_id here
+        tipo_grafado_id: Optional[int] = None, # Added tipo_grafado_id here
+        acabado_id: Optional[int] = None # Añadido acabado_id
     ) -> List[Dict]:
         """
-        Calcula los costos para cada escala especificada.
-
+        Calcula los costos por escala para un producto.
+        
         Args:
             datos (DatosEscala): Objeto con los parámetros de la escala (ancho, avance, pistas, etc.)
             num_tintas (int): Número de tintas (0 a 7)
@@ -763,6 +782,8 @@ Cálculo:
             valor_material (float): Precio por mm² del material
             valor_acabado (float): Precio por mm² del acabado
             es_manga (bool): True si es manga, False si es etiqueta
+            tipo_grafado_id (Optional[int]): ID del tipo de grafado
+            acabado_id (Optional[int]): ID del acabado seleccionado
 
         Returns:
             List[Dict]: Lista de resultados por cada escala, con los siguientes campos:
@@ -785,7 +806,21 @@ Cálculo:
             >>> print(resultados[0]['valor_unidad'])
         """
         try:
-            self._validar_inputs(datos, num_tintas, es_manga)
+            # Simplemente mantenemos el valor de tintas que viene desde afuera
+            # IMPORTANTE: Asumimos que el ajuste por acabados especiales YA FUE REALIZADO
+            # en app_calculadora_costos.py
+            num_tintas_original = num_tintas  # Para registro y debugging
+            num_tintas_interno = num_tintas   # Usar el valor que ya viene ajustado si era necesario
+            
+            print(f"\n=== INFORMACIÓN DE TINTAS ===")
+            print(f"- Tintas recibidas: {num_tintas}")
+            print(f"- Acabado ID: {acabado_id}")
+            print(f"- Es manga: {es_manga}")
+            print(f"- NO se realiza ajuste interno de tintas (debe venir ya ajustado desde app_calculadora_costos.py)")
+            
+            # Validar entradas con el número de tintas recibido
+            self._validar_inputs(datos, num_tintas_interno, es_manga)
+            
             # Calcular Q3/S3 una sola vez
             q3_result = self.calcular_q3(datos.ancho, datos.pistas, es_manga)
             q3 = q3_result['q3']
@@ -793,31 +828,32 @@ Cálculo:
 
             # Calcular valor de plancha y troquel si no se proporcionan
             if valor_plancha is None:
-                valor_plancha = self.calcular_valor_plancha(datos, num_tintas, es_manga, q3, s3)
+                valor_plancha = self.calcular_valor_plancha(datos, num_tintas_interno, es_manga, q3, s3)
             if valor_troquel is None:
                 # Pass tipo_grafado_id to the internal method call
                 valor_troquel = self.calcular_valor_troquel(datos, es_manga, tipo_grafado_id) # Pass the ID
             # Ensure they are floats after potential calculation or if passed as 0 initially
-            valor_plancha = float(valor_plancha) if valor_plancha is not None else 0.0
+           
             valor_troquel = float(valor_troquel) if valor_troquel is not None else 0.0
 
             # Calcular área de etiqueta si no está establecida
             if datos.area_etiqueta <= 0:
-                calculo_area = self.calcular_area_etiqueta(datos, num_tintas, es_manga, q3, s3)
+                calculo_area = self.calcular_area_etiqueta(datos, num_tintas_interno, es_manga, q3, s3)
                 if 'error' in calculo_area:
                     raise ValueError(f"Error calculando área: {calculo_area['error']}")
                 datos.set_area_etiqueta(calculo_area['area'])
 
             # Debug detallado de datos de entrada
             self._debug_datos_entrada(
-                datos, num_tintas, valor_plancha, valor_troquel, valor_material, valor_acabado, es_manga
+                datos, num_tintas_interno, valor_plancha, valor_troquel, valor_material, valor_acabado, es_manga
             )
             
             resultados = []
             porcentaje_desperdicio = datos.porcentaje_desperdicio / 100
             print("\n=== INICIO CÁLCULO DE COSTOS POR ESCALA ===")
             print(f"Datos de entrada:")
-            print(f"- Número de tintas: {num_tintas}")
+            print(f"- Número de tintas: {num_tintas_interno} (ya incluye ajustes si los había)")
+            print(f"- Acabado ID: {acabado_id}")
             print(f"- Valor plancha: ${valor_plancha:.2f}")
             print(f"- Valor troquel: ${valor_troquel:.2f}")
             print(f"- Valor material: ${valor_material:.6f}/mm²")
@@ -833,22 +869,22 @@ Cálculo:
                 print(f"Metros lineales: {metros:.2f}")
                 tiempo_horas = self.calcular_tiempo_horas(metros, datos)
                 print(f"Tiempo en horas: {tiempo_horas:.2f}")
-                montaje = self.calcular_montaje(num_tintas, datos)
+                montaje = self.calcular_montaje(num_tintas_interno, datos)
                 print(f"Montaje: ${montaje:.2f}")
-                mo_y_maq = self.calcular_mo_y_maq(tiempo_horas, num_tintas, datos, es_manga)
+                mo_y_maq = self.calcular_mo_y_maq(tiempo_horas, num_tintas_interno, datos, es_manga)
                 print(f"MO y Maq: ${mo_y_maq:.2f}")
                 print(f"Área etiqueta para cálculo de tintas: {datos.area_etiqueta:.2f} mm²")
-                tintas = self.calcular_tintas(escala, num_tintas, datos.area_etiqueta, datos)
+                tintas = self.calcular_tintas(escala, num_tintas_interno, datos.area_etiqueta, datos)
                 print(f"Tintas: ${tintas:.2f}")
                 print(f"Área etiqueta para cálculo de papel_lam: {datos.area_etiqueta:.2f} mm²")
                 papel_lam = self.calcular_papel_lam(escala, datos.area_etiqueta, valor_material, valor_acabado)
                 print(f"Papel/lam: ${papel_lam:.2f}")
                 desperdicio_porcentaje = papel_lam * porcentaje_desperdicio
                 print(f"Desperdicio porcentaje ({porcentaje_desperdicio * 100}%): ${desperdicio_porcentaje:.2f}")
-                if num_tintas > 0:
+                if num_tintas_interno > 0:
                     resultado_desperdicio = self.calcular_desperdicio_tintas(
                         dados=datos,
-                        num_tintas=num_tintas,
+                        num_tintas=num_tintas_interno,
                         valor_material=valor_material,
                         es_manga=es_manga
                     )
@@ -878,7 +914,8 @@ Cálculo:
                     'desperdicio_tintas': desperdicio_tintas,
                     'desperdicio_porcentaje': desperdicio_porcentaje,
                     'desperdicio_total': desperdicio_total,
-                    'num_tintas': num_tintas,
+                    'num_tintas': num_tintas_original,  # Guardar número original de tintas
+                    'num_tintas_interno': num_tintas_interno,  # Guardar número ajustado de tintas
                     'ancho': datos.ancho,
                     'avance': datos.avance,
                     'porcentaje_desperdicio': porcentaje_desperdicio

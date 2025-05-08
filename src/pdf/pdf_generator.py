@@ -233,14 +233,46 @@ class CotizacionPDF(BasePDFGenerator):
                 adhesivo_display = adhesivo.upper() if adhesivo != 'No aplica' else adhesivo
                 
                 es_manga = datos_cotizacion.get('es_manga')
+                # Corregir cómo se obtiene acabado_id y tipo_foil_nombre
+                acabado_data = datos_cotizacion.get('acabado', {}) # Obtener el diccionario de acabado
+                acabado_id = acabado_data.get('id') # Obtener el ID desde el diccionario de acabado
+                acabado_nombre_original = acabado_data.get('nombre', 'N/A') # Obtener el nombre desde el diccionario de acabado
+                tipo_foil_nombre = datos_cotizacion.get('tipo_foil_nombre') # Este ya se obtiene directamente
+
+                # DEBUG PDF GENERATOR
+                print(f"--- DEBUG PDF gen (Revisado) ---")
+                print(f"es_manga: {es_manga}")
+                print(f"acabado_id (from acabado_data.get('id')): {acabado_id}")
+                print(f"acabado_nombre_original (from acabado_data.get('nombre')): {acabado_nombre_original}")
+                print(f"tipo_foil_nombre: {tipo_foil_nombre}")
+                # --- FIN DEBUG ---
+
                 if not es_manga:
                     elements.append(Paragraph(f"Adhesivo: {adhesivo_display}", self.styles['Normal']))
                     
-                    acabado_nombre = datos_cotizacion.get('acabado', {}).get('nombre', 'N/A')
-                    elements.append(Paragraph(f"Acabado: {acabado_nombre}", self.styles['Normal']))
+                    # acabado_nombre_original ya está definido arriba
+                    acabado_a_mostrar = acabado_nombre_original
+                    # Requisito 1: Modificar nombre de acabado si es Foil
+                    if acabado_id in [5, 6]: 
+                        print(f"  Processing acabado FOIL. Original: '{acabado_nombre_original}', ID: {acabado_id}")
+                        if "LAMINADO BRILLANTE + FOIL" in acabado_nombre_original.upper():
+                            acabado_a_mostrar = "LAMINADO BRILLANTE"
+                            print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
+                        elif "LAMINADO MATE + FOIL" in acabado_nombre_original.upper():
+                            acabado_a_mostrar = "LAMINADO MATE"
+                            print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
+                        else:
+                            print(f"    Acabado ID is {acabado_id} but original name '{acabado_nombre_original}' does not match expected FOIL patterns.")
+                    elements.append(Paragraph(f"Acabado: {acabado_a_mostrar}", self.styles['Normal']))
                 
-                num_tintas = datos_cotizacion.get('num_tintas', 'N/A')
-                elements.append(Paragraph(f"Tintas: {num_tintas}", self.styles['Normal']))
+                num_tintas_original = datos_cotizacion.get('num_tintas', 0)
+                texto_tintas = f"Tintas: {num_tintas_original}"
+                print(f"  Processing tintas. num_tintas_original: {num_tintas_original}, es_manga: {es_manga}, acabado_id: {acabado_id}, tipo_foil_nombre: {tipo_foil_nombre}")
+                if not es_manga and acabado_id in [5, 6] and tipo_foil_nombre:
+                    texto_tintas = f"Tintas: {num_tintas_original} + COLD FOIL {tipo_foil_nombre.upper()}"
+                    print(f"    Set texto_tintas to: {texto_tintas}")
+                elements.append(Paragraph(texto_tintas, self.styles['Normal']))
+                print(f"--- END DEBUG PDF gen (Revisado) ---")
                 
                 num_rollos = datos_cotizacion.get('num_rollos', 0)
                 # Formatear con punto como separador de miles 

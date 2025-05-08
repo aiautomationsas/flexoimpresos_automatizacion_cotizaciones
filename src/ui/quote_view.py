@@ -43,6 +43,12 @@ def show_quote_header(cotizacion_data: Dict) -> None:
             st.write(f"**Material:** {cotizacion_data['material']['nombre']}")
             if not cotizacion_data.get('es_manga'):
                 st.write(f"**Acabado:** {cotizacion_data['acabado']['nombre']}")
+                # --- INICIO: Mostrar Tipo de Foil --- 
+                tipo_foil_nombre = cotizacion_data.get('tipo_foil_nombre')
+                acabado_id = cotizacion_data.get('acabado_id')
+                if acabado_id in [5, 6] and tipo_foil_nombre:
+                    st.write(f"**Tipo de Foil:** {tipo_foil_nombre}")
+                # --- FIN: Mostrar Tipo de Foil ---
         
         with col3:
             st.markdown("### Información de Cotización")

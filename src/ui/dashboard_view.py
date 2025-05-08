@@ -14,7 +14,7 @@ COLOR_MAP_ESTADO = {
     'En Negociación': '#5DADE2',
     'Aprobada': '#2ecc71',
     'Descartada': '#e74c3c',
-    'Anulada': '#e74c3c',
+    'Anulada': '#FFA500',
     'Desconocido': '#95a5a6' # Color para estados no mapeados o por ID
 }
 
@@ -201,22 +201,17 @@ def show_dashboard():
     negociacion = len(df_filtrado[df_filtrado['estado_nombre'] == 'En Negociación'])
     anuladas = len(df_filtrado[df_filtrado['estado_nombre'] == 'Anulada'])
 
-    tasa_aprobacion_str = f"{(aprobadas / total_cotizaciones * 100):.1f}%" if total_cotizaciones > 0 else "0.0%"
-    tasa_descarte_str = f"{(descartadas / total_cotizaciones * 100):.1f}%" if total_cotizaciones > 0 else "0.0%"
-    tasa_negociacion_str = f"{(negociacion / total_cotizaciones * 100):.1f}%" if total_cotizaciones > 0 else "0.0%"
-    tasa_anulada_str = f"{(anuladas / total_cotizaciones * 100):.1f}%" if total_cotizaciones > 0 else "0.0%"
-
     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
     with col_m1:
         st.metric("Total Cotizaciones", total_cotizaciones)
     with col_m2:
-        st.metric("Aprobadas", aprobadas, delta=tasa_aprobacion_str)
+        st.metric("Aprobadas", aprobadas)
     with col_m3:
-        st.metric("Descartadas", descartadas, delta=tasa_descarte_str, delta_color="inverse")
+        st.metric("Descartadas", descartadas)
     with col_m4:
-        st.metric("En Negociación", negociacion, delta=tasa_negociacion_str)
+        st.metric("En Negociación", negociacion)
     with col_m5:
-        st.metric("Anuladas", anuladas, delta=tasa_anulada_str, delta_color="off")
+        st.metric("Anuladas", anuladas)
     # -------------------------------------
     st.divider() # Añadir separador
 
@@ -306,9 +301,6 @@ def show_dashboard():
         if 'fecha_creacion' in df_display.columns:
             sort_col = 'fecha_creacion'
         else:
-            # Si entramos aquí, es porque 'fecha_creacion' no está en df_display.
-            # El bloque if externo 'if columnas_existentes:' ya aseguró que
-            # columnas_existentes está definida y no está vacía.
             sort_col = columnas_existentes[0]
 
         if columns_to_show_in_table and sort_col and sort_col in df_for_streamlit_table.columns:
@@ -603,11 +595,10 @@ def show_dashboard():
                 st.metric(
                     "Tasa Descarte General",
                     f"{tasa_descarte_gen:.1f}%",
-                    delta_color="inverse",
                     help="% de cotizaciones descartadas sobre el total filtrado."
                 )
             else:
-                st.metric("Tasa Descarte General", "0.0%", delta_color="inverse")
+                st.metric("Tasa Descarte General", "0.0%")
 
         with col_rech2:
             # Cliente con más descartes

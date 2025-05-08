@@ -39,7 +39,7 @@ CANTIDAD_TINTA_ESTANDAR = 100  # Cantidad estándar de tinta para cálculos
 # Constantes para mano de obra
 MO_MONTAJE = 5000.0  # Valor fijo de mano de obra para montaje
 MO_IMPRESION = 50000.0  # Valor fijo de mano de obra para impresión
-MO_TROQUELADO = 50000.0  # Valor fijo de mano de obra para troquelado
+MO_TROQUELADO = 20000.0  # Valor fijo de mano de obra para troquelado
 MO_SELLADO = 50000.0  # Valor fijo de mano de obra para sellado
 MO_CORTE = 50000.0  # Valor fijo de mano de obra para corte
 

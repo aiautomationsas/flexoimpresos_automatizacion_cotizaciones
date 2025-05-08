@@ -119,6 +119,20 @@ class TipoGrafado:
         )
 
 @dataclass
+class TipoFoil:
+    """Representa un tipo de foil en el sistema."""
+    id: int
+    nombre: str
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'TipoFoil':
+        """Crea una instancia de TipoFoil desde un diccionario."""
+        return TipoFoil(
+            id=data['id'],
+            nombre=data['nombre']
+        )
+
+@dataclass
 class Material:
     id: Optional[int] = None
     nombre: str = ''
@@ -316,6 +330,7 @@ class Cotizacion:
     referencia_cliente_id: Optional[int] = None  # Relación principal con referencias_cliente
     material_adhesivo_id: Optional[int] = None
     acabado_id: Optional[int] = None
+    tipo_foil_id: Optional[int] = None  # Nuevo campo para tipo de foil
     num_tintas: Optional[int] = None
     num_paquetes_rollos: Optional[int] = None
     numero_cotizacion: Optional[int] = None
@@ -351,6 +366,7 @@ class Cotizacion:
     tipo_producto: Optional[TipoProducto] = None
     forma_pago: Optional[FormaPago] = None
     politicas_entrega: Optional[PoliticasEntrega] = None
+    tipo_foil: Optional[TipoFoil] = None  # Nueva relación con TipoFoil
     # --- NUEVO: Campo para perfil --- 
     perfil_comercial_info: Optional[Dict] = None # Guardará {'id': UUID, 'nombre': str, ...}
     # --- FIN NUEVO ---
@@ -361,6 +377,7 @@ class Cotizacion:
         referencia_cliente_id=None,
         material_adhesivo_id=None,
         acabado_id=None,
+        tipo_foil_id=None,  # Nuevo parámetro
         num_tintas=None,
         num_paquetes_rollos=None,
         numero_cotizacion=None,
@@ -395,6 +412,7 @@ class Cotizacion:
         tipo_producto=None,
         forma_pago=None,
         politicas_entrega=None,
+        tipo_foil=None,  # Nueva relación
         # --- NUEVO: Añadir campo para perfil --- 
         perfil_comercial_info=None,
         # --- FIN NUEVO ---
@@ -403,6 +421,7 @@ class Cotizacion:
         self.referencia_cliente_id = referencia_cliente_id
         self.material_adhesivo_id = material_adhesivo_id
         self.acabado_id = acabado_id
+        self.tipo_foil_id = tipo_foil_id  # Nuevo campo
         self.num_tintas = num_tintas
         self.num_paquetes_rollos = num_paquetes_rollos
         self.numero_cotizacion = numero_cotizacion
@@ -437,6 +456,7 @@ class Cotizacion:
         self.tipo_producto = tipo_producto
         self.forma_pago = forma_pago
         self.politicas_entrega = politicas_entrega
+        self.tipo_foil = tipo_foil  # Nueva relación
         # --- NUEVO: Guardar perfil --- 
         self.perfil_comercial_info = perfil_comercial_info
         # --- FIN NUEVO ---

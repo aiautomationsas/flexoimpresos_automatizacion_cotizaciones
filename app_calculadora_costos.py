@@ -55,20 +55,9 @@ from src.ui.calculator.product_section import (_mostrar_material, _mostrar_adhes
 from src.ui.manage_quotes_view import show_manage_quotes
 from src.ui.manage_clients_view import show_manage_clients, show_create_client
 from src.ui.dashboard_view import show_dashboard
-# ------------------------------------------------
-# --- INICIO CAMBIO ---
-# ... (resto de importaciones sin cambios) ...
+# --- NUEVO: Importar vista de gestión de valores ---
+from src.ui.manage_values_view import show_manage_values
 
-# Configuración de página
-# --- ELIMINAR ESTE BLOQUE COMENTADO ---
-# # --- ELIMINAR ESTE BLOQUE DUPLICADO ---
-# # st.set_page_config(
-# #     page_title="Sistema de Cotización - Flexo Impresos",
-# #     page_icon="🏭",
-# #     layout="wide"
-# # )
-# # -------------------------------------
-# -------------------------------------
 
 # Cargar CSS
 try:
@@ -169,6 +158,10 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         Optional[Dict[str, Any]]: Resultados del cálculo o None si hay error
     """
     try:
+        # Debug inicial para rastrear flujo del cálculo
+        print("\n======= INICIO DEL PROCESO DE CÁLCULO =======")
+        print(f"Datos recibidos: es_manga={form_data.get('es_manga')}, num_tintas={form_data.get('num_tintas')}, acabado_id={form_data.get('acabado_id')}")
+        
         # Validar datos necesarios
         required_fields = ['ancho', 'avance', 'pistas', 'num_tintas', 'num_paquetes', 
                          'material_id', 'es_manga', 'escalas']
@@ -334,6 +327,32 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         #     return None
         # datos_escala.set_area_etiqueta(area_result['area'])
 
+        # ---- AJUSTAR NÚMERO DE TINTAS SI EL ACABADO LO REQUIERE ----
+        num_tintas = form_data['num_tintas']  # Número original seleccionado por el usuario
+        acabado_id = form_data.get('acabado_id')
+        es_manga = form_data['es_manga']
+        
+        # Ajustar tintas para acabados especiales
+        num_tintas_ajustado = num_tintas
+        if not es_manga and acabado_id in [3, 5, 6]:
+            num_tintas_ajustado = num_tintas + 1
+            print(f"\n=== AJUSTE DE TINTAS POR ACABADO ESPECIAL ===")
+            print(f"Tintas originales seleccionadas: {num_tintas}")
+            print(f"Acabado ID {acabado_id} requiere 1 tinta adicional")
+            print(f"Tintas ajustadas para cálculos: {num_tintas_ajustado}")
+            
+            # Validar que no se exceda el límite
+            if num_tintas_ajustado > 7:
+                st.error(f"El acabado seleccionado requiere 1 tinta adicional en el cálculo. "
+                         f"Con las {num_tintas} tintas seleccionadas, se excede el máximo de 7 tintas "
+                         f"permitidas. Para este acabado, seleccione máximo 6 tintas.")
+                return None
+        else:
+            print(f"\n=== SIN AJUSTE DE TINTAS ===")
+            print(f"Tintas seleccionadas: {num_tintas} (sin ajuste)")
+            
+        # A partir de este punto, usamos num_tintas_ajustado para todos los cálculos internos
+        
         # --- GUARDAR DATOS DE CALCULO PARA GUARDADO POSTERIOR --- 
         # Guardamos los valores finales que se usaron en el cálculo
         # para pasarlos luego a guardar_calculos_escala
@@ -341,6 +360,8 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         # Calcular valor_troquel por defecto (si no ajustado) usando mejor_opcion
         valor_troquel_defecto = 0.0
         if not st.session_state.get('ajustar_troquel'):
+            # El troquel no depende directamente del número de tintas, pero lo agregamos aquí
+            # para mantener la coherencia en el código
             troquel_result = calc_lito.calcular_valor_troquel(
                 datos_escala, 
                 mejor_opcion.repeticiones, # Usar repeticiones de mejor opción
@@ -357,7 +378,8 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         valor_plancha_defecto = 0.0
         precio_sin_constante = None # Inicializar para guardar el valor separado
         if not st.session_state.get('ajustar_planchas'):
-             plancha_result = calc_lito.calcular_precio_plancha(datos_escala, num_tintas, es_manga)
+             # Usar el número de tintas ajustado para calcular la plancha
+             plancha_result = calc_lito.calcular_precio_plancha(datos_escala, num_tintas_ajustado, es_manga)
              if 'error' in plancha_result:
                  st.warning(f"Advertencia: No se pudo calcular el valor de plancha por defecto: {plancha_result['error']}")
              else:
@@ -386,13 +408,15 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             'unidad_z_dientes': mejor_opcion.dientes if mejor_opcion else 0, # <-- CORREGIDO
             'existe_troquel': datos_escala.troquel_existe, # Usar valor procesado
             'planchas_x_separado': datos_escala.planchas_por_separado,
-            'num_tintas': num_tintas,
+            'num_tintas': num_tintas, # Número de tintas original
+            'num_tintas_ajustado': num_tintas_ajustado, # Número de tintas ajustado (con tinta adicional por acabado si aplica)
             'numero_pistas': datos_escala.pistas,
             'num_paquetes_rollos': form_data['num_paquetes'],
             'tipo_producto_id': form_data['tipo_producto_id'],
             'tipo_grafado_id': form_data.get('tipo_grafado_id'), # Usar ID guardado
             'altura_grafado': form_data.get('altura_grafado'),
-            'valor_plancha_separado': None # Inicializar para aplicar la lógica de redondeo
+            'valor_plancha_separado': None, # Inicializar para aplicar la lógica de redondeo
+            'acabado_id': form_data.get('acabado_id') # Añadir ID de acabado
         }
         
         # --- Aplicar Fórmula de Redondeo a valor_plancha_separado --- 
@@ -418,28 +442,22 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         # -------------------------------------------------------------
 
         # Realizar cálculos principales por escala
-        print(f"\nDEBUG: Calling calculadora.calcular_costos_por_escala with:")
-        print(f"  - datos: {datos_escala}")
-        print(f"  - num_tintas: {num_tintas}")
-        # Pasar los mismos valores finales que se usarán para persistir
-        print(f"  - valor_plancha (final): {datos_calculo_persistir['valor_plancha']}")
-        print(f"  - valor_troquel (final): {datos_calculo_persistir['valor_troquel']}")
-        print(f"  - valor_material (final): {datos_calculo_persistir['valor_material']}")
-        print(f"  - valor_acabado: {datos_calculo_persistir['valor_acabado']}")
-        print(f"  - es_manga: {es_manga}")
-        print(f"  - tipo_grafado_id: {datos_calculo_persistir['tipo_grafado_id']}")
-        # NOTA: CalculadoraCostosEscala necesita usar estos valores directamente,
-        # sin recalcular plancha/troquel internamente si ya vienen dados.
+        print(f"\n=== REALIZAR CÁLCULOS PRINCIPALES POR ESCALA ===")
+        print(f"  - Tintas originales: {num_tintas}")
+        print(f"  - Tintas ajustadas: {num_tintas_ajustado}")
+        print(f"  - Es manga: {es_manga}")
+        print(f"  - Acabado ID: {acabado_id}")
 
         resultados = calculadora.calcular_costos_por_escala(
             datos=datos_escala,
-            num_tintas=num_tintas,
-            valor_plancha=datos_calculo_persistir['valor_plancha'], # Pasar valor final
-            valor_troquel=datos_calculo_persistir['valor_troquel'], # Pasar valor final
-            valor_material=datos_calculo_persistir['valor_material'], # Pasar valor final
+            num_tintas=num_tintas_ajustado,  # IMPORTANTE: Usar el valor AJUSTADO que incluye +1 para acabados especiales
+            valor_plancha=datos_calculo_persistir['valor_plancha'], 
+            valor_troquel=datos_calculo_persistir['valor_troquel'], 
+            valor_material=datos_calculo_persistir['valor_material'], 
             valor_acabado=datos_calculo_persistir['valor_acabado'],
             es_manga=es_manga,
-            tipo_grafado_id=datos_calculo_persistir['tipo_grafado_id'] # Pasar ID
+            tipo_grafado_id=datos_calculo_persistir['tipo_grafado_id'], 
+            acabado_id=acabado_id
         )
         
         if resultados:
@@ -451,7 +469,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 kwargs_modelo = {
                     'material_adhesivo_id': form_data['material_adhesivo_id'], # Usar la clave correcta
                     'acabado_id': form_data.get('acabado_id') if not es_manga else 10, # ID 10 = Sin acabado
-                    'num_tintas': num_tintas,
+                    'num_tintas': num_tintas, # Usar tintas originales (no ajustadas) para mostrar al usuario
                     'num_paquetes_rollos': form_data['num_paquetes'],
                     'es_manga': es_manga,
                     'tipo_grafado': form_data.get('tipo_grafado_nombre'), # Pasar nombre si existe
@@ -465,6 +483,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                     'tipo_producto_id': form_data['tipo_producto_id'],
                     'forma_pago_id': form_data['forma_pago_id'],
                     'altura_grafado': form_data.get('altura_grafado'),
+                    'tipo_foil_id': st.session_state.get("tipo_foil_id"), # <--- LÍNEA AÑADIDA
                     'escalas_resultados': resultados # Pasar la lista de dicts
                 }
                 
@@ -533,8 +552,12 @@ def show_navigation():
         'calculator': "📝 Cotizador",
         'manage_quotes': "📂 Gestionar Cotizaciones",
         'manage_clients': "👥 Gestionar Clientes",
-        'dashboard': "📊 Dashboard" # Nueva opción
+        'dashboard': "📊 Dashboard", # Nueva opción
     }
+    
+    # Solo mostrar la opción de gestión de valores a administradores
+    if st.session_state.get('usuario_rol') == 'administrador':
+        options['manage_values'] = "💰 Administrar Valores"
 
     # Obtener la vista actual o default a 'calculator'
     current_view_key = st.session_state.get('current_view', 'calculator')
@@ -1300,6 +1323,10 @@ def main():
     elif current_view == 'dashboard':
         show_dashboard()
     # --------------------------------------------------
+    # --- NUEVA OPCIÓN DE MENÚ ---
+    elif current_view == 'manage_values':
+        show_manage_values()
+    # ---------------------------
     # elif st.session_state.current_view == 'reports': # Ya no se usa directamente
     #     show_reports()
     else:
@@ -1312,7 +1339,16 @@ def show_quote_results():
     """Muestra los resultados de la cotización calculada."""
     # --- MOSTRAR INFORME SI YA ESTÁ GUARDADA ---
     if st.session_state.get('cotizacion_guardada', False) and st.session_state.get('cotizacion_id') is not None:
-        st.success(f"Cotización #{st.session_state.cotizacion_id} guardada ✓")
+        # Obtener el número de cotización de los datos completos
+        numero_cotizacion = None
+        if 'datos_completos_cot' in st.session_state and st.session_state.datos_completos_cot:
+            numero_cotizacion = st.session_state.datos_completos_cot.get('numero_cotizacion', None)
+            
+        # Mostrar mensaje con el número de cotización si está disponible
+        if numero_cotizacion:
+            st.success(f"Cotización #{numero_cotizacion} guardada ✓")
+        else:
+            st.success(f"Cotización #{st.session_state.cotizacion_id} guardada ✓")
         
         # --- Botones de PDF y Nueva Cotización ---
         col_pdf, col_new = st.columns(2)
@@ -1368,12 +1404,13 @@ def show_quote_results():
         if 'cotizacion_guardada' in st.session_state and st.session_state.cotizacion_guardada and informe_md and informe_md != "*El informe técnico se genera al guardar la cotización.*":
             try:
                 # Generar nombre de archivo usando número de cotización o identificador
-                id_para_archivo = st.session_state.get('cotizacion_id', 'informe')
+                id_para_archivo = 'informe'  # Valor predeterminado
                 nombre_cliente = ''
                 if 'datos_completos_cot' in st.session_state and st.session_state.datos_completos_cot:
                     nombre_cliente = st.session_state.datos_completos_cot.get('cliente_nombre', '').replace(' ', '_')
-                    numero_cotizacion = st.session_state.datos_completos_cot.get('numero_cotizacion', id_para_archivo)
-                    id_para_archivo = f"{numero_cotizacion}_{nombre_cliente}"
+                    numero_cotizacion = st.session_state.datos_completos_cot.get('numero_cotizacion', '')
+                    if numero_cotizacion:
+                        id_para_archivo = f"{numero_cotizacion}_{nombre_cliente}"
                 
                 nombre_archivo = f"Informe_Tecnico_{id_para_archivo}"
                 
@@ -1418,7 +1455,21 @@ def show_quote_results():
     # Mostrar resultados para cada escala
     st.markdown("### Resultados por Escala")
     resultados_df = pd.DataFrame(calc['results'])
-    st.dataframe(resultados_df)
+    
+    # Si existe el campo num_tintas_mostrar, usar ese para mostrar en lugar de num_tintas
+    if 'num_tintas_mostrar' in resultados_df.columns:
+        # Hacemos una copia para no modificar los datos originales guardados en session_state
+        df_mostrar = resultados_df.copy()
+        # Renombrar la columna para mayor claridad en el dataframe
+        df_mostrar = df_mostrar.rename(columns={'num_tintas_mostrar': 'Tintas'})
+        # Quitar columnas internas/técnicas que no son necesarias para el usuario
+        columnas_a_quitar = ['num_tintas_original', 'num_tintas_interno', 'num_tintas']
+        columnas_mostrar = [col for col in df_mostrar.columns if col not in columnas_a_quitar]
+        st.dataframe(df_mostrar[columnas_mostrar])
+    else:
+        # Si no existe, mostrar el dataframe original
+        st.dataframe(resultados_df)
+    
     st.divider()
     
     # --- Formulario y Lógica de Guardado --- 

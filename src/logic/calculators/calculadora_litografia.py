@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple
 import math
-from calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
-from calculadora_base import CalculadoraBase
-from constants import (
+from src.logic.calculators.calculadora_desperdicios import CalculadoraDesperdicio, OpcionDesperdicio
+from src.logic.calculators.calculadora_base import CalculadoraBase
+from src.config.constants import (
     GAP_PISTAS_ETIQUETAS, GAP_AVANCE_ETIQUETAS, ANCHO_MAXIMO_LITOGRAFIA,
     VALOR_MM_PLANCHA, INCREMENTO_ANCHO_SIN_TINTAS, INCREMENTO_ANCHO_TINTAS
 )

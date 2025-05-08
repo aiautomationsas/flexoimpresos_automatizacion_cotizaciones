@@ -2,7 +2,7 @@
 Clase base para cálculos comunes entre CalculadoraLitografia y CalculadoraCostosEscala.
 """
 from typing import Dict
-from constants import (
+from src.config.constants import (
     GAP_PISTAS_ETIQUETAS, GAP_PISTAS_MANGAS, GAP_FIJO, 
     AVANCE_FIJO, MM_COLOR
 )

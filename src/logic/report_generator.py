@@ -61,6 +61,7 @@ def generar_informe_tecnico_markdown(
         material_id = cotizacion_data.get('material_id')
         acabado_id = cotizacion_data.get('acabado_id')
         adhesivo_id = cotizacion_data.get('adhesivo_id') # Puede ser None
+        tipo_foil_nombre = cotizacion_data.get('tipo_foil_nombre') # Obtener tipo_foil_nombre
         
         # +++ DEBUG: Imprimir ID de material +++
         print(f"\n--- DEBUG Report Generator ---")
@@ -156,13 +157,18 @@ def generar_informe_tecnico_markdown(
 - **Unidad (Z - Dientes Cilindro)**: {dientes}
 """
 
+        # --- Modificar info_materiales para incluir Tipo de Foil --- 
+        foil_info_str = ""
+        if acabado_id in [5, 6] and tipo_foil_nombre:
+            foil_info_str = f"\n- **Tipo de Foil**: {tipo_foil_nombre}"
+
         info_materiales = f"""
 ### Información de Materiales
 #### Material Base
 - **Material**: {material_display}
 
 #### Acabado
-- **Tipo**: {acabado_display}
+- **Tipo**: {acabado_display}{foil_info_str}
 {f"- **Descripción**: {acabado_descripcion}" if acabado_descripcion and not es_manga else ""}
 
 #### Adhesivo
