@@ -43,7 +43,7 @@ class DBManager:
         3. Propósitos de depuración y pruebas
 
         Genera un identificador único para la cotización con el siguiente formato:
-        TIPO MATERIAL ANCHO_x_AVANCE TINTAS [ACABADO] [RX/MX_PAQUETES] CLIENTE REFERENCIA NUMERO_COTIZACION
+        TIPO MATERIAL ANCHO_x_AVANCE [TINTAS] [ACABADO] [RX/MX_PAQUETES] CLIENTE REFERENCIA NUMERO_COTIZACION
 
         Ejemplos:
         - Etiqueta normal: ET PELB 50X50MM 0T LAM RX1000 ENSAYO VLAMOS 150
@@ -129,7 +129,12 @@ class DBManager:
         num = f"{numero_cotizacion}" # Nombre de variable como en el código original
         
         # Construir el identificador pieza por pieza
-        identificador_parts = [tipo, material_code, dimensiones, tintas_str_final]
+        identificador_parts = [tipo, material_code, dimensiones]
+
+        # Solo añadir la parte de tintas si num_tintas es mayor que 0
+        # o si la lógica de FOIL ya modificó tintas_str_final para incluir "FOIL"
+        if num_tintas > 0 or "FOIL" in tintas_str_final:
+            identificador_parts.append(tintas_str_final)
 
         if es_manga:
             paquetes = f"MX{num_paquetes_rollos}"

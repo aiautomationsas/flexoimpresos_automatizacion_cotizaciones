@@ -250,28 +250,48 @@ class CotizacionPDF(BasePDFGenerator):
                 if not es_manga:
                     elements.append(Paragraph(f"Adhesivo: {adhesivo_display}", self.styles['Normal']))
                     
-                    # acabado_nombre_original ya está definido arriba
-                    acabado_a_mostrar = acabado_nombre_original
-                    # Requisito 1: Modificar nombre de acabado si es Foil
-                    if acabado_id in [5, 6]: 
-                        print(f"  Processing acabado FOIL. Original: '{acabado_nombre_original}', ID: {acabado_id}")
-                        if "LAMINADO BRILLANTE + FOIL" in acabado_nombre_original.upper():
-                            acabado_a_mostrar = "LAMINADO BRILLANTE"
-                            print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
-                        elif "LAMINADO MATE + FOIL" in acabado_nombre_original.upper():
-                            acabado_a_mostrar = "LAMINADO MATE"
-                            print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
+                    # --- INICIO LÓGICA CORREGIDA PARA ACABADO ---
+                    acabado_presente_y_valido = bool(acabado_data and acabado_id is not None)
+                    
+                    if acabado_presente_y_valido:
+                        # Verificar si es el acabado a omitir explícitamente
+                        omitir_sin_acabado = (acabado_id == 10 or 
+                                              acabado_nombre_original.upper() == 'SIN ACABADO')
+                                              
+                        if not omitir_sin_acabado:
+                            # Acabado presente y no es "SIN ACABADO", mostrarlo
+                            acabado_a_mostrar = acabado_nombre_original
+                            # Modificar nombre si es FOIL
+                            if acabado_id in [5, 6]: 
+                                print(f"  Processing acabado FOIL. Original: '{acabado_nombre_original}', ID: {acabado_id}")
+                                if "LAMINADO BRILLANTE + FOIL" in acabado_nombre_original.upper():
+                                    acabado_a_mostrar = "LAMINADO BRILLANTE"
+                                    print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
+                                elif "LAMINADO MATE + FOIL" in acabado_nombre_original.upper():
+                                    acabado_a_mostrar = "LAMINADO MATE"
+                                    print(f"    Set acabado_a_mostrar to: {acabado_a_mostrar}")
+                                else:
+                                    print(f"    Acabado ID is {acabado_id} but original name '{acabado_nombre_original}' does not match expected FOIL patterns.")
+                            elements.append(Paragraph(f"Acabado: {acabado_a_mostrar}", self.styles['Normal']))
+                            print(f"  Displaying acabado: {acabado_a_mostrar}")
                         else:
-                            print(f"    Acabado ID is {acabado_id} but original name '{acabado_nombre_original}' does not match expected FOIL patterns.")
-                    elements.append(Paragraph(f"Acabado: {acabado_a_mostrar}", self.styles['Normal']))
+                            # Es explícitamente "SIN ACABADO", no añadir línea
+                            print(f"  Skipping acabado line because it is ID 10 or named 'SIN ACABADO'.")
+                    else:
+                        # No había datos válidos de acabado
+                        print(f"  No valid acabado data found. Skipping acabado line.")
+                    # --- FIN LÓGICA CORREGIDA PARA ACABADO ---
                 
                 num_tintas_original = datos_cotizacion.get('num_tintas', 0)
-                texto_tintas = f"Tintas: {num_tintas_original}"
-                print(f"  Processing tintas. num_tintas_original: {num_tintas_original}, es_manga: {es_manga}, acabado_id: {acabado_id}, tipo_foil_nombre: {tipo_foil_nombre}")
-                if not es_manga and acabado_id in [5, 6] and tipo_foil_nombre:
-                    texto_tintas = f"Tintas: {num_tintas_original} + COLD FOIL {tipo_foil_nombre.upper()}"
-                    print(f"    Set texto_tintas to: {texto_tintas}")
-                elements.append(Paragraph(texto_tintas, self.styles['Normal']))
+                if num_tintas_original > 0:
+                    texto_tintas = f"Tintas: {num_tintas_original}"
+                    print(f"  Processing tintas. num_tintas_original: {num_tintas_original}, es_manga: {es_manga}, acabado_id: {acabado_id}, tipo_foil_nombre: {tipo_foil_nombre}")
+                    if not es_manga and acabado_id in [5, 6] and tipo_foil_nombre:
+                        texto_tintas = f"Tintas: {num_tintas_original} + COLD FOIL {tipo_foil_nombre.upper()}"
+                        print(f"    Set texto_tintas to: {texto_tintas}")
+                    elements.append(Paragraph(texto_tintas, self.styles['Normal']))
+                else:
+                    print(f"  Skipping tintas line as num_tintas_original is 0.")
                 print(f"--- END DEBUG PDF gen (Revisado) ---")
                 
                 num_rollos = datos_cotizacion.get('num_rollos', 0)
