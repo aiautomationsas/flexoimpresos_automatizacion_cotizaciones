@@ -61,7 +61,8 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
         # El valor se guarda en st.session_state.ancho via key
         st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, format="%.2f", key="ancho", value=float(default_ancho))
         # El valor se guarda en st.session_state.avance via key
-        st.number_input("Avance (mm)", min_value=1.00, format="%.2f", key="avance", value=float(default_avance))
+        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, format="%.2f", key="avance", value=float(default_avance),
+                        help="Valor máximo: 523.87mm (correspondiente a la unidad de montaje de 165 dientes)")
     with col2:
         # --- Pistas ---
         usuario_rol = st.session_state.get('usuario_rol', '')

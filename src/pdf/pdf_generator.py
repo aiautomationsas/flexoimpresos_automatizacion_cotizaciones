@@ -219,7 +219,7 @@ class CotizacionPDF(BasePDFGenerator):
                 elements.append(Paragraph(f"Señores:", self.styles['Normal']))
                 # Usar 'nombre_cliente' del diccionario de datos
                 elements.append(Paragraph(datos_cotizacion.get('nombre_cliente', 'CLIENTE NO ESPECIFICADO'), self.styles['Normal']))
-                elements.append(Spacer(1, 20))
+                elements.append(Spacer(1, 10))
 
                 # Detalles del producto/referencia
                 identificador = datos_cotizacion.get('identificador', '')
@@ -419,16 +419,17 @@ class CotizacionPDF(BasePDFGenerator):
                             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                            ('FONTSIZE', (0, 0), (-1, 0), 12),
-                            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                            ('FONTSIZE', (0, 0), (-1, 0), 11),
+                            ('TOPPADDING', (0, 0), (-1, 0), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
                             ('BACKGROUND', (0, 1), (-1, -1), colors.white),
                             ('GRID', (0, 0), (-1, -1), 1, colors.black),
                             ('ALIGN', (0, 1), (0, -1), 'CENTER'),
                             ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
                             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                            ('FONTSIZE', (0, 1), (-1, -1), 10),
-                            ('TOPPADDING', (0, 1), (-1, -1), 8),
-                            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                            ('FONTSIZE', (0, 1), (-1, -1), 9),
+                            ('TOPPADDING', (0, 1), (-1, -1), 3),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
                         ])
                         tabla.setStyle(style)
                         elements.append(tabla)
@@ -445,7 +446,7 @@ class CotizacionPDF(BasePDFGenerator):
                 elements.append(Paragraph(f"Forma de Pago: {forma_pago}", self.styles['Normal']))
                 elements.append(Paragraph("I.V.A (no incluido): 19%", self.styles['Normal']))
                 elements.append(Paragraph("% de Tolerancia: 10% + ó - de acuerdo a la cantidad pedida", self.styles['Normal']))
-                elements.append(Spacer(1, 20))
+                elements.append(Spacer(1, 3))
 
                 elements.append(Paragraph("Política de Entrega:", self.styles['Heading2']))
                 
@@ -466,7 +467,7 @@ class CotizacionPDF(BasePDFGenerator):
                     elements.append(Paragraph("• Cambios: 15 días calendario a partir de la aprobación del sherpa", self.styles['Normal']))
                     elements.append(Paragraph("• Nuevos: 20 días calendario a partir de la aprobación del sherpa", self.styles['Normal']))
                 
-                elements.append(Spacer(1, 10))
+                elements.append(Spacer(1, 2))
                 elements.append(Paragraph("Política de Cartera:", self.styles['Heading2']))
                 elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
                 elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))

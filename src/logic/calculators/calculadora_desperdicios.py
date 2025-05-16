@@ -66,8 +66,6 @@ class CalculadoraDesperdicio:
             raise TypeError("El avance debe ser un número")
         if avance_mm <= 0:
             raise ValueError("El avance debe ser mayor que 0")
-        if avance_mm > self.ANCHO_MAQUINA:
-            raise ValueError(f"El avance ({avance_mm}mm) es mayor que el ancho de la máquina ({self.ANCHO_MAQUINA}mm)")
 
     def _calcular_desperdicio_individual(self, medida_mm: float, avance: float, repeticiones: int) -> float:
         """
@@ -119,7 +117,10 @@ class CalculadoraDesperdicio:
             # Probar para repeticiones de 1 a 20 (como en Excel)
             for rep in range(1, self.MAX_REPETICIONES + 1):
                 ancho_total = self._calcular_ancho_total(avance_mm, rep)
-                if self._validar_ancho_total(ancho_total):
+                
+                # Aquí eliminamos la validación del ancho total para una sola repetición
+                # Si el avance es mayor que el ancho de la máquina, al menos debemos permitir una repetición
+                if rep == 1 or self._validar_ancho_total(ancho_total):
                     desperdicio = self._calcular_desperdicio_individual(row['mm'], avance_mm, rep)
                     if desperdicio < 999:
                         opciones.append(OpcionDesperdicio(

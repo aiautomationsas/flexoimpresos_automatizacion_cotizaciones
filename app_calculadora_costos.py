@@ -334,7 +334,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         
         # Ajustar tintas para acabados especiales
         num_tintas_ajustado = num_tintas
-        if not es_manga and acabado_id in [3, 5, 6]:
+        if not es_manga and acabado_id in [3, 4, 5, 6]:
             num_tintas_ajustado = num_tintas + 1
             print(f"\n=== AJUSTE DE TINTAS POR ACABADO ESPECIAL ===")
             print(f"Tintas originales seleccionadas: {num_tintas}")
