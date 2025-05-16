@@ -1361,13 +1361,14 @@ def show_quote_results():
                         cotizacion_id = st.session_state.cotizacion_id
                         datos_pdf = st.session_state.db.get_datos_completos_cotizacion(cotizacion_id)
                         if datos_pdf:
+                              print(f"DEBUG PDF COTIZACION: datos_pdf contiene: {datos_pdf}") # <-- LÍNEA DE DEBUG AÑADIDA
                               pdf_gen = CotizacionPDF()
                               pdf_bytes = pdf_gen.generar_pdf(datos_pdf)
                               # Ofrecer descarga
                               st.download_button(
                                   label="Descargar PDF Ahora",
                                   data=pdf_bytes,
-                                file_name=f"Cotizacion_{datos_pdf.get('numero_cotizacion', 'N')}.pdf",
+                                file_name=f"Cotizacion_{datos_pdf.get('consecutivo', 'N')}.pdf", # CORREGIDO: Usar 'consecutivo' (minúsculas)
                                   mime="application/pdf"
                               )
                         else:
