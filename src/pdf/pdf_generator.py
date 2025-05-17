@@ -343,9 +343,22 @@ class CotizacionPDF(BasePDFGenerator):
                     else:
                         elements.append(Paragraph(f"Grafado: No especificado", self.styles['Normal']))
                 
-                valor_plancha = datos_cotizacion.get('valor_plancha_separado')
-                if valor_plancha:
-                    elements.append(Paragraph(f"Costo Preprensa: ${valor_plancha:,.0f}", self.styles['Normal']))
+                # --- MODIFICACIÓN INICIO: Condición más robusta para mostrar costo de preprensa ---
+                # Se verifica explícitamente si las planchas se deben cobrar por separado
+                # y si el valor de preprensa es positivo.
+                planchas_son_separadas = datos_cotizacion.get('planchas_x_separado', False) # Default a False si la clave no existe
+
+                if planchas_son_separadas:
+                    valor_plancha_str = datos_cotizacion.get('valor_plancha_separado')
+                    if valor_plancha_str is not None:
+                        try:
+                            valor_plancha_float = float(valor_plancha_str)
+                            if valor_plancha_float > 0:
+                                elements.append(Paragraph(f"Costo Preprensa: ${valor_plancha_float:,.0f}", self.styles['Normal']))
+                        except (ValueError, TypeError):
+                            # Opcional: Log si el valor no es numérico pero se esperaba.
+                            print(f"Advertencia PDF: 'valor_plancha_separado' ('{valor_plancha_str}') no es un número válido, aunque 'planchas_x_separado' es True.")
+                # --- MODIFICACIÓN FIN ---
                 
                 elements.append(Spacer(1, 20))
 
