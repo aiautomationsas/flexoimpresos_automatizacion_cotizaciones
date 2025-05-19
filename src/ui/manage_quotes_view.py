@@ -174,7 +174,7 @@ def show_manage_quotes_ui():
                             pdf_bytes = generar_bytes_pdf_cotizacion(datos_pdf) # Usar helper importado
                             if pdf_bytes:
                                 st.session_state[session_bytes_key] = pdf_bytes
-                                st.session_state[session_filename_key] = f"Cotizacion_{datos_pdf.get('consecutivo', 'N')}.pdf"
+                                st.session_state[session_filename_key] = f"{datos_pdf.get('identificador', f'Cotizacion_{datos_pdf.get('consecutivo', 'N')}').replace(' ', '_')}.pdf"
                                 st.success("✅ PDF generado exitosamente. Use el botón de abajo para descargar.")
                                 # No usar st.rerun() aquí para que el botón de descarga aparezca
                             else:
