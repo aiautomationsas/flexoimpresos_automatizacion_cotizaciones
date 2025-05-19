@@ -13,6 +13,7 @@ import os
 import math
 import traceback
 from datetime import datetime
+from decimal import Decimal
 
 # Placeholder para EmptyImage si Image falla (como en el código provisto)
 class EmptyImage(Flowable):
@@ -346,18 +347,29 @@ class CotizacionPDF(BasePDFGenerator):
                 # --- MODIFICACIÓN INICIO: Condición más robusta para mostrar costo de preprensa ---
                 # Se verifica explícitamente si las planchas se deben cobrar por separado
                 # y si el valor de preprensa es positivo.
-                planchas_son_separadas = datos_cotizacion.get('planchas_x_separado', False) # Default a False si la clave no existe
+                planchas_son_separadas = datos_cotizacion.get('planchas_x_separado', False)
+                valor_plancha_separado = datos_cotizacion.get('valor_plancha_separado')
 
-                if planchas_son_separadas:
-                    valor_plancha_str = datos_cotizacion.get('valor_plancha_separado')
-                    if valor_plancha_str is not None:
-                        try:
-                            valor_plancha_float = float(valor_plancha_str)
-                            if valor_plancha_float > 0:
-                                elements.append(Paragraph(f"Costo Preprensa: ${valor_plancha_float:,.0f}", self.styles['Normal']))
-                        except (ValueError, TypeError):
-                            # Opcional: Log si el valor no es numérico pero se esperaba.
-                            print(f"Advertencia PDF: 'valor_plancha_separado' ('{valor_plancha_str}') no es un número válido, aunque 'planchas_x_separado' es True.")
+                print(f"\n=== DEBUG COSTO PREPRENSA ===")
+                print(f"planchas_son_separadas: {planchas_son_separadas}")
+                print(f"valor_plancha_separado (tipo): {type(valor_plancha_separado)}")
+                print(f"valor_plancha_separado (valor): {valor_plancha_separado}")
+
+                if planchas_son_separadas and valor_plancha_separado is not None:
+                    try:
+                        # Si es Decimal, convertir a float
+                        if isinstance(valor_plancha_separado, Decimal):
+                            valor_plancha_float = float(valor_plancha_separado)
+                        else:
+                            valor_plancha_float = float(valor_plancha_separado)
+                            
+                        if valor_plancha_float > 0:
+                            elements.append(Paragraph(f"Costo Preprensa: ${valor_plancha_float:,.0f}", self.styles['Normal']))
+                            print(f"DEBUG PDF: Mostrando costo preprensa: ${valor_plancha_float:,.0f}")
+                    except (ValueError, TypeError) as e:
+                        print(f"Error al procesar valor_plancha_separado: {e}")
+                else:
+                    print(f"DEBUG PDF: No se muestra costo preprensa - planchas_son_separadas: {planchas_son_separadas}, valor_plancha_separado: {valor_plancha_separado}")
                 # --- MODIFICACIÓN FIN ---
                 
                 elements.append(Spacer(1, 20))

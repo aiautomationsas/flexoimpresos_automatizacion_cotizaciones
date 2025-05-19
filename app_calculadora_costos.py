@@ -395,14 +395,6 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             'valor_acabado': acabado.valor if acabado else 0,
             'valor_troquel': st.session_state.get('precio_troquel', valor_troquel_defecto) if st.session_state.get('ajustar_troquel') else valor_troquel_defecto,
             'rentabilidad': datos_escala.rentabilidad, # Guardar el valor decimal directamente
-            
-            # --- CORREGIDO: Añadir lógica para valor_plancha_separado --- 
-            # 'valor_plancha_separado': (
-            #     st.session_state.get('precio_planchas') if st.session_state.get('ajustar_planchas') and datos_escala.planchas_por_separado
-            #     else precio_sin_constante if datos_escala.planchas_por_separado and precio_sin_constante is not None
-            #     else None
-            # ),
-            # ----------------------------------------------------------
             'avance': datos_escala.avance,
             'ancho': form_data['ancho'], # Guardar ancho original sin ajuste de manga
             'unidad_z_dientes': mejor_opcion.dientes if mejor_opcion else 0, # <-- CORREGIDO
@@ -427,7 +419,8 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             elif precio_sin_constante is not None:
                 valor_plancha_separado_base = precio_sin_constante
         
-        if valor_plancha_separado_base is not None and valor_plancha_separado_base > 0:
+        # Establecer valor_plancha_separado basado en planchas_x_separado
+        if datos_calculo_persistir['planchas_x_separado'] and valor_plancha_separado_base is not None and valor_plancha_separado_base > 0:
             try:
                 valor_dividido = valor_plancha_separado_base / 0.7
                 # Redondear hacia arriba al siguiente múltiplo de 10000
@@ -438,7 +431,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 print(f"Error aplicando redondeo a valor_plancha_separado: {e_round}")
                 datos_calculo_persistir['valor_plancha_separado'] = None # Poner None si hay error
         else:
-             datos_calculo_persistir['valor_plancha_separado'] = None # Si no aplica o es cero
+            datos_calculo_persistir['valor_plancha_separado'] = None # Si no aplica o es cero
         # -------------------------------------------------------------
 
         # Realizar cálculos principales por escala

@@ -1668,6 +1668,7 @@ class DBManager:
                 'tipo_grafado': cotizacion.tipo_grafado_id, # Mantener como ID
                 'altura_grafado': cotizacion.altura_grafado, # Añadir la altura del grafado
                 'valor_plancha_separado': cotizacion.valor_plancha_separado or 0,
+                'planchas_x_separado': cotizacion.planchas_x_separado, # Añadir este campo
                 'cliente': cliente_dict,
                 'comercial': perfil_comercial, # Ya es un dict
                 'identificador': cotizacion.identificador,
@@ -2030,87 +2031,45 @@ class DBManager:
                                 tipo_producto_id: int, tipo_grafado_id: Optional[int], valor_acabado: float, 
                                 unidad_z_dientes: float, altura_grafado: Optional[float]=None, 
                                 valor_plancha_separado: Optional[float] = None) -> bool:
-        """Guarda o actualiza los parámetros de cálculo de escala para una cotización usando RPC."""
-        if not cotizacion_id:
-            print("Error: cotizacion_id es requerido para guardar cálculos de escala.")
-            return False
-
-        # Prepare the dictionary with parameters for the RPC function
-        # Ensure keys match the SQL function parameter names (e.g., p_cotizacion_id)
-        rpc_params = {
-            'p_cotizacion_id': cotizacion_id,
-            'p_valor_material': valor_material,
-            'p_valor_plancha': valor_plancha,
-            'p_valor_troquel': valor_troquel,
-            'p_rentabilidad': rentabilidad,
-            'p_avance': avance,
-            'p_ancho': ancho,
-            'p_existe_troquel': existe_troquel,
-            'p_planchas_x_separado': planchas_x_separado,
-            'p_num_tintas': num_tintas,
-            'p_numero_pistas': numero_pistas,
-            'p_num_paquetes_rollos': num_paquetes_rollos,
-            'p_tipo_producto_id': tipo_producto_id,
-            'p_tipo_grafado_id': tipo_grafado_id,
-            'p_valor_acabado': valor_acabado,
-            'p_unidad_z_dientes': unidad_z_dientes
-            # Eliminar 'p_altura_grafado' y 'p_valor_plancha_separado'
-        }
-
+        """Guarda o actualiza los cálculos de escala para una cotización"""
         try:
+            print("\nGuardando cálculos de escala actualizados...")
+            
+            # Preparar parámetros para la RPC
+            rpc_params = {
+                'p_cotizacion_id': cotizacion_id,
+                'p_valor_material': valor_material,
+                'p_valor_plancha': valor_plancha,
+                'p_valor_troquel': valor_troquel,
+                'p_rentabilidad': rentabilidad,
+                'p_avance': avance,
+                'p_ancho': ancho,
+                'p_existe_troquel': existe_troquel,
+                'p_planchas_x_separado': planchas_x_separado,
+                'p_num_tintas': num_tintas,
+                'p_numero_pistas': numero_pistas,
+                'p_num_paquetes_rollos': num_paquetes_rollos,
+                'p_tipo_producto_id': tipo_producto_id,
+                'p_tipo_grafado_id': tipo_grafado_id,
+                'p_valor_acabado': valor_acabado,
+                'p_unidad_z_dientes': unidad_z_dientes
+            }
+            
             print(f"\nLlamando a RPC 'upsert_calculos_escala' para cotizacion_id: {cotizacion_id}")
             print(f"Parámetros RPC: {rpc_params}")
-
+            
+            # Llamar a la RPC
             response = self.supabase.rpc('upsert_calculos_escala', rpc_params).execute()
-
-            # Check if the RPC call was successful and returned data
-            # --- MODIFICACIÓN: Handle direct dictionary in response.data ---
-            success_data = None
-            if hasattr(response, 'data'):
-                if isinstance(response.data, list) and len(response.data) > 0:
-                    # Handle case where data is a list containing the row
-                    success_data = response.data[0]
-                elif isinstance(response.data, dict) and response.data: # Check if it's a non-empty dictionary
-                    # Handle case where data is the row dictionary directly
-                    success_data = response.data
-
-            if success_data is not None:
-                print(f"RPC upsert_calculos_escala exitoso. Fila afectada: {success_data}")
+            
+            if response.data:
+                print("Cálculos de escala guardados exitosamente")
                 return True
-            # --- FIN MODIFICACIÓN ---
-            elif hasattr(response, 'error') and response.error:
-                 # Handle potential errors returned by the RPC call itself (e.g., network or SQL error raised in RPC)
-                 print(f"Error en la llamada RPC upsert_calculos_escala: {response.error}")
-                 # Attempt to extract details if possible
-                 error_details = getattr(response.error, 'details', None)
-                 error_message = getattr(response.error, 'message', str(response.error))
-                 print(f"  Message: {error_message}")
-                 if error_details: print(f"  Details: {error_details}")
-                 return False
-            elif hasattr(response, 'data') and (response.data is None or (isinstance(response.data, list) and len(response.data) == 0)):
-                # Case where the RPC executed but returned no rows (might happen if ON CONFLICT condition wasn't met correctly, or other logic paths)
-                print(f"RPC upsert_calculos_escala ejecutado pero no devolvió filas. Respuesta: {response.data}")
-                # Consider this potentially problematic, returning False
-                return False
             else:
-                # Catch-all for other unexpected response structures
-                print(f"Respuesta inesperada de RPC upsert_calculos_escala: {response}")
+                print("No se recibió respuesta al guardar cálculos de escala")
                 return False
-            # --- FIN MODIFICACIÓN ---
-
-        except postgrest.exceptions.APIError as api_error:
-            # Catch specific Postgrest errors, including our custom permission denied
-            if api_error.code == '42501' and 'permission_denied' in api_error.message:
-                 print(f"Error de permisos (RLS/RPC check) al guardar cálculos escala: {api_error.message}")
-                 # You might want to raise this or handle it specifically in the calling function
-                 # For now, return False
-            else:
-                 print(f"Error de API (Postgrest) al guardar cálculos escala: {api_error}")
-                 traceback.print_exc()
-            return False
+                
         except Exception as e:
-            # Catch any other unexpected errors
-            print(f"Error fatal al guardar cálculos de escala (RPC) para cotizacion_id {cotizacion_id}: {str(e)}")
+            print(f"Error de API (Postgrest) al guardar cálculos escala: {e}")
             traceback.print_exc()
             return False
 
