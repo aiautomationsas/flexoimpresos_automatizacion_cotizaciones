@@ -229,7 +229,7 @@ def handle_pdf_generation(results: Dict[str, Any]) -> None:
                 st.download_button(
                     label="Descargar PDF",
                     data=pdf_data,
-                    file_name=f"cotizacion_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    file_name=f"Cotizacion {datetime.now().strftime('%Y%m%d')}.pdf",
                     mime="application/pdf"
                 )
     except Exception as e:
