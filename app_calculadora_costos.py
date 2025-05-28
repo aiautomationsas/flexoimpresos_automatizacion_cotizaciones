@@ -1361,7 +1361,7 @@ def show_quote_results():
                               st.download_button(
                                   label="Descargar PDF Ahora",
                                   data=pdf_bytes,
-                                file_name=f"{datos_pdf.get('identificador', f'Cotizacion_{datos_pdf.get('consecutivo', 'N')}').replace(' ', '_')}.pdf", # Usar identificador, con fallback y reemplazo de espacios
+                                file_name=f"{datos_pdf.get('identificador', f'Cotizacion_{datos_pdf.get('consecutivo', 'N')}')}.pdf", # Usar identificador, con fallback y sin reemplazo de espacios
                                   mime="application/pdf"
                               )
                         else:
