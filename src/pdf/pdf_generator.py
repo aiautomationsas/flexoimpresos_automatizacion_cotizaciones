@@ -256,8 +256,7 @@ class CotizacionPDF(BasePDFGenerator):
                     
                     if acabado_presente_y_valido:
                         # Verificar si es el acabado a omitir explícitamente
-                        omitir_sin_acabado = (acabado_id == 10 or 
-                                              acabado_nombre_original.upper() == 'SIN ACABADO')
+                        omitir_sin_acabado = (acabado_nombre_original.upper() == 'SIN ACABADO')
                                               
                         if not omitir_sin_acabado:
                             # Acabado presente y no es "SIN ACABADO", mostrarlo
