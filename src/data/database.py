@@ -2,11 +2,13 @@ from typing import List, Optional, Dict, Any, Tuple
 from src.data.models import (
     Cotizacion, Material, Acabado, Cliente, Escala, ReferenciaCliente,
     TipoProducto, PrecioEscala, TipoGrafado, EstadoCotizacion, MotivoRechazo,
-    FormaPago, Adhesivo, TipoFoil
+    Adhesivo, TipoFoil, PoliticasEntrega, PoliticasCartera
 )
 import os
 import logging
 from datetime import datetime
+from dateutil.parser import isoparse
+from decimal import Decimal
 import streamlit as st
 import traceback
 import postgrest
@@ -17,12 +19,43 @@ import json
 import math
 
 class DBManager:
+    def _parse_timestamptz(self, value: Any) -> Optional[datetime]:
+        """Parsea un timestamptz ISO de Postgres a datetime de forma tolerante.
+        Acepta fracciones con 1-6 dígitos y ajusta 'Z' a '+00:00'.
+        """
+        try:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value
+            v = str(value).replace('Z', '+00:00')
+            try:
+                return datetime.fromisoformat(v)
+            except Exception:
+                # Normalizar microsegundos a 6 dígitos antes del timezone
+                if '.' in v:
+                    head, _, tail = v.partition('.')
+                    digits = []
+                    tz_part = ''
+                    for ch in tail:
+                        if ch.isdigit() and len(digits) < 6:
+                            digits.append(ch)
+                        else:
+                            tz_part = tail[len(digits):]
+                            break
+                    micros = ''.join(digits).ljust(6, '0')
+                    new_v = f"{head}.{micros}{tz_part}"
+                    return datetime.fromisoformat(new_v)
+                # Sin fracción, intentar parseo directo
+                return datetime.fromisoformat(v)
+        except Exception:
+            return None
     # --- INICIO DEFINICIÓN CAMPOS ACTUALIZABLES ---
     CAMPOS_COTIZACION_ACTUALIZABLES = {
         'material_adhesivo_id', 'acabado_id', 'tipo_foil_id', 'num_tintas', 'num_paquetes_rollos',
         'es_manga', 'tipo_grafado_id', 'valor_troquel', 'valor_plancha_separado',
         'estado_id', 'id_motivo_rechazo', 'planchas_x_separado', 'existe_troquel',
-        'numero_pistas', 'tipo_producto_id', 'ancho', 'avance', 'forma_pago_id',
+        'numero_pistas', 'tipo_producto_id', 'ancho', 'avance',
         'altura_grafado', 'es_recotizacion', 'ajustes_modificados_admin',
         'identificador'  # <--- AÑADIR ESTA LÍNEA
     }
@@ -30,6 +63,19 @@ class DBManager:
     
     def __init__(self, supabase_client):
         self.supabase = supabase_client
+    
+    def _parse_dt(self, value):
+        """Parsea de forma segura timestamps ISO (o devuelve el datetime si ya lo es).
+        Retorna None si value es falsy o si el parseo falla.
+        """
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return isoparse(value)
+        except Exception:
+            return None
         
     def _generar_identificador(self, tipo_producto: str, material_code: str, ancho: float, avance: float,
                            num_pistas: int, num_tintas: int, acabado_code: str, num_paquetes_rollos: int,
@@ -70,7 +116,22 @@ class DBManager:
         es_manga = "MANGA" in tipo_producto.upper()
         tipo = "MT" if es_manga else "ET"  # Usar MT para mangas, ET para etiquetas
         
-        dimensiones = f"{ancho:.0f}x{avance:.0f}MM"
+        # Formatear dimensiones sin redondear decimales
+        try:
+            ancho_str = format(Decimal(str(ancho)).normalize(), 'f')
+            if '.' in ancho_str:
+                ancho_str = ancho_str.rstrip('0').rstrip('.')
+        except Exception:
+            ancho_str = str(ancho)
+
+        try:
+            avance_str = format(Decimal(str(avance)).normalize(), 'f')
+            if '.' in avance_str:
+                avance_str = avance_str.rstrip('0').rstrip('.')
+        except Exception:
+            avance_str = str(avance)
+
+        dimensiones = f"{ancho_str}x{avance_str}MM"
         
         # Inicializar las cadenas para tintas y acabado
         tintas_str_final = f"{num_tintas}T"
@@ -233,7 +294,7 @@ class DBManager:
         campos_booleanos = {'es_manga', 'existe_troquel', 'es_recotizacion', 'planchas_x_separado', 'ajustes_modificados_admin'}
         campos_enteros = {'material_adhesivo_id', 'acabado_id', 'tipo_foil_id', 'num_tintas', 'num_paquetes_rollos',
                          'tipo_grafado_id', 'estado_id', 'id_motivo_rechazo', 'numero_pistas',
-                         'tipo_producto_id', 'forma_pago_id'}
+                         'tipo_producto_id'}
         campos_numericos = {'valor_troquel', 'valor_plancha_separado', 'ancho', 'avance', 'altura_grafado'}
         
         new_dict = {}
@@ -295,7 +356,7 @@ class DBManager:
             datos_cotizacion.pop('material', None)
             datos_cotizacion.pop('acabado', None)
             datos_cotizacion.pop('tipo_producto', None)
-            datos_cotizacion.pop('forma_pago', None)
+
             datos_cotizacion.pop('perfil_comercial_info', None)
             datos_cotizacion.pop('tipo_grafado', None)
             # ---------------------------------------------------------
@@ -309,10 +370,7 @@ class DBManager:
                         print(f"Error convirtiendo {key} a float")
                         datos_cotizacion[key] = 0.0
             
-            # Asegurarse que forma_pago_id esté presente como None si no se proporcionó
-            if 'forma_pago_id' not in datos_cotizacion or datos_cotizacion['forma_pago_id'] is None:
-                print("Estableciendo forma_pago_id por defecto a 1 (antes de RPC)")
-                datos_cotizacion['forma_pago_id'] = 1 # O el default que corresponda
+
             
             
             print("\\nDatos para la llamada RPC inicial:")
@@ -434,7 +492,6 @@ class DBManager:
 
 
             # 5. Actualizar la cotización con el identificador generado
-            """
             if identificador_final:
                 print(f"\\nActualizando cotización {cotizacion_id} con el identificador final...")
                 try:
@@ -472,7 +529,6 @@ class DBManager:
                     st.warning(f"Cotización {cotizacion_id} creada, pero falló la actualización del identificador. Error: {e}")
             
             # 6. Devolver los datos de la cotización creada (incluyendo id y numero_cotizacion_final)
-            """
             return cotizacion_creada_data
 
         try:
@@ -757,6 +813,7 @@ class DBManager:
                 clientes = self.supabase.table('clientes')\
                     .select('*')\
                     .in_('id', cliente_ids)\
+                    .order('nombre', desc=False)\
                     .execute()
 
                 return [Cliente(
@@ -766,8 +823,8 @@ class DBManager:
                     persona_contacto=cliente.get('persona_contacto'),
                     correo_electronico=cliente.get('correo_electronico'),
                     telefono=cliente.get('telefono'),
-                    creado_en=datetime.fromisoformat(cliente['creado_en']) if cliente.get('creado_en') else None,
-                    actualizado_en=datetime.fromisoformat(cliente['actualizado_en']) if cliente.get('actualizado_en') else None
+                    creado_en=self._parse_timestamptz(cliente.get('creado_en')),
+                    actualizado_en=self._parse_timestamptz(cliente.get('actualizado_en'))
                 ) for cliente in clientes.data] if clientes.data else []
 
             except Exception as e:
@@ -1175,39 +1232,44 @@ class DBManager:
             return 'faf071b9-a885-4d8a-b65e-6a3b3785334a' # ID de comercial por defecto
 
     def get_clientes(self) -> List[Cliente]:
-        """Obtiene todos los clientes disponibles usando RPC."""
+        """Obtiene clientes sujetos a RLS (admin ve todos; comercial solo los propios)."""
         def _operation():
-            print("\n=== DEBUG: Llamando RPC get_all_clientes ===")
-            response = self.supabase.rpc('get_all_clientes').execute()
-            
+            print("\n=== DEBUG: Consultando clientes con RLS activo ===")
+            response = (
+                self.supabase
+                .from_('clientes')
+                .select('*')
+                .order('nombre', desc=False)
+                .execute()
+            )
+
             if response is None:
-                 print("ERROR: La respuesta de Supabase RPC fue None en get_clientes.")
-                 raise ConnectionError("Supabase RPC devolvió None en get_clientes")
-            
+                print("ERROR: La respuesta de Supabase fue None en get_clientes.")
+                raise ConnectionError("Supabase devolvió None en get_clientes")
+
             if not response.data:
-                print("No se encontraron clientes (vía RPC)")
+                print("No se encontraron clientes (RLS)")
                 return []
-            
-            clientes = []
+
+            clientes: List[Cliente] = []
             for item in response.data:
-                 try:
-                     clientes.append(Cliente(**item))
-                 except TypeError as te:
-                    print(f"Error creando objeto Cliente desde RPC data: {te}")
+                try:
+                    clientes.append(Cliente(**item))
+                except TypeError as te:
+                    print(f"Error creando objeto Cliente desde datos: {te}")
                     print(f"Datos del item problemático: {item}")
                     continue
-                    
-            print(f"Se encontraron {len(clientes)} clientes (vía RPC)")        
+
+            print(f"Se encontraron {len(clientes)} clientes (RLS)")
             return clientes
 
         try:
-            # Usar _retry_operation con la función RPC
-            return self._retry_operation("obtener clientes (RPC)", _operation)
+            return self._retry_operation("obtener clientes (RLS)", _operation)
         except ConnectionError as ce:
-             print(f"Error de conexión persistente en get_clientes (RPC): {ce}")
-             raise
+            print(f"Error de conexión persistente en get_clientes: {ce}")
+            raise
         except Exception as e:
-            print(f"Error al obtener clientes (RPC): {str(e)}")
+            print(f"Error al obtener clientes: {str(e)}")
             traceback.print_exc()
             raise
 
@@ -1229,6 +1291,33 @@ class DBManager:
             print(f"Error al obtener cliente: {e}")
             traceback.print_exc()
             return None
+
+    def actualizar_cliente(self, cliente_id: int, cambios: Dict[str, Any]) -> bool:
+        """Actualiza campos permitidos de un cliente.
+        RLS: Comercial solo si es dueña (vía referencias_cliente); admin puede todos.
+        """
+        campos_permitidos = {
+            'nombre', 'persona_contacto', 'correo_electronico', 'telefono'
+        }
+        data = {k: v for k, v in cambios.items() if k in campos_permitidos}
+        if not data:
+            print("No hay campos válidos para actualizar en cliente")
+            return False
+        try:
+            # Nota: el cliente Python no soporta encadenar .select después de update
+            resp = (
+                self.supabase
+                .from_('clientes')
+                .update(data)
+                .eq('id', cliente_id)
+                .execute()
+            )
+            # Si RLS bloquea, se lanzará APIError y caerá en except
+            return resp is not None
+        except Exception as e:
+            print(f"Error actualizando cliente {cliente_id}: {e}")
+            traceback.print_exc()
+            return False
 
     def ejecutar_sql(self, query: str) -> Any:
         """Ejecuta una consulta SQL directamente en la base de datos"""
@@ -1268,30 +1357,52 @@ class DBManager:
             except ValueError:
                 raise Exception(f"No se pudo convertir el código '{codigo_limpio}' a número")
             
-            # Preparar datos para RPC
+            # Preparar datos para RPC atómica (cliente + referencia dueña)
             rpc_data = {
                 'p_nombre': cliente.nombre.strip(),
                 'p_codigo': codigo_numerico,  # Enviar como bigint
                 'p_persona_contacto': cliente.persona_contacto.strip() if cliente.persona_contacto else None,
                 'p_correo_electronico': cliente.correo_electronico.strip() if cliente.correo_electronico else None,
-                'p_telefono': cliente.telefono.strip() if cliente.telefono else None
+                'p_telefono': cliente.telefono.strip() if cliente.telefono else None,
+                'p_descripcion': 'Principal'
             }
             
             print("\nDatos que se enviarán:")
             for k, v in rpc_data.items():
                 print(f"  {k}: {v} (tipo: {type(v)})")
             
-            # Intentar insertar usando RPC
-            response = self.supabase.rpc(
-                'insertar_cliente',
-                rpc_data
-            ).execute()
-            
-            if not response.data:
-                raise Exception("No se pudo crear el cliente")
-            
-            nuevo_cliente = Cliente(**response.data[0])
-            return nuevo_cliente
+            # Intentar crear cliente + referencia con RPC segura
+            try:
+                response = self.supabase.rpc(
+                    'crear_cliente_y_referencia',
+                    rpc_data
+                ).execute()
+            except Exception as e_rpc:
+                print(f"Error llamando a crear_cliente_y_referencia: {e_rpc}")
+                raise
+
+            if not response or not response.data:
+                raise Exception("No se pudo crear el cliente (sin datos de RPC)")
+
+            # La RPC retorna (cliente_id, referencia_id)
+            result = response.data[0]
+            cliente_id = result.get('cliente_id') if isinstance(result, dict) else None
+            if not cliente_id:
+                raise Exception("La RPC no retornó cliente_id")
+
+            # Recuperar el cliente creado sujeto a RLS
+            cliente_creado = self.get_cliente(int(cliente_id))
+            if not cliente_creado:
+                # Fallback: construir objeto mínimo si no se puede leer aún
+                cliente_creado = Cliente(
+                    id=int(cliente_id),
+                    nombre=cliente.nombre.strip(),
+                    codigo=codigo_numerico,
+                    persona_contacto=rpc_data['p_persona_contacto'],
+                    correo_electronico=rpc_data['p_correo_electronico'],
+                    telefono=rpc_data['p_telefono']
+                )
+            return cliente_creado
                 
         except Exception as e:
             print("\n!!! ERROR EN CREAR_CLIENTE !!!")
@@ -1513,12 +1624,13 @@ class DBManager:
             for k, v in data.items():
                 print(f"  {k}: {v} (Tipo: {type(v)}) ")
 
-            # Verificar si ya existe una referencia con la misma descripción para este cliente
+            # Verificar si ya existe una referencia con la misma descripción para este cliente y ese usuario objetivo
             existing = self.supabase.rpc(
                 'check_referencia_exists',
                 {
                     'p_cliente_id': referencia.cliente_id,
-                    'p_descripcion': data['descripcion']
+                    'p_descripcion': data['descripcion'],
+                    'p_id_usuario': user_id_to_use
                 }
             ).execute()
 
@@ -1631,8 +1743,7 @@ class DBManager:
 
             acabado = cotizacion.acabado
             tipo_producto = cotizacion.tipo_producto
-            # Remove redundant fetch, rely on cotizacion.forma_pago from obtener_cotizacion
-            # forma_pago = self.get_forma_pago(cotizacion.forma_pago_id) if cotizacion.forma_pago_id else None
+
             
             # Obtener los valores de material, acabado y troquel de la tabla de cálculos
             calculos = self.get_calculos_escala_cotizacion(cotizacion_id)
@@ -1685,8 +1796,8 @@ class DBManager:
                 'avance': calculos.get('avance', 0) if calculos else 0,
                 'numero_pistas': calculos.get('numero_pistas', 0) if calculos else 0,
                 'desperdicio_total': calculos.get('desperdicio_total', 0) if calculos else 0,
-                # Use cotizacion.forma_pago (the object) directly
-                'forma_pago_desc': cotizacion.forma_pago.descripcion if cotizacion.forma_pago and cotizacion.forma_pago.descripcion else "No especificada"
+    
+
             }
             
             # --- INICIO: Añadir Adhesivo Tipo ---
@@ -1745,7 +1856,7 @@ class DBManager:
             print(f"  Valor Material: {datos.get('valor_material')}")
             print(f"  Valor Acabado: {datos.get('valor_acabado')}")
             print(f"  Valor Troquel: {datos.get('valor_troquel')}")
-            print(f"  Forma de Pago: {datos.get('forma_pago_desc')}") # Imprimir forma de pago
+
             print(f"  Política de Entrega: {datos.get('politica_entrega')}") # Imprimir política de entrega
 
             # Procesar las escalas desde el objeto cotizacion.escalas
@@ -1958,7 +2069,7 @@ class DBManager:
                 'ancho': cotizacion.ancho,
                 'avance': cotizacion.avance,
                 'identificador': cotizacion.identificador,
-                'forma_pago_id': cotizacion.forma_pago_id,
+
                 'altura_grafado': cotizacion.altura_grafado
             }
             
@@ -2030,7 +2141,8 @@ class DBManager:
                                 num_tintas: int, numero_pistas: int, num_paquetes_rollos: int, 
                                 tipo_producto_id: int, tipo_grafado_id: Optional[int], valor_acabado: float, 
                                 unidad_z_dientes: float, altura_grafado: Optional[float]=None, 
-                                valor_plancha_separado: Optional[float] = None) -> bool:
+                                valor_plancha_separado: Optional[float] = None,
+                                parametros_especiales: Optional[Dict[str, Any]] = None) -> bool:
         """Guarda o actualiza los cálculos de escala para una cotización"""
         try:
             print("\nGuardando cálculos de escala actualizados...")
@@ -2063,6 +2175,20 @@ class DBManager:
             
             if response.data:
                 print("Cálculos de escala guardados exitosamente")
+                # Intentar guardar parametros_especiales si fueron provistos
+                if parametros_especiales:
+                    try:
+                        print("Guardando parametros_especiales adjuntos...")
+                        _ = (
+                            self.supabase
+                            .from_('calculos_escala_cotizacion')
+                            .update({'parametros_especiales': parametros_especiales})
+                            .eq('cotizacion_id', cotizacion_id)
+                            .execute()
+                        )
+                    except Exception as e_save_params:
+                        # No bloquear el flujo si la columna no existe o no hay permisos
+                        print(f"ADVERTENCIA: No se pudieron guardar parametros_especiales: {e_save_params}")
                 return True
             else:
                 print("No se recibió respuesta al guardar cálculos de escala")
@@ -2071,6 +2197,25 @@ class DBManager:
         except Exception as e:
             print(f"Error de API (Postgrest) al guardar cálculos escala: {e}")
             traceback.print_exc()
+            return False
+
+    def guardar_parametros_especiales(self, cotizacion_id: int, parametros_especiales: Optional[Dict[str, Any]]) -> bool:
+        """Guarda un JSON de parametros_especiales en calculos_escala_cotizacion si la columna existe.
+        No falla en caso de error de esquema/permiso; devuelve False pero deja fluir.
+        """
+        try:
+            if not parametros_especiales:
+                return True
+            _ = (
+                self.supabase
+                .from_('calculos_escala_cotizacion')
+                .update({'parametros_especiales': parametros_especiales})
+                .eq('cotizacion_id', cotizacion_id)
+                .execute()
+            )
+            return True
+        except Exception as e:
+            print(f"ADVERTENCIA: No se pudieron guardar parametros_especiales (¿columna ausente?): {e}")
             return False
 
     def get_cotizacion_por_referencia(self, referencia_id: int) -> Optional[Cotizacion]:
@@ -2097,7 +2242,7 @@ class DBManager:
             material = self.get_material(cotizacion_data['material_id']) if cotizacion_data.get('material_id') else None
             acabado = self.get_acabado(cotizacion_data['acabado_id']) if cotizacion_data.get('acabado_id') else None
             tipo_producto = self.get_tipo_producto(cotizacion_data['tipo_producto_id']) if cotizacion_data.get('tipo_producto_id') else None
-            forma_pago = self.get_forma_pago(cotizacion_data['forma_pago_id']) if cotizacion_data.get('forma_pago_id') else None
+
             
             # Crear objeto Cotizacion con todos los datos
             cotizacion = Cotizacion(
@@ -2129,7 +2274,7 @@ class DBManager:
                 material=material,
                 acabado=acabado,
                 tipo_producto=tipo_producto,
-                forma_pago=forma_pago
+
             )
             
             # Obtener y asignar las escalas
@@ -2181,6 +2326,211 @@ class DBManager:
             calculos = self.get_calculos_escala_cotizacion(cotizacion_id)
             if not calculos:
                 return None
+            return calculos
+        except Exception as e:
+            print(f"Error en get_calculos_persistidos: {e}")
+            traceback.print_exc()
+            return None
+
+    # ============================
+    #  Políticas de Entrega (CRUD)
+    # ============================
+    def get_politicas_entrega(self) -> List[PoliticasEntrega]:
+        try:
+            response = self.supabase.table('politicas_entrega').select('*').order('id').execute()
+            return [PoliticasEntrega(
+                id=item.get('id'),
+                descripcion=item.get('descripcion', ''),
+                created_at=self._parse_dt(item.get('created_at')),
+                updated_at=self._parse_dt(item.get('updated_at')),
+            ) for item in (response.data or [])]
+        except Exception as e:
+            print(f"Error al obtener políticas de entrega: {e}")
+            return []
+
+    def get_politica_entrega(self, politica_id: int) -> Optional[PoliticasEntrega]:
+        try:
+            response = self.supabase.table('politicas_entrega').select('*').eq('id', politica_id).maybe_single().execute()
+            data = response.data if isinstance(response.data, dict) else None
+            if not data:
+                return None
+            return PoliticasEntrega(
+                id=data.get('id'),
+                descripcion=data.get('descripcion', ''),
+                created_at=self._parse_dt(data.get('created_at')),
+                updated_at=self._parse_dt(data.get('updated_at')),
+            )
+        except Exception as e:
+            print(f"Error al obtener política de entrega: {e}")
+            return None
+
+    def create_politica_entrega(self, politica: PoliticasEntrega) -> bool:
+        try:
+            payload = {
+                'descripcion': politica.descripcion,
+            }
+            resp = self.supabase.table('politicas_entrega').insert(payload).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al crear política de entrega: {e}")
+            return False
+
+    def update_politica_entrega(self, politica: PoliticasEntrega) -> bool:
+        try:
+            payload = {
+                'descripcion': politica.descripcion,
+                'updated_at': datetime.now().isoformat()
+            }
+            resp = self.supabase.table('politicas_entrega').update(payload).eq('id', politica.id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al actualizar política de entrega: {e}")
+            return False
+
+    def delete_politica_entrega(self, politica_id: int) -> bool:
+        try:
+            resp = self.supabase.table('politicas_entrega').delete().eq('id', politica_id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al eliminar política de entrega: {e}")
+            return False
+
+    def get_cotizaciones_by_politica(self, politica_id: int) -> List[Dict[str, Any]]:
+        try:
+            resp = self.supabase.table('cotizaciones').select('id').eq('politicas_entrega_id', politica_id).execute()
+            return resp.data or []
+        except Exception:
+            return []
+
+    # ==========================
+    #  Políticas de Cartera CRUD
+    # ==========================
+    def get_politicas_cartera(self) -> List[PoliticasCartera]:
+        try:
+            response = self.supabase.table('politicas_cartera').select('*').order('id').execute()
+            return [PoliticasCartera(
+                id=item.get('id'),
+                descripcion=item.get('descripcion', ''),
+                created_at=self._parse_dt(item.get('created_at')),
+                updated_at=self._parse_dt(item.get('updated_at')),
+            ) for item in (response.data or [])]
+        except Exception as e:
+            print(f"Error al obtener políticas de cartera: {e}")
+            return []
+
+    def get_politica_cartera(self, politica_id: int) -> Optional[PoliticasCartera]:
+        try:
+            response = self.supabase.table('politicas_cartera').select('*').eq('id', politica_id).maybe_single().execute()
+            data = response.data if isinstance(response.data, dict) else None
+            if not data:
+                return None
+            return PoliticasCartera(
+                id=data.get('id'),
+                descripcion=data.get('descripcion', ''),
+                created_at=self._parse_dt(data.get('created_at')),
+                updated_at=self._parse_dt(data.get('updated_at')),
+            )
+        except Exception as e:
+            print(f"Error al obtener política de cartera: {e}")
+            return None
+
+    def create_politicas_cartera_table_if_not_exists(self) -> bool:
+        try:
+            # Solo helper: crear tabla simple si no existe
+            self.supabase.rpc('exec_sql', {
+                'p_sql': """
+                create table if not exists public.politicas_cartera (
+                  id serial primary key,
+                  descripcion text not null,
+                  created_at timestamptz default now(),
+                  updated_at timestamptz default now()
+                );
+                """
+            }).execute()
+            return True
+        except Exception as e:
+            print(f"Error creando tabla politicas_cartera: {e}")
+            return False
+
+    def create_politica_cartera(self, politica: PoliticasCartera) -> bool:
+        try:
+            payload = {
+                'descripcion': politica.descripcion,
+            }
+            resp = self.supabase.table('politicas_cartera').insert(payload).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al crear política de cartera: {e}")
+            return False
+
+    def update_politica_cartera(self, politica: PoliticasCartera) -> bool:
+        try:
+            payload = {
+                'descripcion': politica.descripcion,
+                'updated_at': datetime.now().isoformat()
+            }
+            resp = self.supabase.table('politicas_cartera').update(payload).eq('id', politica.id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al actualizar política de cartera: {e}")
+            return False
+
+    def delete_politica_cartera(self, politica_id: int) -> bool:
+        try:
+            resp = self.supabase.table('politicas_cartera').delete().eq('id', politica_id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al eliminar política de cartera: {e}")
+            return False
+
+    # ============================
+    #  Gestión de Comerciales (perfiles)
+    # ============================
+    def get_comerciales_by_role_id(self, role_id: str) -> List[Dict[str, Any]]:
+        """Obtiene perfiles que pertenecen al rol de comercial especificado por role_id."""
+        try:
+            # Asumimos tabla 'perfiles' con columnas: id(uuid), nombre, email, celular(int), rol_id(uuid), updated_at
+            resp = self.supabase.table('perfiles').select('id,nombre,email,celular,rol_id,updated_at').eq('rol_id', role_id).order('updated_at', desc=True).execute()
+            return resp.data or []
+        except Exception as e:
+            print(f"Error al obtener comerciales: {e}")
+            return []
+
+    def create_comercial(self, nombre: str, email: Optional[str], celular: Optional[int], role_id: str) -> bool:
+        try:
+            payload = {
+                'nombre': nombre,
+                'email': email,
+                'celular': celular,
+                'rol_id': role_id,
+            }
+            resp = self.supabase.table('perfiles').insert(payload).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al crear comercial: {e}")
+            return False
+
+    def update_comercial(self, perfil_id: str, nombre: str, email: Optional[str], celular: Optional[int]) -> bool:
+        try:
+            payload = {
+                'nombre': nombre,
+                'email': email,
+                'celular': celular,
+                'updated_at': datetime.now().isoformat()
+            }
+            resp = self.supabase.table('perfiles').update(payload).eq('id', perfil_id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al actualizar comercial: {e}")
+            return False
+
+    def delete_comercial(self, perfil_id: str) -> bool:
+        try:
+            resp = self.supabase.table('perfiles').delete().eq('id', perfil_id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al eliminar comercial: {e}")
+            return False
                 
             # Formatear los datos para que coincidan con la estructura esperada por generar_informe_tecnico_markdown
             datos_calculo = {
@@ -2364,34 +2714,7 @@ class DBManager:
             if details.get('tipo_producto_id'):
                 tipo_prod_obj = TipoProducto(id=details['tipo_producto_id'], nombre=details.get('tipo_producto_nombre', 'N/A')) # Simplificado
                 
-            # --- INICIO MODIFICACIÓN FORMA PAGO ---
-            forma_pago_obj = None
-            forma_pago_id_from_details = details.get('forma_pago_id')
 
-            if forma_pago_id_from_details:
-                forma_pago_desc_from_details = details.get('forma_pago_desc')
-
-                # Si la descripción no vino de RPC o es N/A, buscarla por ID
-                if not forma_pago_desc_from_details or forma_pago_desc_from_details == 'N/A':
-                    print(f"obtener_cotizacion: Forma pago desc no encontrada en details (o es 'N/A'). Buscando por ID {forma_pago_id_from_details}...")
-                    try:
-                        fp_lookup = self.supabase.table('formas_pago').select('descripcion').eq('id', forma_pago_id_from_details).maybe_single().execute()
-                        if fp_lookup.data and fp_lookup.data.get('descripcion'):
-                            forma_pago_desc_from_details = fp_lookup.data['descripcion']
-                            print(f"obtener_cotizacion: Forma pago desc encontrada por lookup: {forma_pago_desc_from_details}")
-                        else:
-                            print(f"obtener_cotizacion: No se encontró forma pago desc en lookup para ID {forma_pago_id_from_details}")
-                            forma_pago_desc_from_details = 'No especificada' # Usar default más descriptivo
-                    except Exception as lookup_err_fp:
-                        print(f"Error buscando forma pago desc por ID {forma_pago_id_from_details}: {lookup_err_fp}")
-                        forma_pago_desc_from_details = 'Error al buscar' # Indicar error
-                
-                # Crear el objeto FormaPago
-                try:
-                    forma_pago_obj = FormaPago(id=forma_pago_id_from_details, descripcion=forma_pago_desc_from_details)
-                except Exception as e_fp:
-                     print(f"Error creando objeto FormaPago con ID {forma_pago_id_from_details} y Desc {forma_pago_desc_from_details}: {e_fp}")
-            # --- FIN MODIFICACIÓN FORMA PAGO ---
                  
             tipo_grafado_obj = None # El modelo Cotizacion usa tipo_grafado_id directamente
             if details.get('tipo_grafado_id'):
@@ -2406,7 +2729,6 @@ class DBManager:
                 acabado_id=details.get('acabado_id'),
                 tipo_foil_id=details.get('tipo_foil_id'),  # Agregado campo tipo_foil_id
                 tipo_producto_id=details.get('tipo_producto_id'),
-                forma_pago_id=details.get('forma_pago_id'),
                 tipo_grafado_id=details.get('tipo_grafado_id'),
                 estado_id=details.get('estado_id'),
                 id_motivo_rechazo=details.get('id_motivo_rechazo'),
@@ -2437,7 +2759,6 @@ class DBManager:
                 # adhesivo=adhesivo_obj,
                 acabado=acabado_obj,
                 tipo_producto=tipo_prod_obj,
-                forma_pago=forma_pago_obj,
                 tipo_foil=TipoFoil(id=details.get('tipo_foil_id'), nombre=details.get('tipo_foil_nombre', 'N/A')) if details.get('tipo_foil_id') else None,  # Agregado objeto tipo_foil
                 # tipo_grafado=tipo_grafado_obj, # ID es suficiente
             )
@@ -2657,72 +2978,7 @@ class DBManager:
             return False
 
     # --- NUEVO: Función para obtener descripción de forma de pago --- 
-    def get_forma_pago_desc(self, forma_pago_id: Optional[int]) -> str:
-        """Obtiene la descripción de una forma de pago por su ID."""
-        if forma_pago_id is None:
-            return "No especificada"
-        forma_pago = self.get_forma_pago(forma_pago_id)
-        return forma_pago.descripcion if forma_pago else "ID inválido"
 
-    def get_formas_pago(self) -> List[FormaPago]:
-        """Obtiene todas las formas de pago disponibles."""
-        def _operation():
-            print("\n=== DEBUG: Llamando RPC get_all_formas_pago ===") # Asumiendo RPC existe
-            try:
-                # Intentar con RPC primero (si existe)
-                response = self.supabase.rpc('get_all_formas_pago').execute() 
-            except Exception:
-                 # Fallback a SELECT si RPC falla o no existe
-                 print("Fallback a SELECT para formas_pago")
-                 response = self.supabase.from_('formas_pago').select('*').order('id').execute()
-            
-            if response is None:
-                 print("ERROR: La respuesta de Supabase fue None en get_formas_pago.")
-                 raise ConnectionError("Supabase devolvió None en get_formas_pago")
-            
-            if not response.data:
-                logging.warning("No se encontraron formas de pago")
-                return []
-                
-            formas_pago = []
-            for item in response.data:
-                 try:
-                     formas_pago.append(FormaPago(**item))
-                 except TypeError as te:
-                    print(f"Error creando objeto FormaPago desde data: {te}")
-                    print(f"Datos del item problemático: {item}")
-                    continue
-                    
-            print(f"Formas de pago obtenidas: {len(formas_pago)}")        
-            return formas_pago
-            
-        try:
-            return self._retry_operation("obtener formas de pago", _operation)
-        except ConnectionError as ce:
-             print(f"Error de conexión persistente en get_formas_pago: {ce}")
-             raise
-        except Exception as e:
-            logging.error(f"Error al obtener formas de pago: {str(e)}")
-            traceback.print_exc()
-            raise
-            
-    def get_forma_pago(self, forma_pago_id: int) -> Optional[FormaPago]:
-        """Obtiene una forma de pago específica por su ID."""
-        if forma_pago_id is None:
-            return None
-        try:
-            response = self.supabase.from_('formas_pago').select('*').eq('id', forma_pago_id).execute()
-            
-            if not response.data or len(response.data) == 0:
-                print(f"No se encontró forma de pago con ID {forma_pago_id}")
-                return None
-            
-            return FormaPago(**response.data[0])
-            
-        except Exception as e:
-            print(f"Error al obtener forma de pago: {e}")
-            traceback.print_exc()
-            return None
 
     def get_referencias_by_cliente(self, cliente_id: int) -> List[ReferenciaCliente]:
         """Obtiene las referencias de un cliente"""
@@ -3231,34 +3487,7 @@ class DBManager:
             if details.get('tipo_producto_id'):
                 tipo_prod_obj = TipoProducto(id=details['tipo_producto_id'], nombre=details.get('tipo_producto_nombre', 'N/A')) # Simplificado
                 
-            # --- INICIO MODIFICACIÓN FORMA PAGO ---
-            forma_pago_obj = None
-            forma_pago_id_from_details = details.get('forma_pago_id')
 
-            if forma_pago_id_from_details:
-                forma_pago_desc_from_details = details.get('forma_pago_desc')
-
-                # Si la descripción no vino de RPC o es N/A, buscarla por ID
-                if not forma_pago_desc_from_details or forma_pago_desc_from_details == 'N/A':
-                    print(f"obtener_cotizacion: Forma pago desc no encontrada en details (o es 'N/A'). Buscando por ID {forma_pago_id_from_details}...")
-                    try:
-                        fp_lookup = self.supabase.table('formas_pago').select('descripcion').eq('id', forma_pago_id_from_details).maybe_single().execute()
-                        if fp_lookup.data and fp_lookup.data.get('descripcion'):
-                            forma_pago_desc_from_details = fp_lookup.data['descripcion']
-                            print(f"obtener_cotizacion: Forma pago desc encontrada por lookup: {forma_pago_desc_from_details}")
-                        else:
-                            print(f"obtener_cotizacion: No se encontró forma pago desc en lookup para ID {forma_pago_id_from_details}")
-                            forma_pago_desc_from_details = 'No especificada' # Usar default más descriptivo
-                    except Exception as lookup_err_fp:
-                        print(f"Error buscando forma pago desc por ID {forma_pago_id_from_details}: {lookup_err_fp}")
-                        forma_pago_desc_from_details = 'Error al buscar' # Indicar error
-                
-                # Crear el objeto FormaPago
-                try:
-                    forma_pago_obj = FormaPago(id=forma_pago_id_from_details, descripcion=forma_pago_desc_from_details)
-                except Exception as e_fp:
-                     print(f"Error creando objeto FormaPago con ID {forma_pago_id_from_details} y Desc {forma_pago_desc_from_details}: {e_fp}")
-            # --- FIN MODIFICACIÓN FORMA PAGO ---
                  
             tipo_grafado_obj = None # El modelo Cotizacion usa tipo_grafado_id directamente
             if details.get('tipo_grafado_id'):
@@ -3273,7 +3502,6 @@ class DBManager:
                 acabado_id=details.get('acabado_id'),
                 tipo_foil_id=details.get('tipo_foil_id'),  # Agregado campo tipo_foil_id
                 tipo_producto_id=details.get('tipo_producto_id'),
-                forma_pago_id=details.get('forma_pago_id'),
                 tipo_grafado_id=details.get('tipo_grafado_id'),
                 estado_id=details.get('estado_id'),
                 id_motivo_rechazo=details.get('id_motivo_rechazo'),
@@ -3304,7 +3532,6 @@ class DBManager:
                 # adhesivo=adhesivo_obj,
                 acabado=acabado_obj,
                 tipo_producto=tipo_prod_obj,
-                forma_pago=forma_pago_obj,
                 tipo_foil=TipoFoil(id=details.get('tipo_foil_id'), nombre=details.get('tipo_foil_nombre', 'N/A')) if details.get('tipo_foil_id') else None,  # Agregado objeto tipo_foil
                 # tipo_grafado=tipo_grafado_obj, # ID es suficiente
             )

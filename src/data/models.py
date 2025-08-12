@@ -290,26 +290,23 @@ class EstadoCotizacion:
     estado: str
     motivo_rechazo_id: Optional[int] = None
 
-@dataclass
-class FormaPago:
-    """Representa una forma de pago"""
-    id: int
-    descripcion: str
 
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> 'FormaPago':
-        """Crea una instancia de FormaPago desde un diccionario."""
-        return FormaPago(
-            id=data['id'],
-            descripcion=data['descripcion']
-        )
 
 @dataclass
 class PoliticasEntrega:
-    """Represents delivery policies."""
-    id: int
+    """Representa políticas de entrega configurables por el administrador."""
+    id: Optional[int]
     descripcion: str
-    # Add other relevant fields
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+@dataclass
+class PoliticasCartera:
+    """Representa políticas de cartera (condiciones comerciales)."""
+    id: Optional[int]
+    descripcion: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 @dataclass
 class MaterialAdhesivo:
@@ -355,7 +352,6 @@ class Cotizacion:
     id_usuario: Optional[UUID] = None
     id_motivo_rechazo: Optional[int] = None
     colores_tinta: Optional[str] = None
-    forma_pago_id: Optional[int] = None
     altura_grafado: Optional[float] = None
     politicas_entrega_id: Optional[int] = None
     escalas: List[Escala] = field(default_factory=list)
@@ -364,7 +360,6 @@ class Cotizacion:
     material_adhesivo: Optional[MaterialAdhesivo] = None
     acabado: Optional[Acabado] = None
     tipo_producto: Optional[TipoProducto] = None
-    forma_pago: Optional[FormaPago] = None
     politicas_entrega: Optional[PoliticasEntrega] = None
     tipo_foil: Optional[TipoFoil] = None  # Nueva relación con TipoFoil
     # --- NUEVO: Campo para perfil --- 
@@ -402,7 +397,6 @@ class Cotizacion:
         modificado_por=None,
         ultima_modificacion_inputs=None,
         colores_tinta=None,
-        forma_pago_id=None,
         politicas_entrega_id=None,
         altura_grafado=None,
         # Relaciones
@@ -410,7 +404,6 @@ class Cotizacion:
         material_adhesivo=None,
         acabado=None,
         tipo_producto=None,
-        forma_pago=None,
         politicas_entrega=None,
         tipo_foil=None,  # Nueva relación
         # --- NUEVO: Añadir campo para perfil --- 
@@ -446,7 +439,6 @@ class Cotizacion:
         self.modificado_por = modificado_por
         self.ultima_modificacion_inputs = ultima_modificacion_inputs
         self.colores_tinta = colores_tinta
-        self.forma_pago_id = forma_pago_id
         self.politicas_entrega_id = politicas_entrega_id
         self.altura_grafado = float(altura_grafado) if altura_grafado is not None else None
         # Relaciones
@@ -454,7 +446,6 @@ class Cotizacion:
         self.material_adhesivo = material_adhesivo
         self.acabado = acabado
         self.tipo_producto = tipo_producto
-        self.forma_pago = forma_pago
         self.politicas_entrega = politicas_entrega
         self.tipo_foil = tipo_foil  # Nueva relación
         # --- NUEVO: Guardar perfil --- 

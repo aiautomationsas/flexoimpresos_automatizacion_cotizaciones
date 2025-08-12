@@ -44,7 +44,7 @@ class CotizacionManager:
             - avance: float
             - ancho: float
             - tipo_producto_id: int
-            - forma_pago_id: int
+
             - altura_grafado: Optional[float]
             - escalas_resultados: List[Dict] # Resultado del cálculo
         """
@@ -72,7 +72,7 @@ class CotizacionManager:
             cotizacion.tipo_producto_id = kwargs.get('tipo_producto_id')
             cotizacion.ancho = float(kwargs.get('ancho', 0.0))
             cotizacion.avance = float(kwargs.get('avance', 0.0))
-            cotizacion.forma_pago_id = kwargs.get('forma_pago_id', 1) # Default a 1 si no se provee
+
             cotizacion.altura_grafado = float(kwargs.get('altura_grafado')) if kwargs.get('altura_grafado') is not None else None
             cotizacion.fecha_creacion = datetime.now()
             cotizacion.ultima_modificacion_inputs = datetime.now() # Marcar como modificado
@@ -103,7 +103,7 @@ class CotizacionManager:
             print(f"  Acabado ID: {cotizacion.acabado_id}")
             print(f"  Num Tintas: {cotizacion.num_tintas}")
             print(f"  Es Manga: {cotizacion.es_manga}")
-            print(f"  Forma Pago ID: {cotizacion.forma_pago_id}")
+
             print(f"  Altura Grafado: {cotizacion.altura_grafado}")
             print(f"  Tipo Grafado ID: {cotizacion.tipo_grafado_id}")
             print(f"  Número de escalas procesadas: {len(cotizacion.escalas)}")
@@ -147,7 +147,7 @@ class CotizacionManager:
             cotizacion.tipo_producto_id = kwargs.get('tipo_producto_id', cotizacion.tipo_producto_id)
             cotizacion.ancho = float(kwargs.get('ancho', cotizacion.ancho))
             cotizacion.avance = float(kwargs.get('avance', cotizacion.avance))
-            cotizacion.forma_pago_id = kwargs.get('forma_pago_id', cotizacion.forma_pago_id)
+
             cotizacion.altura_grafado = float(kwargs.get('altura_grafado', cotizacion.altura_grafado)) if kwargs.get('altura_grafado') is not None else cotizacion.altura_grafado
             cotizacion.ultima_modificacion_inputs = datetime.now()
             cotizacion.modificado_por = kwargs.get('modificado_por', st.session_state.get('user_id')) # Permitir pasar explícitamente
@@ -176,7 +176,7 @@ class CotizacionManager:
             # Imprimir algunos campos para verificar
             print(f"  ID: {cotizacion.id}")
             print(f"  Material Adhesivo ID: {cotizacion.material_adhesivo_id}")
-            print(f"  Forma Pago ID: {cotizacion.forma_pago_id}")
+
             print(f"  Número de escalas actualizadas: {len(cotizacion.escalas)}")
 
             return cotizacion
@@ -252,7 +252,7 @@ class CotizacionManager:
             datos_bd.pop('material', None)
             datos_bd.pop('acabado', None)
             datos_bd.pop('tipo_producto', None)
-            datos_bd.pop('forma_pago', None)
+    
             datos_bd.pop('perfil_comercial_info', None) # Eliminar este campo si existe
             datos_bd.pop('tipo_grafado', None) # Eliminar el nombre, ya tenemos el ID
             
@@ -343,6 +343,15 @@ class CotizacionManager:
             cotizacion_id = resultado_creacion['id']
             cotizacion_model.id = cotizacion_id # Actualizar ID en el modelo
             print(f"Cotización principal creada con ID: {cotizacion_id}")
+            
+            # Intentar guardar parametros_especiales si vienen en datos_calculo
+            try:
+                params_esp = datos_calculo.get('parametros_especiales') if isinstance(datos_calculo, dict) else None
+                if params_esp:
+                    _ = self.db.guardar_parametros_especiales(cotizacion_id, params_esp)
+            except Exception as _:
+                # No bloquear el flujo si falla
+                pass
             
             # 4. Guardar las escalas
             if cotizacion_model.escalas:
@@ -539,8 +548,9 @@ class CotizacionManager:
                 material_code = self.db.get_material_adhesivo_code(mat_ad_id_actual) if mat_ad_id_actual else ""
                 acabado_id_actual = cotizacion_model.acabado_id
                 acabado_code = self.db.get_acabado_code(acabado_id_actual) if acabado_id_actual else ""
-                ancho_actual = cotizacion_model.ancho
-                avance_actual = cotizacion_model.avance
+                # Preferir valores calculados si están disponibles para evitar redondeos en el identificador
+                ancho_actual = datos_calculo.get('ancho_calculado', cotizacion_model.ancho) if 'datos_calculo' in locals() else cotizacion_model.ancho
+                avance_actual = datos_calculo.get('avance_calculado', cotizacion_model.avance) if 'datos_calculo' in locals() else cotizacion_model.avance
                 num_pistas_actual = cotizacion_model.numero_pistas
                 num_tintas_actual = cotizacion_model.num_tintas
                 num_paq_rollos_actual = cotizacion_model.num_paquetes_rollos
@@ -582,7 +592,7 @@ class CotizacionManager:
             datos_actualizar.pop('material', None)
             datos_actualizar.pop('acabado', None)
             datos_actualizar.pop('tipo_producto', None)
-            datos_actualizar.pop('forma_pago', None)
+    
             datos_actualizar.pop('perfil_comercial_info', None)
             datos_actualizar.pop('tipo_grafado', None) 
             # --- INICIO: QUITAR CAMPOS QUE NO PERTENECEN A 'cotizaciones' o se manejan aparte ---
@@ -684,7 +694,8 @@ class CotizacionManager:
                     valor_acabado=datos_calculo.get('valor_acabado', 0.0),
                     unidad_z_dientes=datos_calculo.get('unidad_z_dientes', 0.0),
                     altura_grafado=datos_calculo.get('altura_grafado', cotizacion_model.altura_grafado),
-                    valor_plancha_separado=datos_calculo.get('valor_plancha_separado', cotizacion_model.valor_plancha_separado)
+                    valor_plancha_separado=datos_calculo.get('valor_plancha_separado', cotizacion_model.valor_plancha_separado),
+                    parametros_especiales=datos_calculo.get('parametros_especiales')
                 )
                 if not success_calculos:
                     return False, "⚠️ La cotización principal y escalas se actualizaron, pero hubo un error al guardar los cálculos de escala"

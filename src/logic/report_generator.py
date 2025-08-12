@@ -1,5 +1,7 @@
 import math
 from typing import Dict, Any, Optional
+import re
+from decimal import Decimal
 import streamlit as st # Importar streamlit para acceder a session_state
 import markdown
 import base64
@@ -19,6 +21,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from src.config.constants import GAP_AVANCE_MANGAS, GAP_AVANCE_ETIQUETAS
 # Importar DBManager si es necesario para type hinting, aunque lo usemos de session_state
 from src.data.database import DBManager 
+from src.logic.calculators.calculadora_desperdicios import CalculadoraDesperdicio
 
 def generar_informe_tecnico_markdown(
     cotizacion_data: Dict[str, Any],
@@ -37,6 +40,18 @@ def generar_informe_tecnico_markdown(
         str: El informe técnico formateado en Markdown.
     """
     try:
+        # Utilidad local para formatear medidas sin redondear (preserva decimales tal cual vengan)
+        def format_measure(value: Any) -> str:
+            try:
+                if value is None or value == "":
+                    return "N/A"
+                d = Decimal(str(value))
+                s = format(d.normalize(), 'f')
+                if '.' in s:
+                    s = s.rstrip('0').rstrip('.')
+                return s
+            except Exception:
+                return str(value)
         # Acceder a la instancia de DBManager desde session_state
         if 'db' not in st.session_state:
             return "Error: No se pudo acceder a la base de datos desde session_state."
@@ -126,6 +141,44 @@ def generar_informe_tecnico_markdown(
         gap_avance = GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS
         area_etiqueta = ancho * avance
 
+        # Obtener desperdicio de la unidad (mm) desde cálculos guardados si existe; si no, calcularlo
+        desperdicio_unidad = 0.0
+        try:
+            # Preferir campo persistido
+            desperdicio_persistido = calculos_guardados.get('desperdicio_mm') if isinstance(calculos_guardados, dict) else None
+            if desperdicio_persistido is not None:
+                desperdicio_unidad = float(desperdicio_persistido)
+            else:
+                # Fallback a cálculo en vivo
+                if avance and avance > 0:
+                    calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
+                    mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
+                    if mejor_opcion:
+                        desperdicio_unidad = float(getattr(mejor_opcion, 'desperdicio', 0.0) or 0.0)
+        except Exception as e_desp:
+            print(f"Advertencia: no se pudo obtener/calcular el desperdicio de la unidad para el informe técnico: {e_desp}")
+            desperdicio_unidad = 0.0
+
+        # Gap al avance total = Gap base (2.6mm en etiquetas, 0mm en mangas) + desperdicio por unidad
+        gap_avance_total = (gap_avance or 0.0) + (desperdicio_unidad or 0.0)
+
+        # Obtener número de repeticiones (unidad de montaje)
+        repeticiones_unidad = None
+        try:
+            rep_persistido = calculos_guardados.get('repeticiones') if isinstance(calculos_guardados, dict) else None
+            if rep_persistido is not None:
+                repeticiones_unidad = int(rep_persistido)
+            else:
+                if avance and avance > 0:
+                    if 'calc_desp' not in locals():
+                        calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
+                        mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
+                    if mejor_opcion:
+                        repeticiones_unidad = int(getattr(mejor_opcion, 'repeticiones', 0) or 0)
+        except Exception as e_rep:
+            print(f"Advertencia: no se pudo obtener/calcular las repeticiones para el informe técnico: {e_rep}")
+            repeticiones_unidad = None
+
         # Formato para plancha separada
         plancha_info = ""
         if not es_comercial and valor_plancha_separado is not None and valor_plancha_separado > 0:
@@ -137,9 +190,22 @@ def generar_informe_tecnico_markdown(
 """
 
         # --- Construcción del Informe Markdown --- (Sin cambios en la estructura, solo usa los datos obtenidos arriba)
+        # Ajustar identificador para mostrar dimensiones sin redondeo en el informe técnico
+        identificador_display = str(identificador).upper() if identificador else 'N/A'
+        try:
+            ancho_fmt = format_measure(ancho)
+            avance_fmt = format_measure(avance)
+            if ancho_fmt != 'N/A' and avance_fmt != 'N/A':
+                dims_fmt = f"{ancho_fmt.upper()}X{avance_fmt.upper()}MM"
+                # Reemplazar cualquier patrón de dimensiones existente por el formateado sin redondeo
+                identificador_display = re.sub(r"\b[0-9]+(?:[\.,][0-9]+)?x[0-9]+(?:[\.,][0-9]+)?mm\b", dims_fmt, identificador_display, flags=re.IGNORECASE)
+                # Si no estaba presente el patrón y no contiene dims, no forzar añadir para no cambiar el formato esperado
+        except Exception:
+            pass
+
         header = f"""
 ## Informe Técnico de Cotización
-- **Identificador Único**: {identificador}
+- **Identificador Único**: {identificador_display}
 - **Número Cotización**: {numero_cotizacion}
 - **Cliente**: {cliente_nombre}
 - **Referencia**: {referencia_desc}
@@ -147,15 +213,18 @@ def generar_informe_tecnico_markdown(
 """
 
         params_impresion = f"""
-### Parámetros de Impresión
-- **Ancho**: {ancho:.2f} mm
-- **Avance/Largo**: {avance:.2f} mm
-- **Gap al avance**: {gap_avance:.2f} mm
-- **Pistas**: {pistas}
-- **Número de Tintas**: {num_tintas}
-- **Área de Etiqueta/Manga**: {area_etiqueta:.2f} mm²
-- **Unidad (Z - Dientes Cilindro)**: {dientes}
-"""
+        ### Parámetros de Impresión
+        - **Ancho**: {format_measure(ancho)} mm
+        - **Avance/Largo**: {format_measure(avance)} mm
+        - **Gap al avance (base)**: {format_measure(gap_avance)} mm{'' if not es_manga else ' (mangas)'}
+        - **Adicional por desperdicio de la unidad**: {format_measure(desperdicio_unidad)} mm
+        - **Gap al avance total**: {format_measure(gap_avance)} mm + {format_measure(desperdicio_unidad)} mm = {format_measure(gap_avance_total)} mm
+        - **Pistas**: {pistas}
+        - **Número de repeticiones (unidad)**: {repeticiones_unidad if repeticiones_unidad is not None else 'N/A'}
+        - **Número de Tintas**: {num_tintas}
+        - **Área de Etiqueta/Manga**: {format_measure(area_etiqueta)} mm²
+        - **Unidad (Z - Dientes Cilindro)**: {dientes}
+        """
 
         # --- Modificar info_materiales para incluir Tipo de Foil --- 
         foil_info_str = ""

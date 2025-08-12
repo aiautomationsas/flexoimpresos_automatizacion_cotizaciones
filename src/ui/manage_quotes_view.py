@@ -244,7 +244,10 @@ def show_manage_quotes_ui():
                                     'ancho': calculos_raw.get('ancho', 0.0),
                                     'num_tintas': calculos_raw.get('num_tintas', 0),
                                     'numero_pistas': calculos_raw.get('numero_pistas', 1),
-                                    'num_paquetes_rollos': calculos_raw.get('num_paquetes_rollos', 0)
+                                    'num_paquetes_rollos': calculos_raw.get('num_paquetes_rollos', 0),
+                                    # Pasar desperdicio en mm y repeticiones si están persistidos
+                                    'desperdicio_mm': calculos_raw.get('desperdicio_mm'),
+                                    'repeticiones': calculos_raw.get('repeticiones')
                                 }
                             else:
                                 datos_calculo = None

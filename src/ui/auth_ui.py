@@ -98,24 +98,31 @@ def show_user_info() -> None:
 
     # Crear contenedor para información del usuario y botón de logout
     with st.sidebar:
-        st.markdown(f"""
-            <div style='padding: 1rem; background-color: #f8f9fa; border-radius: 5px;'>
-                <p><strong>Usuario:</strong> {nombre}</p>
-                <p><strong>Rol:</strong> {rol}</p>
-                <p><strong>Email:</strong> {email}</p>
-                <p><small>Última sesión: {st.session_state.get('last_login', 'N/A')}</small></p>
+        avatar_letter = (nombre or "?")[:1].upper()
+        st.markdown(
+            f"""
+            <div style="display:flex; gap:12px; align-items:center; padding:12px; background: linear-gradient(180deg,#ffffff, #f7f9fc); border:1px solid #e6e9ef; border-radius:12px;">
+                <div style="width:44px; height:44px; border-radius:50%; background:#2d7ff9; color:white; display:flex; align-items:center; justify-content:center; font-weight:700;">{avatar_letter}</div>
+                <div>
+                    <div style="font-weight:700; font-size:15px;">{nombre}</div>
+                    <div style="font-size:13px; color:#566074;">🛡️ {rol}</div>
+                    <div style="font-size:12px; color:#7a8699;">✉️ {email}</div>
+                </div>
             </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Cerrar Sesión", key="logout_button", type="primary"):
-                logout_user()
-        
-        with col2:
-            if st.button("Actualizar Perfil", key="update_profile"):
+            <div style="margin-top:6px; font-size:11px; color:#99a1b3; text-align:right;">Última sesión: {st.session_state.get('last_login', 'N/A')}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("\n")
+        col_upd, col_out = st.columns(2)
+        with col_upd:
+            if st.button("🔧 Actualizar Perfil", key="update_profile_btn", type="primary", use_container_width=True):
                 st.session_state.show_profile_update = True
                 st.rerun()
+        with col_out:
+            if st.button("🚪 Cerrar Sesión", key="logout_button", use_container_width=True):
+                logout_user()
 
 def logout_user() -> None:
     """Maneja el proceso de cierre de sesión."""
@@ -155,16 +162,38 @@ def show_profile_update() -> None:
     if not st.session_state.get('show_profile_update'):
         return
 
-    st.sidebar.markdown("### Actualizar Perfil")
+    st.sidebar.markdown("""
+        <div style="padding:6px 0 2px 0;">
+            <span style="font-weight:700; font-size:16px;">🔧 Actualizar Perfil</span>
+            <div style="font-size:12px; color:#566074;">Modifica tu nombre, email o cambia tu contraseña.</div>
+        </div>
+    """, unsafe_allow_html=True)
+
     with st.sidebar.form("profile_update_form"):
         perfil = st.session_state.get('perfil_usuario', {})
         
-        nuevo_nombre = st.text_input("Nombre", value=perfil.get('nombre', ''))
-        nuevo_email = st.text_input("Email", value=perfil.get('email', ''))
-        nueva_password = st.text_input("Nueva Contraseña (opcional)", type="password")
-        confirmar_password = st.text_input("Confirmar Contraseña", type="password") if nueva_password else None
+        nuevo_nombre = st.text_input("Nombre", value=perfil.get('nombre', ''), placeholder="Tu nombre completo")
+        nuevo_email = st.text_input("Email", value=perfil.get('email', ''), placeholder="tu@email.com")
+
+        st.caption("El email se usa para iniciar sesión y recibir notificaciones.")
+
+        cambiar_password = st.checkbox("Cambiar contraseña")
+        nueva_password = None
+        confirmar_password = None
+        if cambiar_password:
+            col1, col2 = st.columns(2)
+            with col1:
+                nueva_password = st.text_input("Nueva contraseña", type="password", placeholder="Mínimo 8 caracteres")
+            with col2:
+                confirmar_password = st.text_input("Confirmar", type="password", placeholder="Repite la contraseña")
+            st.caption("Recomendación: usa una contraseña de 12+ caracteres, con mayúsculas, minúsculas y números.")
         
-        submitted = st.form_submit_button("Actualizar")
+        col_ok, col_cancel = st.columns(2)
+        submitted = col_ok.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
+        cancel = col_cancel.form_submit_button("Cancelar", use_container_width=True)
+        if cancel:
+            st.session_state.show_profile_update = False
+            st.rerun()
         if submitted:
             try:
                 with st.spinner("Actualizando perfil..."):
@@ -174,7 +203,10 @@ def show_profile_update() -> None:
                         return
                     
                     # Validar contraseñas si se está actualizando
-                    if nueva_password:
+                    if cambiar_password:
+                        if not nueva_password or not confirmar_password:
+                            st.error("Debes ingresar y confirmar la nueva contraseña.")
+                            return
                         if nueva_password != confirmar_password:
                             st.error("Las contraseñas no coinciden.")
                             return
@@ -187,7 +219,7 @@ def show_profile_update() -> None:
                     success = auth_manager.update_profile(
                         nombre=nuevo_nombre,
                         email=nuevo_email,
-                        password=nueva_password if nueva_password else None
+                        password=nueva_password if cambiar_password else None
                     )
                     
                     if success:

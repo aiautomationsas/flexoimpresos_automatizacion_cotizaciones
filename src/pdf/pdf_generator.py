@@ -224,8 +224,39 @@ class CotizacionPDF(BasePDFGenerator):
 
                 # Detalles del producto/referencia
                 identificador = datos_cotizacion.get('identificador', '')
+                # Formatear dimensiones sin redondeo para la referencia
+                def _fmt_medida(value):
+                    try:
+                        d = Decimal(str(value))
+                        s = format(d.normalize(), 'f')
+                        if '.' in s:
+                            s = s.rstrip('0').rstrip('.')
+                        return s
+                    except Exception:
+                        return str(value)
+
+                ancho_ref = datos_cotizacion.get('ancho')
+                avance_ref = datos_cotizacion.get('avance')
+                dims_fmt = None
+                if ancho_ref is not None and avance_ref is not None:
+                    dims_fmt = f"{_fmt_medida(ancho_ref).upper()}X{_fmt_medida(avance_ref).upper()}MM"
+
                 if identificador:
-                    elements.append(Paragraph(f"Referencia: {identificador}", self.styles['Normal']))
+                    try:
+                        import re
+                        if dims_fmt:
+                            # Reemplazar cualquier patrón de dimensiones existente por el formateado sin redondeo
+                            identificador_ref = re.sub(r"\b[0-9]+(?:[\.,][0-9]+)?X[0-9]+(?:[\.,][0-9]+)?MM\b", dims_fmt, identificador.upper())
+                        else:
+                            identificador_ref = identificador.upper()
+                    except Exception:
+                        identificador_ref = identificador.upper()
+
+                    # Si no se encontró patrón para reemplazar y tenemos dims, añadirlas al final
+                    if dims_fmt and dims_fmt not in identificador_ref:
+                        elements.append(Paragraph(f"Referencia: {identificador_ref} {dims_fmt}", self.styles['Normal']))
+                    else:
+                        elements.append(Paragraph(f"Referencia: {identificador_ref}", self.styles['Normal']))
                 
                 material_nombre = datos_cotizacion.get('material', {}).get('nombre', 'N/A')
                 elements.append(Paragraph(f"Material: {material_nombre}", self.styles['Normal']))
@@ -323,10 +354,12 @@ class CotizacionPDF(BasePDFGenerator):
                         # Asegurar que altura_grafado sea un número formateado correctamente
                         if altura_grafado is not None:
                             try:
-                                # Convertir a float y luego formatear con 1 decimal
-                                altura_grafado_num = float(altura_grafado)
-                                altura_grafado_fmt = f"{int(round(altura_grafado_num))}"
-                                print(f"Altura formateada: {altura_grafado_fmt}")
+                                from decimal import Decimal
+                                d = Decimal(str(altura_grafado))
+                                altura_grafado_fmt = format(d.normalize(), 'f')
+                                if '.' in altura_grafado_fmt:
+                                    altura_grafado_fmt = altura_grafado_fmt.rstrip('0').rstrip('.')
+                                print(f"Altura formateada (sin redondeo): {altura_grafado_fmt}")
                             except (ValueError, TypeError):
                                 altura_grafado_fmt = str(altura_grafado)
                                 print(f"Error al formatear altura, usando como string: {altura_grafado_fmt}")
@@ -466,8 +499,6 @@ class CotizacionPDF(BasePDFGenerator):
                     elements.append(Spacer(1, 20))
 
                 # Políticas y condiciones
-                forma_pago = datos_cotizacion.get('forma_pago_desc', '50% ANTICIPO 50% ENTREGA')
-                elements.append(Paragraph(f"Forma de Pago: {forma_pago}", self.styles['Normal']))
                 elements.append(Paragraph("I.V.A (no incluido): 19%", self.styles['Normal']))
                 elements.append(Paragraph("% de Tolerancia: 10% + ó - de acuerdo a la cantidad pedida", self.styles['Normal']))
                 elements.append(Spacer(1, 3))

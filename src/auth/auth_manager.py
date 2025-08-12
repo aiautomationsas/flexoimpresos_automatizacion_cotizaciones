@@ -76,6 +76,98 @@ class AuthManager:
             print(f"Error during logout: {str(e)}")
             traceback.print_exc()
 
+    def update_profile(self, nombre: Optional[str] = None, email: Optional[str] = None, password: Optional[str] = None) -> bool:
+        """
+        Actualiza el perfil del usuario autenticado.
+
+        - Actualiza campos en la tabla `perfiles` (nombre, email) para auth.uid()
+        - Actualiza la contraseña a través de Supabase Auth si se proporciona
+
+        Returns: True si al menos una actualización fue exitosa
+        """
+        try:
+            # Obtener sesión/usuario actual
+            session = self.supabase.auth.get_session()
+            if not session or not session.user:
+                print("update_profile: No hay sesión de usuario activa")
+                return False
+
+            user_id = session.user.id
+            current_email = getattr(session.user, 'email', None)
+
+            print(f"update_profile: Iniciando actualización para user_id={user_id}")
+
+            any_success = False
+
+            # 1) Actualización de contraseña en Auth
+            if password:
+                try:
+                    print("update_profile: Actualizando contraseña en Supabase Auth...")
+                    auth_resp = self.supabase.auth.update_user({
+                        "password": password
+                    })
+                    # auth_resp puede no lanzar excepción aunque falle; registramos por si acaso
+                    print(f"update_profile: Respuesta update_user password: {auth_resp}")
+                    any_success = True
+                except Exception as e_pass:
+                    print(f"update_profile: Error actualizando contraseña: {e_pass}")
+                    traceback.print_exc()
+
+            # 2) Preparar actualización en tabla perfiles (solo si hay nombre/email)
+            update_fields = {}
+            if nombre is not None:
+                update_fields['nombre'] = nombre
+            if email is not None and email != current_email:
+                update_fields['email'] = email
+
+            if update_fields:
+                try:
+                    print(f"update_profile: Actualizando perfiles con: {update_fields}")
+                    resp = self.supabase.from_('perfiles') \
+                        .update(update_fields) \
+                        .eq('id', user_id) \
+                        .execute()
+                    print(f"update_profile: Respuesta update perfiles: {resp}")
+                    any_success = True or any_success
+                except Exception as e_db:
+                    print(f"update_profile: Error actualizando tabla perfiles: {e_db}")
+                    traceback.print_exc()
+
+                # Si el email cambió, también intentar actualizarlo en Auth para mantener consistencia
+                if 'email' in update_fields:
+                    try:
+                        print("update_profile: Actualizando email en Supabase Auth...")
+                        auth_resp_email = self.supabase.auth.update_user({
+                            "email": update_fields['email']
+                        })
+                        print(f"update_profile: Respuesta update_user email: {auth_resp_email}")
+                    except Exception as e_email:
+                        print(f"update_profile: Error actualizando email en Auth: {e_email}")
+                        traceback.print_exc()
+
+            # 3) Refrescar perfil en sesión
+            try:
+                profile_response = self.supabase.rpc('get_current_user_profile').execute()
+                if profile_response and profile_response.data:
+                    profile = profile_response.data[0]
+                    from src.utils.session_manager import SessionManager
+                    # Mantener email consistente en sesión si lo tenemos
+                    new_email = update_fields.get('email', current_email)
+                    SessionManager.full_init(user_id=user_id, usuario_rol=profile.get('rol_nombre'), perfil_usuario=profile)
+                    # Guardar también email visible en sesión
+                    st.session_state.user = new_email or st.session_state.get('user')
+                    print("update_profile: Perfil en sesión actualizado")
+            except Exception as e_profile:
+                print(f"update_profile: Error refrescando perfil en sesión: {e_profile}")
+                traceback.print_exc()
+
+            return any_success
+
+        except Exception as e:
+            print(f"update_profile: Error general: {e}")
+            traceback.print_exc()
+            return False
+
     def check_auth_status(self) -> bool:
         """Check if user is authenticated."""
         return st.session_state.get('authenticated', False)

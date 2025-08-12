@@ -468,37 +468,7 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
              st.session_state.planchas_separadas = False
 
 
-# --- Helper Function for Payment Method ---
 
-def _mostrar_formas_pago(formas_pago: List[Any], datos_cargados: Optional[Dict] = None):
-    """
-    Muestra el selector de forma de pago.
-
-    Args:
-        formas_pago: Lista completa de objetos de forma de pago.
-    """
-    st.subheader("Condiciones Comerciales")
-    
-    default_forma_pago_id = datos_cargados.get('forma_pago_id', st.session_state.get("forma_pago_id", 1)) if datos_cargados else st.session_state.get("forma_pago_id", 1) # Default a ID 1
-
-
-    try:
-        index_fp = next(i for i, fp in enumerate(formas_pago) if fp.id == default_forma_pago_id)
-    except StopIteration:
-        index_fp = 0 # Default al primero si no se encuentra
-
-    forma_pago_seleccionada = st.selectbox(
-        "Forma de Pago",
-        options=formas_pago,
-        format_func=lambda fp: fp.descripcion,
-        key="forma_pago_select",
-        index=index_fp
-    )
-
-    if forma_pago_seleccionada:
-        st.session_state["forma_pago_id"] = forma_pago_seleccionada.id # Guardar en estado
-    else:
-        st.session_state["forma_pago_id"] = None
 
 
 # --- Función Principal Refactorizada --- 
@@ -531,10 +501,5 @@ def mostrar_secciones_internas_formulario(
     
     # 4. Opciones Adicionales
     _mostrar_opciones_adicionales(es_manga, datos_cargados)
-    st.divider()
-    
-    # 5. Forma de Pago
-    formas_pago = initial_data.get('formas_pago', [])
-    _mostrar_formas_pago(formas_pago, datos_cargados)
 
 # --- FIN FUNCIÓN RENOMBRADA --- 

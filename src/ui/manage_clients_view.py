@@ -26,11 +26,20 @@ def show_manage_clients():
         return
 
     db_manager: DBManager = st.session_state.db
-    # user_role = st.session_state.usuario_rol # Rol no se usa aquí directamente
+    user_role = st.session_state.get('usuario_rol')
+    comercial_id = st.session_state.get('comercial_id')
 
     try:
-        clientes = db_manager.get_clientes()
+        # Administrador ve todos; comercial solo los suyos
+        if user_role == 'administrador':
+            clientes = db_manager.get_clientes()
+        else:
+            clientes = db_manager.get_clientes_by_comercial(comercial_id) if comercial_id else []
         if clientes:
+            # Ordenar clientes por nombre
+            clientes.sort(key=lambda x: x.nombre)
+            # Ordenar clientes por nombre
+            clientes.sort(key=lambda x: x.nombre)
             # Crear DataFrame para mostrar los clientes
             df_clientes = pd.DataFrame([{
                 'NIT': c.codigo,
@@ -44,12 +53,34 @@ def show_manage_clients():
                 df_clientes,
                 hide_index=True,
                 use_container_width=True,
-                # Configuración adicional de la tabla si se desea
-                # column_config={
-                #     "NIT": st.column_config.TextColumn(width="small"),
-                #     "Nombre": st.column_config.TextColumn(width="large"),
-                # }
             )
+
+            # Editor simple: seleccionar cliente y editar campos permitidos
+            st.subheader("Editar cliente")
+            opciones = {f"{c.codigo} - {c.nombre}": c for c in clientes}
+            seleccion = st.selectbox("Selecciona un cliente", list(opciones.keys()))
+            cliente_sel: Cliente = opciones[seleccion]
+
+            with st.form("editar_cliente_form"):
+                nombre = st.text_input("Nombre", value=cliente_sel.nombre)
+                contacto = st.text_input("Persona de Contacto", value=cliente_sel.persona_contacto or "")
+                correo = st.text_input("Correo", value=cliente_sel.correo_electronico or "")
+                telefono = st.text_input("Teléfono", value=cliente_sel.telefono or "")
+                submitted = st.form_submit_button("Guardar cambios")
+
+                if submitted:
+                    cambios = {
+                        'nombre': nombre.strip(),
+                        'persona_contacto': contacto.strip() or None,
+                        'correo_electronico': correo.strip() or None,
+                        'telefono': telefono.strip() or None,
+                    }
+                    ok = db_manager.actualizar_cliente(cliente_sel.id, cambios)
+                    if ok:
+                        st.success("Cambios guardados")
+                        st.rerun()
+                    else:
+                        st.error("No se pudieron guardar los cambios (verifica permisos RLS)")
         else:
             st.info("No hay clientes registrados.")
 

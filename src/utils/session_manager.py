@@ -177,7 +177,6 @@ class SessionManager:
         st.session_state.mostrar_form_referencia = False
         st.session_state.cotizacion_cargada = False
         st.session_state.paso_actual = 'calculadora'
-        st.session_state.forma_pago_id = 1
         st.session_state.rentabilidad_ajustada = None
         st.session_state.ajustar_material = False
         st.session_state.valor_material_ajustado = 0.0
@@ -221,7 +220,7 @@ class SessionManager:
             'num_paquetes',
             'tiene_troquel',
             'planchas_separadas',
-            'forma_pago_select', 'forma_pago_id',
+    
             'es_manga', # Estado derivado
             'material_adhesivo_id', # Estado derivado
             'tipo_producto_seleccionado', # Forzar selección de nuevo

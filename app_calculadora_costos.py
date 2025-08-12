@@ -46,7 +46,7 @@ from src.logic.report_generator import generar_informe_tecnico_markdown, markdow
 # --------------------------------------------
 
 # UI Components - mover estas importaciones al final
-from src.ui.auth_ui import handle_authentication, show_login, show_logout_button
+from src.ui.auth_ui import handle_authentication, show_login, show_user_info, show_profile_update
 from src.ui.calculator_view import show_calculator, show_quote_results # Mantener solo los usados
 # MODIFICADO: Importar funciones específicas
 from src.ui.calculator.product_section import (_mostrar_material, _mostrar_adhesivo, 
@@ -57,6 +57,9 @@ from src.ui.manage_clients_view import show_manage_clients, show_create_client
 from src.ui.dashboard_view import show_dashboard
 # --- NUEVO: Importar vista de gestión de valores ---
 from src.ui.manage_values_view import show_manage_values
+from src.ui.manage_policies_view import show_manage_policies
+from src.ui.manage_cartera_policies_view import show_manage_cartera_policies
+from src.ui.manage_commercials_view import show_manage_commercials
 
 
 # Cargar CSS
@@ -119,12 +122,16 @@ def load_initial_data() -> Dict[str, Any]:
     """
     try:
         db = st.session_state.db
+        # Cargar datos base sujetos a RLS
         data = {
             'materiales': db.get_materiales(),
             'acabados': db.get_acabados(),
             'tipos_producto': db.get_tipos_producto(),
-            'clientes': db.get_clientes(),
-            'formas_pago': db.get_formas_pago(),
+            # Clientes: admin ve todos; comercial solo propios
+            'clientes': (
+                db.get_clientes() if st.session_state.get('usuario_rol') == 'administrador'
+                else db.get_clientes_by_comercial(st.session_state.get('comercial_id'))
+            ),
             'tipos_grafado': db.get_tipos_grafado(),
             'adhesivos': db.get_adhesivos(),
             'estados_cotizacion': db.get_estados_cotizacion() # <-- AÑADIDO
@@ -132,7 +139,7 @@ def load_initial_data() -> Dict[str, Any]:
         
         # Verificar que se obtuvieron todos los datos necesarios (excluding adhesives for now as they might be optional initially)
         required_data = ['materiales', 'acabados', 'tipos_producto', 'clientes', 
-                         'formas_pago', 'tipos_grafado', 'estados_cotizacion'] # <-- AÑADIDO a la verificación
+                         'tipos_grafado', 'estados_cotizacion'] # <-- AÑADIDO a la verificación
         missing_data = [k for k in required_data if k not in data or not data[k]]
         if missing_data:
             st.error(f"No se pudieron cargar los siguientes datos requeridos: {', '.join(missing_data)}")
@@ -408,7 +415,20 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             'tipo_grafado_id': form_data.get('tipo_grafado_id'), # Usar ID guardado
             'altura_grafado': form_data.get('altura_grafado'),
             'valor_plancha_separado': None, # Inicializar para aplicar la lógica de redondeo
-            'acabado_id': form_data.get('acabado_id') # Añadir ID de acabado
+            'acabado_id': form_data.get('acabado_id'), # Añadir ID de acabado
+            # --- NUEVO: parámetros especiales opcionales ---
+            'parametros_especiales': {
+                # Ejemplos de parámetros especiales que queremos persistir y precargar
+                # Estos se poblarán desde session_state si existen
+                'ajustar_material': bool(st.session_state.get('ajustar_material', False)),
+                'valor_material_ajustado': st.session_state.get('valor_material_ajustado'),
+                'ajustar_troquel': bool(st.session_state.get('ajustar_troquel', False)),
+                'precio_troquel': st.session_state.get('precio_troquel'),
+                'ajustar_planchas': bool(st.session_state.get('ajustar_planchas', False)),
+                'precio_planchas': st.session_state.get('precio_planchas'),
+                'ajustar_rentabilidad': bool(st.session_state.get('ajustar_rentabilidad', False)),
+                'rentabilidad_ajustada': st.session_state.get('rentabilidad_ajustada')
+            }
         }
         
         # --- Aplicar Fórmula de Redondeo a valor_plancha_separado --- 
@@ -474,7 +494,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                     'avance': datos_escala.avance, # Usar avance de datos_escala
                     'ancho': form_data['ancho'], # Ancho original
                     'tipo_producto_id': form_data['tipo_producto_id'],
-                    'forma_pago_id': form_data['forma_pago_id'],
+        
                     'altura_grafado': form_data.get('altura_grafado'),
                     'tipo_foil_id': st.session_state.get("tipo_foil_id"), # <--- LÍNEA AÑADIDA
                     'escalas_resultados': resultados # Pasar la lista de dicts
@@ -551,6 +571,9 @@ def show_navigation():
     # Solo mostrar la opción de gestión de valores a administradores
     if st.session_state.get('usuario_rol') == 'administrador':
         options['manage_values'] = "💰 Administrar Valores"
+        options['manage_policies'] = "📋 Políticas de Entrega"
+        options['manage_cartera'] = "💰 Políticas de Cartera"
+        options['manage_commercials'] = "👔 Gestionar Comerciales"
 
     # Obtener la vista actual o default a 'calculator'
     current_view_key = st.session_state.get('current_view', 'calculator')
@@ -725,7 +748,7 @@ def mostrar_calculadora():
                         st.session_state.datos_cotizacion_editar = datos_cargados
                         
                         # --- INICIO DIAGNÓSTICO TEMPORAL ---
-                        st.warning(f"DEBUG - Datos Cargados: numero_pistas={datos_cargados.get('numero_pistas')} (tipo: {type(datos_cargados.get('numero_pistas', '')).__name__}), forma_pago_id={datos_cargados.get('forma_pago_id')} (tipo: {type(datos_cargados.get('forma_pago_id', '')).__name__})")
+                        st.warning(f"DEBUG - Datos Cargados: numero_pistas={datos_cargados.get('numero_pistas')} (tipo: {type(datos_cargados.get('numero_pistas', '')).__name__})")
                         # --- FIN DIAGNÓSTICO TEMPORAL ---
                         
                         # Forzar tipo producto ANTES de mostrar selector
@@ -740,22 +763,28 @@ def mostrar_calculadora():
                                 st.error(f"Error crítico: Tipo de producto ID {tipo_producto_id_cargado} de la cotización no se encontró en los datos iniciales. No se puede editar.")
                                 # Limpiar estado para evitar inconsistencias
                                 if 'tipo_producto_objeto' in st.session_state: del st.session_state['tipo_producto_objeto']
-                                if 'tipo_producto_seleccionado' in st.session_state: del st.session_state['tipo_producto_seleccionado']
-                                st.session_state.modo_edicion = False # Salir del modo edición
-                                st.session_state.cotizacion_a_editar_id = None
-                                st.session_state.datos_cotizacion_editar = None
-                                # Detener la ejecución de esta función para este rerun
-                                return # <-- AÑADIDO: Detener si no se encuentra el objeto
-                        else:
-                            st.warning("Cotización sin tipo de producto definido.")
-                            # También deberíamos detenernos aquí si el tipo es esencial
-                            st.error("Error crítico: La cotización a editar no tiene tipo de producto definido. No se puede editar.")
-                            if 'tipo_producto_objeto' in st.session_state: del st.session_state['tipo_producto_objeto']
-                            if 'tipo_producto_seleccionado' in st.session_state: del st.session_state['tipo_producto_seleccionado']
-                            st.session_state.modo_edicion = False # Salir del modo edición
-                            st.session_state.cotizacion_a_editar_id = None
-                            st.session_state.datos_cotizacion_editar = None
-                            return # <-- AÑADIDO: Detener si falta el ID
+                        
+                        # --- NUEVO: Precargar parámetros especiales almacenados (si existen) ---
+                        try:
+                            calculos_raw = db.get_calculos_escala_cotizacion(cotizacion_id_editar)
+                            if calculos_raw and isinstance(calculos_raw, dict):
+                                params_esp = calculos_raw.get('parametros_especiales')
+                                if isinstance(params_esp, dict):
+                                    st.session_state['ajustar_material'] = bool(params_esp.get('ajustar_material', False))
+                                    if params_esp.get('valor_material_ajustado') is not None:
+                                        st.session_state['valor_material_ajustado'] = params_esp.get('valor_material_ajustado')
+                                    st.session_state['ajustar_troquel'] = bool(params_esp.get('ajustar_troquel', False))
+                                    if params_esp.get('precio_troquel') is not None:
+                                        st.session_state['precio_troquel'] = params_esp.get('precio_troquel')
+                                    st.session_state['ajustar_planchas'] = bool(params_esp.get('ajustar_planchas', False))
+                                    if params_esp.get('precio_planchas') is not None:
+                                        st.session_state['precio_planchas'] = params_esp.get('precio_planchas')
+                                    st.session_state['ajustar_rentabilidad'] = bool(params_esp.get('ajustar_rentabilidad', False))
+                                    if params_esp.get('rentabilidad_ajustada') is not None:
+                                        st.session_state['rentabilidad_ajustada'] = params_esp.get('rentabilidad_ajustada')
+                        except Exception as e_precarga:
+                            print(f"ADVERTENCIA: No se pudieron precargar parametros_especiales: {e_precarga}")
+                        # Nota: el manejo de "sin tipo de producto" ya se hace arriba
                     else:
                         st.error(f"No se pudieron cargar detalles para Cotización ID {cotizacion_id_editar}.")
                         st.session_state.modo_edicion = False
@@ -1059,10 +1088,7 @@ def mostrar_calculadora():
                     # Opciones Adicionales
                     datos_formulario_enviado['tiene_troquel'] = bool(st.session_state.get('tiene_troquel', False))
                     datos_formulario_enviado['planchas_separadas'] = bool(st.session_state.get('planchas_separadas', False))
-                    # Forma de Pago 
-                    forma_pago_obj = st.session_state.get('forma_pago_select')
-                    if forma_pago_obj: datos_formulario_enviado['forma_pago_id'] = forma_pago_obj.id
-                    else: validation_errors.append("Forma de pago no seleccionada.")
+
                          
                     # Calcular ID Combinado (como antes)
                     mat_id = datos_formulario_enviado.get('material_id')
@@ -1113,9 +1139,13 @@ def show_manage_clients():
     user_role = st.session_state.usuario_rol
     
     try:
-        clientes = db_manager.get_clientes()
+        if user_role == 'administrador':
+            clientes = db_manager.get_clientes()
+        else:
+            clientes = db_manager.get_clientes_by_comercial(st.session_state.get('comercial_id'))
+
         if clientes:
-            # Crear DataFrame para mostrar los clientes
+            # Tabla de clientes
             df_clientes = pd.DataFrame([{
                 'NIT': c.codigo,
                 'Nombre': c.nombre,
@@ -1123,16 +1153,40 @@ def show_manage_clients():
                 'Correo': c.correo_electronico or '',
                 'Teléfono': c.telefono or ''
             } for c in clientes])
-            
-            st.dataframe(
-                df_clientes,
-                hide_index=True,
-                use_container_width=True
-            )
+
+            st.dataframe(df_clientes, hide_index=True, use_container_width=True)
+
+            # Editor: seleccionar y actualizar datos permitidos
+            st.subheader("Editar cliente")
+            opciones = {f"{c.codigo} - {c.nombre}": c for c in clientes}
+            if opciones:
+                seleccion = st.selectbox("Selecciona un cliente", list(opciones.keys()))
+                cli = opciones[seleccion]
+
+                with st.form("editar_cliente_form"):
+                    nombre = st.text_input("Nombre", value=cli.nombre or "")
+                    contacto = st.text_input("Persona de Contacto", value=cli.persona_contacto or "")
+                    correo = st.text_input("Correo", value=cli.correo_electronico or "")
+                    telefono = st.text_input("Teléfono", value=cli.telefono or "")
+                    enviado = st.form_submit_button("Guardar cambios")
+
+                    if enviado:
+                        cambios = {
+                            'nombre': nombre.strip(),
+                            'persona_contacto': (contacto.strip() or None),
+                            'correo_electronico': (correo.strip() or None),
+                            'telefono': (telefono.strip() or None),
+                        }
+                        ok = db_manager.actualizar_cliente(cli.id, cambios)
+                        if ok:
+                            st.success("Cambios guardados")
+                            st.rerun()
+                        else:
+                            st.error("No se pudieron guardar los cambios. Verifica permisos o datos.")
         else:
             st.info("No hay clientes registrados.")
     except Exception as e:
-        st.error(f"Error al cargar los clientes: {str(e)}")
+        st.error(f"Error al cargar/editar clientes: {str(e)}")
 
 def show_create_client():
     """Muestra el formulario para crear un nuevo cliente."""
@@ -1240,8 +1294,10 @@ def main():
         show_login()
         return
 
-    # Mostrar botón de logout en el sidebar si está autenticado
-    show_logout_button()
+    # Mostrar info de usuario y opciones (actualizar perfil / logout) en el sidebar
+    show_user_info()
+    # Renderizar formulario de actualización de perfil si el usuario lo activó
+    show_profile_update()
 
     # Mostrar mensajes pendientes
     if st.session_state.messages:
@@ -1319,6 +1375,12 @@ def main():
     # --- NUEVA OPCIÓN DE MENÚ ---
     elif current_view == 'manage_values':
         show_manage_values()
+    elif current_view == 'manage_policies':
+        show_manage_policies()
+    elif current_view == 'manage_cartera':
+        show_manage_cartera_policies()
+    elif current_view == 'manage_commercials':
+        show_manage_commercials()
     # ---------------------------
     # elif st.session_state.current_view == 'reports': # Ya no se usa directamente
     #     show_reports()
