@@ -119,6 +119,10 @@ class CalculadoraLitografia(CalculadoraBase):
         
         mensaje = None
         if ancho_redondeado > self.ANCHO_MAXIMO:
+            # Excepción solicitada: ignorar advertencia para etiquetas de 50mm a 6 pistas
+            es_caso_excepcion = (abs(ancho - 50.0) < 0.01 and int(pistas) == 6)
+            if es_caso_excepcion:
+                return ancho_redondeado, None
             # Calcular pistas recomendadas
             ancho_con_gap = ancho + C3
             pistas_recomendadas = math.floor((self.ANCHO_MAXIMO - incremento + C3) / ancho_con_gap)
@@ -184,22 +188,14 @@ class CalculadoraLitografia(CalculadoraBase):
         
         return True
 
-    def calcular_unidad_montaje_sugerida(self, datos: DatosLitografia, es_manga: bool = False) -> float:
-        """
-        Calcula la unidad de montaje sugerida basada en el criterio según tipo
-        
-        Args:
-            datos: Objeto DatosLitografia con los datos necesarios
-            es_manga: True si es manga, False si es etiqueta
-            
-        Returns:
-            float: Número de dientes sugerido para el montaje
-            
-        Raises:
-            ValueError: Si no se encuentra una opción válida
-        """
-        mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
-        return mejor_opcion.dientes
+    # def calcular_unidad_montaje_sugerida(self, datos: DatosLitografia, es_manga: bool = False) -> float:
+    #     """
+    #     [DESHABILITADO] Selección automática de unidad de montaje.
+    #     El usuario ahora elige la unidad desde la UI. Se conserva la función
+    #     comentada según requerimiento, pero no se usa.
+    #     """
+    #     mejor_opcion = self.obtener_mejor_opcion_desperdicio(datos, es_manga)
+    #     return mejor_opcion.dientes
 
     def calcular_precio_plancha(self, datos: DatosLitografia, num_tintas: int = 0, es_manga: bool = False) -> Dict:
         """

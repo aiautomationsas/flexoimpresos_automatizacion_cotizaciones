@@ -288,12 +288,33 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         # Ajustar el ancho si es manga
         ancho_base = form_data['ancho']
         if es_manga:
-            ancho_ajustado = (ancho_base * FACTOR_ANCHO_MANGAS) + INCREMENTO_ANCHO_MANGAS
-            print(f"\n=== AJUSTE DE ANCHO PARA MANGA ===")
-            print(f"Ancho original: {ancho_base}")
-            print(f"Factor manga: {FACTOR_ANCHO_MANGAS}")
-            print(f"Incremento manga: {INCREMENTO_ANCHO_MANGAS}")
-            print(f"Ancho ajustado: ({ancho_base} * {FACTOR_ANCHO_MANGAS}) + {INCREMENTO_ANCHO_MANGAS} = {ancho_ajustado}")
+            # Caso excepcional: Fundas Transparentes (0 Tintas)
+            if form_data.get('num_tintas', 0) == 0:
+                ancho_ajustado = (ancho_base * 2) + 6
+                print(f"\n=== AJUSTE DE ANCHO PARA MANGA - FUNDA TRANSPARENTE (0 TINTAS) ===")
+                print(f"Ancho original (cerrado): {ancho_base}")
+                print(f"Fórmula aplicada: (ancho * 2) + 6 = ({ancho_base} * 2) + 6 = {ancho_ajustado}")
+                # Validación de máximo permitido 415mm (efectivo)
+                if ancho_ajustado > 415:
+                    st.error(f"El ancho efectivo ({ancho_ajustado:.2f} mm) excede el máximo permitido (415 mm) para fundas transparentes.")
+                    return None
+                # Restricción de grafado: >325mm no permite grafado
+                if ancho_ajustado > 325:
+                    # Forzar grafado a 'Sin grafado' (ID=1) si es necesario
+                    try:
+                        if form_data.get('tipo_grafado_id') not in (None, 1):
+                            print("Grafado no permitido (>325mm) en funda transparente. Forzando 'Sin grafado'.")
+                            form_data['tipo_grafado_id'] = 1
+                            form_data['tipo_grafado_nombre'] = 'Sin grafado'
+                    except Exception:
+                        pass
+            else:
+                ancho_ajustado = (ancho_base * FACTOR_ANCHO_MANGAS) + INCREMENTO_ANCHO_MANGAS
+                print(f"\n=== AJUSTE DE ANCHO PARA MANGA ===")
+                print(f"Ancho original: {ancho_base}")
+                print(f"Factor manga: {FACTOR_ANCHO_MANGAS}")
+                print(f"Incremento manga: {INCREMENTO_ANCHO_MANGAS}")
+                print(f"Ancho ajustado: ({ancho_base} * {FACTOR_ANCHO_MANGAS}) + {INCREMENTO_ANCHO_MANGAS} = {ancho_ajustado}")
         else:
             ancho_ajustado = ancho_base
         
@@ -312,6 +333,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             valor_metro=valor_material, # Usar el valor de material determinado (combinado/base + ajustado)
             troquel_existe=troquel_existe,
             planchas_por_separado=form_data.get('planchas_separadas', False),
+            unidad_montaje_dientes=form_data.get('unidad_montaje_dientes')
         )
         
         # --- Calcular Mejor Opción de Desperdicio UNA VEZ ---
@@ -364,37 +386,44 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         # Guardamos los valores finales que se usaron en el cálculo
         # para pasarlos luego a guardar_calculos_escala
         
-        # Calcular valor_troquel por defecto (si no ajustado) usando mejor_opcion
+        # Calcular valor_troquel por defecto (si no ajustado), respetando selección de unidad
         valor_troquel_defecto = 0.0
         if not st.session_state.get('ajustar_troquel'):
-            # El troquel no depende directamente del número de tintas, pero lo agregamos aquí
-            # para mantener la coherencia en el código
-            troquel_result = calc_lito.calcular_valor_troquel(
-                datos_escala, 
-                mejor_opcion.repeticiones, # Usar repeticiones de mejor opción
-                troquel_existe=datos_escala.troquel_existe, # Usar valor procesado
-                tipo_grafado_id=form_data.get('tipo_grafado_id'), # Pasar ID
-                es_manga=es_manga # <-- Añadir parámetro es_manga
-            )
-            if 'error' in troquel_result:
-                 st.warning(f"Advertencia: No se pudo calcular el valor del troquel por defecto: {troquel_result['error']}")
+            # Si el usuario eligió una unidad específica, dejar que la calculadora interna lo compute (None)
+            if form_data.get('unidad_montaje_dientes') is not None:
+                valor_troquel_defecto = None
             else:
-                 valor_troquel_defecto = troquel_result.get('valor', 0.0)
+                # Usar mejor_opcion cuando no hay selección explícita
+                troquel_result = calc_lito.calcular_valor_troquel(
+                    datos_escala, 
+                    mejor_opcion.repeticiones,
+                    troquel_existe=datos_escala.troquel_existe,
+                    tipo_grafado_id=form_data.get('tipo_grafado_id'),
+                    es_manga=es_manga
+                )
+                if 'error' in troquel_result:
+                     st.warning(f"Advertencia: No se pudo calcular el valor del troquel por defecto: {troquel_result['error']}")
+                else:
+                     valor_troquel_defecto = troquel_result.get('valor', 0.0)
 
         # Calcular valor_plancha por defecto (si no ajustado)
         valor_plancha_defecto = 0.0
         precio_sin_constante = None # Inicializar para guardar el valor separado
         if not st.session_state.get('ajustar_planchas'):
-             # Usar el número de tintas ajustado para calcular la plancha
-             plancha_result = calc_lito.calcular_precio_plancha(datos_escala, num_tintas_ajustado, es_manga)
-             if 'error' in plancha_result:
-                 st.warning(f"Advertencia: No se pudo calcular el valor de plancha por defecto: {plancha_result['error']}")
+             # Si el usuario eligió unidad, dejar a la calculadora interna computar plancha (None)
+             if form_data.get('unidad_montaje_dientes') is not None:
+                 valor_plancha_defecto = None
              else:
-                 # Usar el precio que incluye la división por constante si planchas_por_separado=False
-                 valor_plancha_defecto = plancha_result.get('precio', 0.0)
-                 # Guardar el precio ANTES de aplicar la constante (si existe)
-                 if plancha_result.get('detalles'):
-                    precio_sin_constante = plancha_result['detalles'].get('precio_sin_constante')
+                 # Usar el número de tintas ajustado para calcular la plancha con Litografía
+                 plancha_result = calc_lito.calcular_precio_plancha(datos_escala, num_tintas_ajustado, es_manga)
+                 if 'error' in plancha_result:
+                     st.warning(f"Advertencia: No se pudo calcular el valor de plancha por defecto: {plancha_result['error']}")
+                 else:
+                     # Usar el precio que incluye la división por constante si planchas_por_separado=False
+                     valor_plancha_defecto = plancha_result.get('precio', 0.0)
+                     # Guardar el precio ANTES de aplicar la constante (si existe)
+                     if plancha_result.get('detalles'):
+                        precio_sin_constante = plancha_result['detalles'].get('precio_sin_constante')
 
         datos_calculo_persistir = {
             'valor_material': valor_material, # Valor final usado
@@ -404,7 +433,7 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             'rentabilidad': datos_escala.rentabilidad, # Guardar el valor decimal directamente
             'avance': datos_escala.avance,
             'ancho': form_data['ancho'], # Guardar ancho original sin ajuste de manga
-            'unidad_z_dientes': mejor_opcion.dientes if mejor_opcion else 0, # <-- CORREGIDO
+            'unidad_z_dientes': form_data.get('unidad_montaje_dientes') or (mejor_opcion.dientes if mejor_opcion else 0),
             'existe_troquel': datos_escala.troquel_existe, # Usar valor procesado
             'planchas_x_separado': datos_escala.planchas_por_separado,
             'num_tintas': num_tintas, # Número de tintas original
@@ -1088,6 +1117,13 @@ def mostrar_calculadora():
                     # Opciones Adicionales
                     datos_formulario_enviado['tiene_troquel'] = bool(st.session_state.get('tiene_troquel', False))
                     datos_formulario_enviado['planchas_separadas'] = bool(st.session_state.get('planchas_separadas', False))
+                    # Unidad de montaje elegida por el usuario (si marcó troquel existente)
+                    if datos_formulario_enviado['tiene_troquel']:
+                        um_dientes = st.session_state.get('unidad_montaje_dientes')
+                        try:
+                            datos_formulario_enviado['unidad_montaje_dientes'] = float(um_dientes) if um_dientes is not None else None
+                        except Exception:
+                            datos_formulario_enviado['unidad_montaje_dientes'] = None
 
                          
                     # Calcular ID Combinado (como antes)
@@ -1158,12 +1194,14 @@ def show_manage_clients():
 
             # Editor: seleccionar y actualizar datos permitidos
             st.subheader("Editar cliente")
-            opciones = {f"{c.codigo} - {c.nombre}": c for c in clientes}
+            # Mostrar primero el nombre al seleccionar
+            opciones = {f"{c.nombre} - {c.codigo}": c for c in clientes}
             if opciones:
                 seleccion = st.selectbox("Selecciona un cliente", list(opciones.keys()))
                 cli = opciones[seleccion]
 
                 with st.form("editar_cliente_form"):
+                    codigo = st.text_input("NIT/CC", value=str(cli.codigo or ""))
                     nombre = st.text_input("Nombre", value=cli.nombre or "")
                     contacto = st.text_input("Persona de Contacto", value=cli.persona_contacto or "")
                     correo = st.text_input("Correo", value=cli.correo_electronico or "")
@@ -1172,6 +1210,7 @@ def show_manage_clients():
 
                     if enviado:
                         cambios = {
+                            'codigo': codigo.strip() if codigo is not None else None,
                             'nombre': nombre.strip(),
                             'persona_contacto': (contacto.strip() or None),
                             'correo_electronico': (correo.strip() or None),

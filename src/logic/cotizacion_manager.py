@@ -64,7 +64,12 @@ class CotizacionManager:
             cotizacion.num_tintas = int(kwargs.get('num_tintas', 0))
             cotizacion.num_paquetes_rollos = int(kwargs.get('num_paquetes_rollos', 0))
             cotizacion.es_manga = bool(kwargs.get('es_manga', False))
-            cotizacion.valor_troquel = Decimal(str(kwargs.get('valor_troquel', 0.0))) 
+            # Manejar None o cadenas vacías para evitar ConversionSyntax
+            _val_troquel = kwargs.get('valor_troquel', None)
+            if _val_troquel is None or (isinstance(_val_troquel, str) and _val_troquel.strip() == ""):
+                cotizacion.valor_troquel = None
+            else:
+                cotizacion.valor_troquel = Decimal(str(_val_troquel)) 
             cotizacion.valor_plancha_separado = Decimal(str(kwargs.get('valor_plancha_separado'))) if kwargs.get('valor_plancha_separado') is not None else None
             cotizacion.planchas_x_separado = bool(kwargs.get('planchas_x_separado', False))
             cotizacion.existe_troquel = bool(kwargs.get('existe_troquel', False))
@@ -139,7 +144,11 @@ class CotizacionManager:
             cotizacion.num_tintas = int(kwargs.get('num_tintas', cotizacion.num_tintas))
             cotizacion.num_paquetes_rollos = int(kwargs.get('num_paquetes_rollos', cotizacion.num_paquetes_rollos))
             cotizacion.es_manga = bool(kwargs.get('es_manga', cotizacion.es_manga))
-            cotizacion.valor_troquel = Decimal(str(kwargs.get('valor_troquel', cotizacion.valor_troquel or 0.0)))
+            _val_troquel_upd = kwargs.get('valor_troquel', cotizacion.valor_troquel)
+            if _val_troquel_upd is None or (isinstance(_val_troquel_upd, str) and str(_val_troquel_upd).strip() == ""):
+                cotizacion.valor_troquel = None
+            else:
+                cotizacion.valor_troquel = Decimal(str(_val_troquel_upd))
             cotizacion.valor_plancha_separado = Decimal(str(kwargs.get('valor_plancha_separado', cotizacion.valor_plancha_separado))) if kwargs.get('valor_plancha_separado') is not None else cotizacion.valor_plancha_separado
             cotizacion.planchas_x_separado = bool(kwargs.get('planchas_x_separado', cotizacion.planchas_x_separado))
             cotizacion.existe_troquel = bool(kwargs.get('existe_troquel', cotizacion.existe_troquel))

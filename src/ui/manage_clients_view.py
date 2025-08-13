@@ -57,11 +57,14 @@ def show_manage_clients():
 
             # Editor simple: seleccionar cliente y editar campos permitidos
             st.subheader("Editar cliente")
-            opciones = {f"{c.codigo} - {c.nombre}": c for c in clientes}
+            # Mostrar primero el nombre en el selector
+            opciones = {f"{c.nombre} - {c.codigo}": c for c in clientes}
             seleccion = st.selectbox("Selecciona un cliente", list(opciones.keys()))
             cliente_sel: Cliente = opciones[seleccion]
 
             with st.form("editar_cliente_form"):
+                # Campo NIT (codigo)
+                codigo = st.text_input("NIT/CC", value=str(cliente_sel.codigo or ""))
                 nombre = st.text_input("Nombre", value=cliente_sel.nombre)
                 contacto = st.text_input("Persona de Contacto", value=cliente_sel.persona_contacto or "")
                 correo = st.text_input("Correo", value=cliente_sel.correo_electronico or "")
@@ -70,6 +73,7 @@ def show_manage_clients():
 
                 if submitted:
                     cambios = {
+                        'codigo': codigo.strip() if codigo is not None else None,
                         'nombre': nombre.strip(),
                         'persona_contacto': contacto.strip() or None,
                         'correo_electronico': correo.strip() or None,

@@ -39,6 +39,7 @@ class DatosEscala:
     valor_metro: float = 0.0  # Valor del metro de material
     troquel_existe: bool = False  # Si ya existe el troquel
     planchas_por_separado: bool = False  # Si las planchas se cobran por separado
+    unidad_montaje_dientes: Optional[float] = None  # Unidad de montaje elegida (opcional)
 
     def set_area_etiqueta(self, area: float):
         """Set the area of the label."""
@@ -176,6 +177,10 @@ class CalculadoraCostosEscala(CalculadoraBase):
         
         mensaje = None
         if ancho_redondeado > self.ANCHO_MAXIMO:
+            # Excepción solicitada: ignorar advertencia para etiquetas de 50mm a 6 pistas
+            es_caso_excepcion = (abs(ancho - 50.0) < 0.01 and int(pistas) == 6)
+            if es_caso_excepcion:
+                return ancho_redondeado, None
             # Calcular pistas recomendadas
             ancho_con_gap = ancho + self.C3
             pistas_recomendadas = math.floor((self.ANCHO_MAXIMO - incremento + self.C3) / ancho_con_gap)
@@ -195,9 +200,24 @@ class CalculadoraCostosEscala(CalculadoraBase):
         - Desperdicio_unidad = desperdicio por los dientes del troquel
         """
         try:
-            # 1. Obtener el desperdicio de la calculadora
+            # 1. Obtener la opción de desperdicio según la unidad de montaje elegida (si existe)
             calculadora = self._get_calculadora_desperdicios(es_manga)
-            mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
+            mejor_opcion = None
+            if getattr(datos, 'unidad_montaje_dientes', None) is not None:
+                opciones = calculadora.calcular_todas_opciones(datos.avance)
+                candidatas = []
+                for op in opciones:
+                    if isinstance(op, dict):
+                        if op.get('dientes') == datos.unidad_montaje_dientes:
+                            candidatas.append(op)
+                    else:
+                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
+                            candidatas.append(op.__dict__)
+                if candidatas:
+                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+            if mejor_opcion is None:
+                mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:
                 raise ValueError("No se pudo determinar la unidad de montaje")
             
@@ -335,7 +355,9 @@ Cálculo:
         if datos.ancho <= 0:
             raise ValueError("El ancho debe ser mayor que 0")
         if datos.ancho > self.ANCHO_MAXIMO:
-            raise ValueError(f"El ancho ({datos.ancho}) no puede ser mayor que el máximo permitido ({self.ANCHO_MAXIMO})")
+            # Excepción para mangas: Fundas Transparentes (0 Tintas) permiten hasta 415 mm de ancho efectivo
+            if not (es_manga and num_tintas == 0 and datos.ancho <= 415):
+                raise ValueError(f"El ancho ({datos.ancho}) no puede ser mayor que el máximo permitido ({self.ANCHO_MAXIMO})")
         if datos.pistas <= 0:
             raise ValueError("El número de pistas debe ser mayor que 0")
         if not (0 <= num_tintas <= 7):
@@ -344,10 +366,14 @@ Cálculo:
             raise ValueError("El avance debe ser mayor que 0")
         if hasattr(datos, 'avance_total') and datos.avance_total <= 0:
             raise ValueError("El avance total debe ser mayor que 0")
-        # Validar ancho total ocupado por todas las pistas
-        ancho_total, _ = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
-        if ancho_total > self.ANCHO_MAXIMO:
-            raise ValueError(f"El ancho total calculado ({ancho_total} mm) excede el máximo permitido ({self.ANCHO_MAXIMO} mm) para la máquina.")
+        # Validar ancho total solo para etiquetas (la fórmula de ancho total es específica de etiquetas aquí)
+        if not es_manga:
+            ancho_total, _ = self.calcular_ancho_total(num_tintas, datos.pistas, datos.ancho)
+            if ancho_total > self.ANCHO_MAXIMO:
+                # Excepción solicitada: permitir etiquetas 50mm con 6 pistas sin bloquear
+                es_caso_excepcion = (abs(datos.ancho - 50.0) < 0.01 and int(datos.pistas) == 6)
+                if not es_caso_excepcion:
+                    raise ValueError(f"El ancho total calculado ({ancho_total} mm) excede el máximo permitido ({self.ANCHO_MAXIMO} mm) para la máquina.")
 
     def calcular_desperdicio(self, num_tintas: int, ancho: float, papel_lam: float,
                             valor_material: float, datos: DatosEscala,
@@ -423,9 +449,24 @@ Cálculo:
                 q3 = q3_val
                 s3 = s3_val
             
-            # 3. Obtener medida de montaje
+            # 3. Obtener medida de montaje respetando la unidad elegida
             calculadora = self._get_calculadora_desperdicios(es_manga)
-            mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
+            mejor_opcion = None
+            if getattr(datos, 'unidad_montaje_dientes', None) is not None:
+                opciones = calculadora.calcular_todas_opciones(datos.avance)
+                candidatas = []
+                for op in opciones:
+                    if isinstance(op, dict):
+                        if op.get('dientes') == datos.unidad_montaje_dientes:
+                            candidatas.append(op)
+                    else:
+                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
+                            candidatas.append(op.__dict__)
+                if candidatas:
+                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+            if mejor_opcion is None:
+                mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:
                 raise ValueError("No se pudo determinar la unidad de montaje")
             mm_unidad_montaje = mejor_opcion.medida_mm
@@ -470,7 +511,22 @@ Cálculo:
             # Calcular valor base
             perimetro = (datos.ancho + datos.avance) * 2
             calculadora = self._get_calculadora_desperdicios(es_manga)
-            repeticiones = calculadora.obtener_mejor_opcion(datos.avance).repeticiones
+            repeticiones = None
+            if getattr(datos, 'unidad_montaje_dientes', None) is not None:
+                opciones = calculadora.calcular_todas_opciones(datos.avance)
+                candidatas = []
+                for op in opciones:
+                    if isinstance(op, dict):
+                        if op.get('dientes') == datos.unidad_montaje_dientes:
+                            candidatas.append(op)
+                    else:
+                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
+                            candidatas.append(op.__dict__)
+                if candidatas:
+                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                    repeticiones = candidatas[0]['repeticiones']
+            if repeticiones is None:
+                repeticiones = calculadora.obtener_mejor_opcion(datos.avance).repeticiones
             valor_base = perimetro * datos.pistas * repeticiones * 100  # valor_mm = 100
             valor_calculado = max(VALOR_MINIMO, valor_base)
 
@@ -710,9 +766,24 @@ Cálculo:
                 q3 = q3_val
                 s3 = s3_val
             
-            # 3. Obtener mejor opción de desperdicio
+            # 3. Obtener mejor opción de desperdicio respetando unidad elegida (si existe)
             calculadora = self._get_calculadora_desperdicios(es_manga)
-            mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
+            mejor_opcion = None
+            if getattr(datos, 'unidad_montaje_dientes', None) is not None:
+                opciones = calculadora.calcular_todas_opciones(datos.avance)
+                candidatas = []
+                for op in opciones:
+                    if isinstance(op, dict):
+                        if op.get('dientes') == datos.unidad_montaje_dientes:
+                            candidatas.append(op)
+                    else:
+                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
+                            candidatas.append(op.__dict__)
+                if candidatas:
+                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+            if mejor_opcion is None:
+                mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:
                 raise ValueError("No se pudo determinar la unidad de montaje")
             

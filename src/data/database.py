@@ -1297,9 +1297,20 @@ class DBManager:
         RLS: Comercial solo si es dueña (vía referencias_cliente); admin puede todos.
         """
         campos_permitidos = {
-            'nombre', 'persona_contacto', 'correo_electronico', 'telefono'
+            'nombre', 'persona_contacto', 'correo_electronico', 'telefono', 'codigo'
         }
         data = {k: v for k, v in cambios.items() if k in campos_permitidos}
+        # Validar y normalizar NIT/CC (codigo) si viene en cambios
+        if 'codigo' in data:
+            try:
+                codigo_limpio = str(data['codigo']).strip().replace('-', '').replace('.', '')
+                if not codigo_limpio.isdigit():
+                    print("actualizar_cliente: 'codigo' debe ser numérico")
+                    return False
+                data['codigo'] = int(codigo_limpio)
+            except Exception as e_norm:
+                print(f"Error normalizando 'codigo' en actualizar_cliente: {e_norm}")
+                return False
         if not data:
             print("No hay campos válidos para actualizar en cliente")
             return False

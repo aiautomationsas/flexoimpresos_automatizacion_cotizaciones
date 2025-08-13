@@ -52,6 +52,17 @@ def generar_informe_tecnico_markdown(
                 return s
             except Exception:
                 return str(value)
+        # Utilidad local para formatear moneda de forma segura
+        def format_currency(value: Any) -> str:
+            try:
+                if value is None or value == "":
+                    return "$0.00"
+                return f"${float(value):,.2f}"
+            except Exception:
+                try:
+                    return f"${float(Decimal(str(value))):,.2f}"
+                except Exception:
+                    return "$0.00"
         # Acceder a la instancia de DBManager desde session_state
         if 'db' not in st.session_state:
             return "Error: No se pudo acceder a la base de datos desde session_state."
@@ -141,17 +152,42 @@ def generar_informe_tecnico_markdown(
         gap_avance = GAP_AVANCE_MANGAS if es_manga else GAP_AVANCE_ETIQUETAS
         area_etiqueta = ancho * avance
 
-        # Obtener desperdicio de la unidad (mm) desde cálculos guardados si existe; si no, calcularlo
+        # Obtener desperdicio de la unidad (mm) priorizando la unidad seleccionada por el usuario
         desperdicio_unidad = 0.0
         try:
-            # Preferir campo persistido
+            unidad_dientes_sel = None
+            try:
+                unidad_dientes_sel = float(dientes) if dientes not in (None, 'N/A', '') else None
+            except Exception:
+                unidad_dientes_sel = None
+
+            # Preferir valor persistido explícito si existe
             desperdicio_persistido = calculos_guardados.get('desperdicio_mm') if isinstance(calculos_guardados, dict) else None
             if desperdicio_persistido is not None:
                 desperdicio_unidad = float(desperdicio_persistido)
-            else:
-                # Fallback a cálculo en vivo
-                if avance and avance > 0:
-                    calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
+            elif avance and avance > 0:
+                calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
+                # Si el usuario eligió unidad, buscar la mejor opción para esos dientes
+                if unidad_dientes_sel is not None:
+                    opciones = calc_desp.calcular_todas_opciones(avance)
+                    candidatas = []
+                    for op in opciones:
+                        if isinstance(op, dict):
+                            if float(op.get('dientes')) == unidad_dientes_sel:
+                                candidatas.append(op)
+                        else:
+                            if float(getattr(op, 'dientes', 0)) == unidad_dientes_sel:
+                                candidatas.append(op.__dict__)
+                    if candidatas:
+                        candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                        desperdicio_unidad = float(candidatas[0]['desperdicio'] or 0.0)
+                    else:
+                        # Fallback: mejor opción global
+                        mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
+                        if mejor_opcion:
+                            desperdicio_unidad = float(getattr(mejor_opcion, 'desperdicio', 0.0) or 0.0)
+                else:
+                    # Fallback: mejor opción global
                     mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
                     if mejor_opcion:
                         desperdicio_unidad = float(getattr(mejor_opcion, 'desperdicio', 0.0) or 0.0)
@@ -162,17 +198,35 @@ def generar_informe_tecnico_markdown(
         # Gap al avance total = Gap base (2.6mm en etiquetas, 0mm en mangas) + desperdicio por unidad
         gap_avance_total = (gap_avance or 0.0) + (desperdicio_unidad or 0.0)
 
-        # Obtener número de repeticiones (unidad de montaje)
+        # Obtener número de repeticiones (unidad de montaje) respetando la unidad elegida
         repeticiones_unidad = None
         try:
             rep_persistido = calculos_guardados.get('repeticiones') if isinstance(calculos_guardados, dict) else None
             if rep_persistido is not None:
                 repeticiones_unidad = int(rep_persistido)
-            else:
-                if avance and avance > 0:
-                    if 'calc_desp' not in locals():
-                        calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
-                        mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
+            elif avance and avance > 0:
+                if 'calc_desp' not in locals():
+                    calc_desp = CalculadoraDesperdicio(es_manga=es_manga)
+                unidad_dientes_sel = None
+                try:
+                    unidad_dientes_sel = float(dientes) if dientes not in (None, 'N/A', '') else None
+                except Exception:
+                    unidad_dientes_sel = None
+                if unidad_dientes_sel is not None:
+                    opciones = calc_desp.calcular_todas_opciones(avance)
+                    candidatas = []
+                    for op in opciones:
+                        if isinstance(op, dict):
+                            if float(op.get('dientes')) == unidad_dientes_sel:
+                                candidatas.append(op)
+                        else:
+                            if float(getattr(op, 'dientes', 0)) == unidad_dientes_sel:
+                                candidatas.append(op.__dict__)
+                    if candidatas:
+                        candidatas.sort(key=lambda x: abs(x['desperdicio']))
+                        repeticiones_unidad = int(candidatas[0]['repeticiones'] or 0)
+                if repeticiones_unidad is None:
+                    mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
                     if mejor_opcion:
                         repeticiones_unidad = int(getattr(mejor_opcion, 'repeticiones', 0) or 0)
         except Exception as e_rep:
@@ -185,8 +239,8 @@ def generar_informe_tecnico_markdown(
             valor_plancha_original_calculo = valor_plancha
             plancha_info = f"""
 ### Información de Plancha Separada
-- **Valor Plancha Calculado (Incluido en Costo):** ${valor_plancha_original_calculo:,.2f}
-- **Valor Plancha Cobrado por Separado:** ${valor_plancha_separado:,.2f}
+- **Valor Plancha Calculado (Incluido en Costo):** {format_currency(valor_plancha_original_calculo)}
+- **Valor Plancha Cobrado por Separado:** {format_currency(valor_plancha_separado)}
 """
 
         # --- Construcción del Informe Markdown --- (Sin cambios en la estructura, solo usa los datos obtenidos arriba)
@@ -216,9 +270,7 @@ def generar_informe_tecnico_markdown(
         ### Parámetros de Impresión
         - **Ancho**: {format_measure(ancho)} mm
         - **Avance/Largo**: {format_measure(avance)} mm
-        - **Gap al avance (base)**: {format_measure(gap_avance)} mm{'' if not es_manga else ' (mangas)'}
-        - **Adicional por desperdicio de la unidad**: {format_measure(desperdicio_unidad)} mm
-        - **Gap al avance total**: {format_measure(gap_avance)} mm + {format_measure(desperdicio_unidad)} mm = {format_measure(gap_avance_total)} mm
+        - **Gap al avance**: {gap_avance_total:.2f} mm
         - **Pistas**: {pistas}
         - **Número de repeticiones (unidad)**: {repeticiones_unidad if repeticiones_unidad is not None else 'N/A'}
         - **Número de Tintas**: {num_tintas}
@@ -249,9 +301,9 @@ def generar_informe_tecnico_markdown(
         if not es_comercial:
             costos_base = f"""
 ### Costos Base Utilizados
-- **Valor Material Base (por m²)**: ${valor_material:,.2f}/m²
-- **Valor Acabado (por m²)**: ${valor_acabado:,.2f}/m²
-- **Valor Troquel (Total)**: ${valor_troquel:,.2f}
+- **Valor Material Base (por m²)**: {format_currency(valor_material)}/m²
+- **Valor Acabado (por m²)**: {format_currency(valor_acabado)}/m²
+- **Valor Troquel (Total)**: {format_currency(valor_troquel)}
 """
 
         # Ensamblar informe final

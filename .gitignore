@@ -11,3 +11,4 @@ __pycache__
 .env
 .streamlit/secrets.toml
 .cursor
+.cursor/rules/mcp.json

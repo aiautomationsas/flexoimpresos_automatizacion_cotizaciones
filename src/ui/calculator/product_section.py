@@ -1,5 +1,6 @@
 import streamlit as st
 from typing import Dict, Any, List, Optional
+from src.logic.calculators.calculadora_desperdicios import CalculadoraDesperdicio
 from src.data.models import Cliente  # Corrected import: Directly from src.data.models module
 from src.data.database import DBManager  # Asumiendo que DBManager está definido aquí
 import time
@@ -304,12 +305,28 @@ def _mostrar_grafado_altura(es_manga: bool, tipos_grafado: List[Any], datos_carg
     except StopIteration:
         index_grafado = 0
 
+    # Regla de Fundas Transparentes (0 tintas): deshabilitar grafado si ancho efectivo > 325mm
+    try:
+        es_funda_transparente = es_manga and int(st.session_state.get('num_tintas', 0)) == 0
+        ancho_cerrado_ft = float(st.session_state.get('ancho', 0) or 0)
+        ancho_efectivo_ft = (ancho_cerrado_ft * 2) + 6 if es_funda_transparente else 0
+        disable_grafado = es_funda_transparente and ancho_efectivo_ft > 325
+        if disable_grafado:
+            # Si está deshabilitado, apuntar el índice por defecto a 'Sin grafado' (id=1)
+            try:
+                index_grafado = next(i for i, tg in enumerate(tipos_grafado) if tg.id == 1)
+            except StopIteration:
+                index_grafado = 0
+    except Exception:
+        disable_grafado = False
+
     tipo_grafado_seleccionado = st.selectbox(
         "Tipo de grafado",
         options=tipos_grafado,
         format_func=lambda tg: tg.nombre,
         key="tipo_grafado_select",
-        index=index_grafado
+        index=index_grafado,
+        disabled=disable_grafado
     )
     
     # Obtener y guardar el ID seleccionado
@@ -353,6 +370,23 @@ def _mostrar_grafado_altura(es_manga: bool, tipos_grafado: List[Any], datos_carg
     else:
         # Si no requiere altura, establecer None
         st.session_state["altura_grafado"] = None
+
+    # Restricciones para Fundas Transparentes (0 Tintas):
+    # - Ancho efectivo = ancho cerrado * 2 + 6
+    # - Si ancho efectivo > 325mm, no permitir grafado (forzar 'Sin grafado')
+    try:
+        if es_manga and int(st.session_state.get('num_tintas', 0)) == 0:
+            ancho_cerrado = float(st.session_state.get('ancho', 0) or 0)
+            ancho_efectivo = (ancho_cerrado * 2) + 6
+            if ancho_efectivo > 325:
+                # Forzar grafado 'Sin grafado' si el seleccionado no es 1
+                if st.session_state.get("grafado_seleccionado_id") not in (None, 1):
+                    st.session_state["grafado_seleccionado_id"] = 1
+                    st.session_state["tipo_grafado_select"] = next((i for i, tg in enumerate(tipos_grafado) if tg.id == 1), 0)
+                    st.warning("Para fundas transparentes de ancho efectivo > 325mm, se fuerza 'Sin grafado'.")
+                    st.rerun()
+    except Exception:
+        pass
 
 def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabados: List[Any], datos_cargados: Optional[Dict] = None):
     """
@@ -448,6 +482,65 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
     if not es_manga:
         # El valor bool se guarda en st.session_state.tiene_troquel
         st.checkbox("¿Existe troquel?", key="tiene_troquel", value=bool(default_tiene_troquel))
+
+        # Si el usuario indica que sí existe troquel, permitir elegir la unidad de montaje
+        if st.session_state.get("tiene_troquel", False):
+            avance_actual = st.session_state.get("avance")
+            try:
+                avance_float = float(avance_actual) if avance_actual is not None else 0.0
+            except Exception:
+                avance_float = 0.0
+            if avance_float <= 0:
+                st.info("Ingrese primero el avance para listar las unidades disponibles.")
+            else:
+                try:
+                    calc = CalculadoraDesperdicio(es_manga=es_manga)
+                    opciones = calc.calcular_todas_opciones(avance_float)
+                    # Deduplicar por dientes dejando la opción con menor desperdicio
+                    mejores_por_diente = {}
+                    for op in opciones:
+                        key = op['dientes'] if isinstance(op, dict) else op.dientes
+                        # Normalizar estructura
+                        if isinstance(op, dict):
+                            registro = op
+                        else:
+                            registro = {
+                                'dientes': op.dientes,
+                                'medida_mm': op.medida_mm,
+                                'desperdicio': op.desperdicio,
+                                'repeticiones': op.repeticiones,
+                                'ancho_total': op.ancho_total,
+                            }
+                        if key not in mejores_por_diente or abs(registro['desperdicio']) < abs(mejores_por_diente[key]['desperdicio']):
+                            mejores_por_diente[key] = registro
+
+                    if not mejores_por_diente:
+                        st.warning("No hay unidades de montaje disponibles para el avance indicado.")
+                    else:
+                        lista_opciones = sorted(mejores_por_diente.values(), key=lambda x: x['dientes'])
+                        etiquetas = [f"{int(x['dientes'])} dientes ({x['medida_mm']:.3f} mm)" for x in lista_opciones]
+                        valores = [x['dientes'] for x in lista_opciones]
+
+                        # Selección persistente
+                        valor_por_defecto = st.session_state.get('unidad_montaje_dientes')
+                        try:
+                            index_default = valores.index(valor_por_defecto) if valor_por_defecto in valores else 0
+                        except Exception:
+                            index_default = 0
+
+                        seleccion = st.selectbox(
+                            "Unidad de montaje",
+                            options=list(range(len(valores))),
+                            format_func=lambda i: etiquetas[i],
+                            index=index_default,
+                            key="unidad_montaje_select_index",
+                            help="Seleccione la unidad de montaje (cilindro) a utilizar en los cálculos."
+                        )
+
+                        # Guardar solo el valor de dientes seleccionado en session_state
+                        st.session_state['unidad_montaje_dientes'] = valores[seleccion]
+                except Exception as e:
+                    st.error(f"Error listando unidades de montaje: {e}")
     else:
         # Asegurar que el estado es False si es manga
         if st.session_state.get("tiene_troquel") is not False:
