@@ -24,7 +24,7 @@ def show_manage_commercials() -> None:
     st.title("👔 Gestionar Comerciales")
     st.caption("Administre los comerciales (perfiles) asociados al rol especificado.")
 
-    tab_list, tab_create, tab_edit = st.tabs(["📋 Lista", "➕ Crear", "✏️ Editar/Eliminar"])
+    tab_list, tab_create, tab_edit, tab_archived = st.tabs(["📋 Lista", "➕ Crear", "✏️ Editar/Eliminar", "🗄️ Archivados"])
 
     with tab_list:
         _list_commercials(db)
@@ -34,17 +34,20 @@ def show_manage_commercials() -> None:
 
     with tab_edit:
         _edit_delete_commercial(db)
+        
+    with tab_archived:
+        _manage_archived_commercials(db)
 
 
 def _list_commercials(db: DBManager) -> None:
-    st.subheader("Comerciales actuales")
-    comerciales = db.get_comerciales_by_role_id(ROLE_ID_COMERCIAL)
+    st.subheader("Comerciales activos")
+    # Solo muestra comerciales activos (no archivados)
+    comerciales = db.get_comerciales_by_role_id(ROLE_ID_COMERCIAL, include_archived=False)
     if not comerciales:
-        st.info("No hay comerciales registrados para el rol especificado.")
+        st.info("No hay comerciales activos registrados para el rol especificado.")
         return
     df = pd.DataFrame([
         {
-            "ID": c.get("id"),
             "Nombre": c.get("nombre"),
             "Email": c.get("email") or "",
             "Celular": c.get("celular") or "",
@@ -83,10 +86,10 @@ def _create_commercial_form(db: DBManager) -> None:
 
 
 def _edit_delete_commercial(db: DBManager) -> None:
-    st.subheader("Editar / Eliminar comercial")
-    comerciales = db.get_comerciales_by_role_id(ROLE_ID_COMERCIAL)
+    st.subheader("Editar / Archivar comercial")
+    comerciales = db.get_comerciales_by_role_id(ROLE_ID_COMERCIAL, include_archived=False)
     if not comerciales:
-        st.info("No hay comerciales para editar.")
+        st.info("No hay comerciales activos para editar.")
         return
 
     opciones = {f"{c.get('nombre')} ({c.get('email') or ''})": c.get('id') for c in comerciales}
@@ -106,7 +109,7 @@ def _edit_delete_commercial(db: DBManager) -> None:
 
         col1, col2 = st.columns(2)
         guardar = col1.form_submit_button("Guardar cambios", type="primary")
-        eliminar = col2.form_submit_button("Eliminar", type="secondary")
+        archivar = col2.form_submit_button("Archivar", type="secondary")
 
         if guardar:
             if not nombre.strip():
@@ -123,13 +126,52 @@ def _edit_delete_commercial(db: DBManager) -> None:
             else:
                 st.error("❌ No se pudieron guardar los cambios.")
 
-        if eliminar:
-            if st.checkbox("Confirmar eliminación", key="confirm_delete_comercial"):
-                ok = db.delete_comercial(perfil_id)
+        if archivar:
+            if st.checkbox("Confirmar archivado", key="confirm_archive_comercial"):
+                st.info("El comercial será archivado y no aparecerá en las listas principales, pero se podrá restaurar posteriormente.")
+                ok = db.delete_comercial(perfil_id)  # Este método ahora archiva en lugar de eliminar
                 if ok:
-                    st.success("✅ Comercial eliminado.")
+                    st.success("✅ Comercial archivado correctamente.")
                     st.rerun()
                 else:
-                    st.error("❌ No se pudo eliminar el comercial.")
+                    st.error("❌ No se pudo archivar el comercial.")
 
 
+def _manage_archived_commercials(db: DBManager) -> None:
+    """Gestiona los comerciales que han sido archivados."""
+    st.subheader("Comerciales archivados")
+    
+    # Obtener comerciales archivados
+    comerciales_archivados = db.get_comerciales_archivados(ROLE_ID_COMERCIAL)
+    
+    if not comerciales_archivados:
+        st.info("No hay comerciales archivados.")
+        return
+    
+    # Mostrar lista de comerciales archivados
+    df = pd.DataFrame([
+        {
+            "Nombre": c.get("nombre"),
+            "Email": c.get("email") or "",
+            "Celular": c.get("celular") or "",
+            "Archivado": c.get("updated_at") or ""
+        }
+        for c in comerciales_archivados
+    ])
+    st.dataframe(df, hide_index=True, use_container_width=True)
+    
+    # Formulario para restaurar comercial
+    st.subheader("Restaurar comercial archivado")
+    
+    opciones = {f"{c.get('nombre')} ({c.get('email') or ''})": c.get('id') for c in comerciales_archivados}
+    sel_key = st.selectbox("Seleccione un comercial para restaurar:", options=list(opciones.keys()), key="restore_comercial_select")
+    perfil_id = opciones.get(sel_key)
+    
+    if st.button("Restaurar comercial", type="primary"):
+        if perfil_id:
+            ok = db.restaurar_comercial(perfil_id)
+            if ok:
+                st.success("✅ Comercial restaurado correctamente.")
+                st.rerun()
+            else:
+                st.error("❌ No se pudo restaurar el comercial.")

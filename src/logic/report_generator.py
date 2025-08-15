@@ -259,22 +259,24 @@ def generar_informe_tecnico_markdown(
 
         header = f"""
 ## Informe Técnico de Cotización
-- **Identificador Único**: {identificador_display}
-- **Número Cotización**: {numero_cotizacion}
-- **Cliente**: {cliente_nombre}
-- **Referencia**: {referencia_desc}
-- **Comercial**: {comercial_nombre}
+
+**Identificador Único**: {identificador_display}  
+**Número Cotización**: {numero_cotizacion}  
+**Cliente**: {cliente_nombre}  
+**Referencia**: {referencia_desc}  
+**Comercial**: {comercial_nombre}
 """
 
         params_impresion = f"""
-        ### Parámetros de Impresión
-        - **Ancho**: {format_measure(ancho)} mm
-        - **Avance/Largo**: {format_measure(avance)} mm
-        - **Gap al avance**: {gap_avance_total:.2f} mm
-        - **Pistas**: {pistas}
-        - **Número de repeticiones (unidad)**: {repeticiones_unidad if repeticiones_unidad is not None else 'N/A'}
-        - **Número de Tintas**: {num_tintas}
-        - **Área de Etiqueta/Manga**: {format_measure(area_etiqueta)} mm²
+### Parámetros de Impresión
+
+**Ancho**: {format_measure(ancho)} mm  
+**Avance/Largo**: {format_measure(avance)} mm  
+**Gap al avance**: {gap_avance_total:.2f} mm  
+**Pistas**: {pistas}  
+**Número de repeticiones (unidad)**: {repeticiones_unidad if repeticiones_unidad is not None else 'N/A'}  
+**Número de Tintas**: {num_tintas}  
+**Área de Etiqueta/Manga**: {format_measure(area_etiqueta)} mm²
         - **Unidad (Z - Dientes Cilindro)**: {dientes}
         """
 

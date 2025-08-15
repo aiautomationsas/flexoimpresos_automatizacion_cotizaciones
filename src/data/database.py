@@ -117,19 +117,22 @@ class DBManager:
         tipo = "MT" if es_manga else "ET"  # Usar MT para mangas, ET para etiquetas
         
         # Formatear dimensiones sin redondear decimales
-        try:
-            ancho_str = format(Decimal(str(ancho)).normalize(), 'f')
-            if '.' in ancho_str:
-                ancho_str = ancho_str.rstrip('0').rstrip('.')
-        except Exception:
-            ancho_str = str(ancho)
+        def _fmt_medida(value):
+            try:
+                # Convertir a Decimal para manejar precisión
+                d = Decimal(str(value))
+                # Normalizar para eliminar ceros no significativos
+                d = d.normalize()
+                # Si es un número entero, retornar sin decimales
+                if d == d.to_integral():
+                    return str(int(d))
+                # Si tiene decimales, mantenerlos
+                return format(d, 'f').rstrip('0').rstrip('.')
+            except Exception:
+                return str(value)
 
-        try:
-            avance_str = format(Decimal(str(avance)).normalize(), 'f')
-            if '.' in avance_str:
-                avance_str = avance_str.rstrip('0').rstrip('.')
-        except Exception:
-            avance_str = str(avance)
+        ancho_str = _fmt_medida(ancho)
+        avance_str = _fmt_medida(avance)
 
         dimensiones = f"{ancho_str}x{avance_str}MM"
         
@@ -1734,6 +1737,28 @@ class DBManager:
             cliente = referencia.cliente if referencia else None
             perfil_comercial = referencia.perfil if referencia else None # Perfil es un dict
             
+            # Obtener la política de cartera (similar a como se obtiene la política de entrega)
+            print("\n=== DEBUG OBTENCIÓN POLÍTICA DE CARTERA ===")
+            politica_cartera = None
+            
+            # Usar ID fijo para la política de cartera (ID 1)
+            politica_id = 1  # Usar la primera política de cartera
+            
+            try:
+                print(f"Intentando obtener política de cartera con ID: {politica_id}")
+                politica_response = self.supabase.table('politicas_cartera').select('descripcion').eq('id', politica_id).maybe_single().execute()
+                
+                if politica_response.data and politica_response.data.get('descripcion'):
+                    politica_cartera = politica_response.data['descripcion']
+                    print(f"Política de cartera encontrada (ID {politica_id}): {politica_cartera}")
+                else:
+                    print(f"Advertencia: No se encontró descripción para política de cartera con ID {politica_id}")
+            except Exception as e:
+                print(f"Error al buscar política de cartera con ID {politica_id}: {str(e)}")
+                traceback.print_exc()
+                
+            print("=== FIN DEBUG OBTENCIÓN POLÍTICA DE CARTERA ===\n")
+            
             # --- INICIO CAMBIO: Obtener material correctamente ---
             # material = cotizacion.material # <-- ESTO FALLA
             material_adhesivo_info = cotizacion.material_adhesivo # Es un dict o None
@@ -1795,6 +1820,7 @@ class DBManager:
                 'comercial': perfil_comercial, # Ya es un dict
                 'identificador': cotizacion.identificador,
                 'tipo_producto': tipo_producto.__dict__ if tipo_producto else {},
+                'politica_cartera': politica_cartera or "Se retiene despacho con mora de 16 a 30 días\nSe retiene producción con mora de 31 a 45 días",
                 # Agregar los valores para el PDF de materiales
                 'valor_material': valor_material,
                 'valor_acabado': valor_acabado,
@@ -1836,21 +1862,17 @@ class DBManager:
 
             # --- INICIO: Añadir Política de Entrega ---
             politica_entrega_descripcion = None
-            # Verificar si es etiqueta o manga
-            es_etiqueta = not cotizacion.es_manga
             
-            # Determinar el ID de política según el tipo de producto
-            politica_id = 1 if es_etiqueta else 2  # ID 1 para etiquetas, ID 2 para mangas
-            
+            # Siempre usamos la política con ID=1 (único registro permitido)
             try:
-                politica_response = self.supabase.table('politicas_entrega').select('descripcion').eq('id', politica_id).maybe_single().execute()
+                politica_response = self.supabase.table('politicas_entrega').select('descripcion').eq('id', 1).maybe_single().execute()
                 if politica_response.data and politica_response.data.get('descripcion'):
                     politica_entrega_descripcion = politica_response.data['descripcion']
-                    print(f"  Política de entrega encontrada para {'etiqueta' if es_etiqueta else 'manga'} (ID {politica_id}): {politica_entrega_descripcion}")
+                    print(f"  Política de entrega encontrada (ID 1): {politica_entrega_descripcion}")
                 else:
-                    print(f"  Advertencia: No se encontró descripción para política de entrega con ID {politica_id}")
+                    print("  Advertencia: No se encontró descripción para política de entrega")
             except Exception as e_pol:
-                print(f"  Error al buscar política de entrega con ID {politica_id}: {e_pol}")
+                print(f"  Error al buscar política de entrega: {e_pol}")
             
             # Agregar al diccionario final
             datos['politica_entrega'] = politica_entrega_descripcion or "Estándar"  # Valor por defecto si no se encuentra
@@ -2348,7 +2370,8 @@ class DBManager:
     # ============================
     def get_politicas_entrega(self) -> List[PoliticasEntrega]:
         try:
-            response = self.supabase.table('politicas_entrega').select('*').order('id').execute()
+            # Obtener solo el registro con ID=1 (único registro permitido)
+            response = self.supabase.table('politicas_entrega').select('*').eq('id', 1).execute()
             return [PoliticasEntrega(
                 id=item.get('id'),
                 descripcion=item.get('descripcion', ''),
@@ -2357,11 +2380,13 @@ class DBManager:
             ) for item in (response.data or [])]
         except Exception as e:
             print(f"Error al obtener políticas de entrega: {e}")
+            traceback.print_exc()
             return []
 
-    def get_politica_entrega(self, politica_id: int) -> Optional[PoliticasEntrega]:
+    def get_politica_entrega(self, politica_id: int = 1) -> Optional[PoliticasEntrega]:
         try:
-            response = self.supabase.table('politicas_entrega').select('*').eq('id', politica_id).maybe_single().execute()
+            # Siempre obtenemos el registro con ID=1, independientemente del ID proporcionado
+            response = self.supabase.table('politicas_entrega').select('*').eq('id', 1).maybe_single().execute()
             data = response.data if isinstance(response.data, dict) else None
             if not data:
                 return None
@@ -2373,17 +2398,33 @@ class DBManager:
             )
         except Exception as e:
             print(f"Error al obtener política de entrega: {e}")
+            traceback.print_exc()
             return None
 
     def create_politica_entrega(self, politica: PoliticasEntrega) -> bool:
         try:
+            # Verificar si ya existe un registro con ID=1
+            check_response = self.supabase.table('politicas_entrega').select('id').eq('id', 1).execute()
+            
             payload = {
                 'descripcion': politica.descripcion,
+                'updated_at': datetime.now().isoformat()
             }
-            resp = self.supabase.table('politicas_entrega').insert(payload).execute()
+            
+            if check_response.data and len(check_response.data) > 0:
+                # Si ya existe, actualizar en lugar de insertar
+                print("Ya existe un registro de política de entrega. Actualizando...")
+                resp = self.supabase.table('politicas_entrega').update(payload).eq('id', 1).execute()
+            else:
+                # Si no existe, insertar con ID=1
+                print("No existe un registro de política de entrega. Creando nuevo...")
+                payload['id'] = 1
+                resp = self.supabase.table('politicas_entrega').insert(payload).execute()
+            
             return bool(resp.data)
         except Exception as e:
-            print(f"Error al crear política de entrega: {e}")
+            print(f"Error al crear/actualizar política de entrega: {e}")
+            traceback.print_exc()
             return False
 
     def update_politica_entrega(self, politica: PoliticasEntrega) -> bool:
@@ -2392,19 +2433,34 @@ class DBManager:
                 'descripcion': politica.descripcion,
                 'updated_at': datetime.now().isoformat()
             }
-            resp = self.supabase.table('politicas_entrega').update(payload).eq('id', politica.id).execute()
-            return bool(resp.data)
+            
+            # Verificar si la política con ID=1 existe antes de actualizar
+            check = self.supabase.table('politicas_entrega').select('id').eq('id', 1).execute()
+            if not check.data:
+                print("Error: No se encontró la política de entrega (ID=1)")
+                # Si no existe, intentar crearla
+                print("Intentando crear la política de entrega...")
+                payload['id'] = 1
+                resp = self.supabase.table('politicas_entrega').insert(payload).execute()
+            else:
+                # Si existe, actualizarla
+                resp = self.supabase.table('politicas_entrega').update(payload).eq('id', 1).execute()
+            
+            if not resp.data:
+                print("Error: No se recibió respuesta de la actualización/creación")
+                return False
+                
+            print("Actualización exitosa de política de entrega")
+            return True
         except Exception as e:
             print(f"Error al actualizar política de entrega: {e}")
+            traceback.print_exc()
             return False
 
     def delete_politica_entrega(self, politica_id: int) -> bool:
-        try:
-            resp = self.supabase.table('politicas_entrega').delete().eq('id', politica_id).execute()
-            return bool(resp.data)
-        except Exception as e:
-            print(f"Error al eliminar política de entrega: {e}")
-            return False
+        # No permitimos eliminar el registro único
+        print("AVISO: No se permite eliminar la política de entrega. Solo se puede modificar.")
+        return False
 
     def get_cotizaciones_by_politica(self, politica_id: int) -> List[Dict[str, Any]]:
         try:
@@ -2418,31 +2474,66 @@ class DBManager:
     # ==========================
     def get_politicas_cartera(self) -> List[PoliticasCartera]:
         try:
-            response = self.supabase.table('politicas_cartera').select('*').order('id').execute()
-            return [PoliticasCartera(
-                id=item.get('id'),
-                descripcion=item.get('descripcion', ''),
-                created_at=self._parse_dt(item.get('created_at')),
-                updated_at=self._parse_dt(item.get('updated_at')),
-            ) for item in (response.data or [])]
+            print("\n=== DEBUG get_politicas_cartera ===")
+            print("Ejecutando consulta a politicas_cartera...")
+            
+            # Obtener solo el registro con ID=1 (único registro permitido)
+            response = self.supabase.table('politicas_cartera').select('*').eq('id', 1).execute()
+            
+            print(f"Respuesta recibida: {response}")
+            print(f"Datos en response.data: {response.data}")
+            
+            politicas = []
+            for item in (response.data or []):
+                print(f"\nProcesando item: {item}")
+                politica = PoliticasCartera(
+                    id=item.get('id'),
+                    descripcion=item.get('descripcion', ''),
+                    created_at=self._parse_dt(item.get('created_at')),
+                    updated_at=self._parse_dt(item.get('updated_at')),
+                )
+                print(f"Política creada: {politica}")
+                politicas.append(politica)
+            
+            print(f"\nTotal de políticas encontradas: {len(politicas)}")
+            print("=== FIN DEBUG ===\n")
+            return politicas
+            
         except Exception as e:
-            print(f"Error al obtener políticas de cartera: {e}")
+            print(f"Error al obtener políticas de cartera: {str(e)}")
+            traceback.print_exc()
             return []
 
-    def get_politica_cartera(self, politica_id: int) -> Optional[PoliticasCartera]:
+    def get_politica_cartera(self, politica_id: int = 1) -> Optional[PoliticasCartera]:
         try:
-            response = self.supabase.table('politicas_cartera').select('*').eq('id', politica_id).maybe_single().execute()
+            print(f"\n=== DEBUG get_politica_cartera(id={politica_id}) ===")
+            print("Ejecutando consulta...")
+            
+            # Siempre obtenemos el registro con ID=1, independientemente del ID proporcionado
+            response = self.supabase.table('politicas_cartera').select('*').eq('id', 1).maybe_single().execute()
+            print(f"Respuesta recibida: {response}")
+            
             data = response.data if isinstance(response.data, dict) else None
+            print(f"Datos extraídos: {data}")
+            
             if not data:
+                print("No se encontró la política de cartera")
                 return None
-            return PoliticasCartera(
+                
+            politica = PoliticasCartera(
                 id=data.get('id'),
                 descripcion=data.get('descripcion', ''),
                 created_at=self._parse_dt(data.get('created_at')),
                 updated_at=self._parse_dt(data.get('updated_at')),
             )
+            
+            print(f"Política creada: {politica}")
+            print("=== FIN DEBUG ===\n")
+            return politica
+            
         except Exception as e:
-            print(f"Error al obtener política de cartera: {e}")
+            print(f"Error al obtener política de cartera: {str(e)}")
+            traceback.print_exc()
             return None
 
     def create_politicas_cartera_table_if_not_exists(self) -> bool:
@@ -2465,13 +2556,28 @@ class DBManager:
 
     def create_politica_cartera(self, politica: PoliticasCartera) -> bool:
         try:
+            # Verificar si ya existe un registro con ID=1
+            check_response = self.supabase.table('politicas_cartera').select('id').eq('id', 1).execute()
+            
             payload = {
                 'descripcion': politica.descripcion,
+                'updated_at': datetime.now().isoformat()
             }
-            resp = self.supabase.table('politicas_cartera').insert(payload).execute()
+            
+            if check_response.data and len(check_response.data) > 0:
+                # Si ya existe, actualizar en lugar de insertar
+                print("Ya existe un registro de política de cartera. Actualizando...")
+                resp = self.supabase.table('politicas_cartera').update(payload).eq('id', 1).execute()
+            else:
+                # Si no existe, insertar con ID=1
+                print("No existe un registro de política de cartera. Creando nuevo...")
+                payload['id'] = 1
+                resp = self.supabase.table('politicas_cartera').insert(payload).execute()
+            
             return bool(resp.data)
         except Exception as e:
-            print(f"Error al crear política de cartera: {e}")
+            print(f"Error al crear/actualizar política de cartera: {e}")
+            traceback.print_exc()
             return False
 
     def update_politica_cartera(self, politica: PoliticasCartera) -> bool:
@@ -2480,33 +2586,76 @@ class DBManager:
                 'descripcion': politica.descripcion,
                 'updated_at': datetime.now().isoformat()
             }
-            resp = self.supabase.table('politicas_cartera').update(payload).eq('id', politica.id).execute()
-            return bool(resp.data)
+            
+            # Verificar si la política con ID=1 existe antes de actualizar
+            check = self.supabase.table('politicas_cartera').select('id').eq('id', 1).execute()
+            if not check.data:
+                print("Error: No se encontró la política de cartera (ID=1)")
+                # Si no existe, intentar crearla
+                print("Intentando crear la política de cartera...")
+                payload['id'] = 1
+                resp = self.supabase.table('politicas_cartera').insert(payload).execute()
+            else:
+                # Si existe, actualizarla
+                resp = self.supabase.table('politicas_cartera').update(payload).eq('id', 1).execute()
+            
+            if not resp.data:
+                print("Error: No se recibió respuesta de la actualización/creación")
+                return False
+                
+            print("Actualización exitosa de política de cartera")
+            return True
+            
         except Exception as e:
-            print(f"Error al actualizar política de cartera: {e}")
+            print(f"Error al actualizar política de cartera: {str(e)}")
+            traceback.print_exc()
             return False
 
     def delete_politica_cartera(self, politica_id: int) -> bool:
-        try:
-            resp = self.supabase.table('politicas_cartera').delete().eq('id', politica_id).execute()
-            return bool(resp.data)
-        except Exception as e:
-            print(f"Error al eliminar política de cartera: {e}")
-            return False
+        # No permitimos eliminar el registro único
+        print("AVISO: No se permite eliminar la política de cartera. Solo se puede modificar.")
+        return False
 
     # ============================
     #  Gestión de Comerciales (perfiles)
     # ============================
-    def get_comerciales_by_role_id(self, role_id: str) -> List[Dict[str, Any]]:
-        """Obtiene perfiles que pertenecen al rol de comercial especificado por role_id."""
+    def get_comerciales_by_role_id(self, role_id: str, include_archived: bool = False) -> List[Dict[str, Any]]:
+        """
+        Obtiene perfiles que pertenecen al rol de comercial especificado por role_id.
+        
+        Args:
+            role_id: ID del rol de comercial
+            include_archived: Si es True, incluye comerciales archivados. Por defecto es False.
+        """
         try:
-            # Asumimos tabla 'perfiles' con columnas: id(uuid), nombre, email, celular(int), rol_id(uuid), updated_at
-            resp = self.supabase.table('perfiles').select('id,nombre,email,celular,rol_id,updated_at').eq('rol_id', role_id).order('updated_at', desc=True).execute()
+            # Asumimos tabla 'perfiles' con columnas: id(uuid), nombre, email, celular(int), rol_id(uuid), updated_at, archivado(bool)
+            query = self.supabase.table('perfiles').select('id,nombre,email,celular,rol_id,updated_at,archivado').eq('rol_id', role_id)
+            
+            # Si no se incluyen archivados, filtramos para mostrar solo activos
+            if not include_archived:
+                # Buscamos donde archivado es False o NULL (para compatibilidad con registros existentes)
+                query = query.or_('archivado.is.null,archivado.eq.false')
+                
+            resp = query.order('updated_at', desc=True).execute()
             return resp.data or []
         except Exception as e:
             print(f"Error al obtener comerciales: {e}")
             return []
 
+    def get_comerciales_archivados(self, role_id: str) -> List[Dict[str, Any]]:
+        """
+        Obtiene perfiles archivados que pertenecen al rol de comercial especificado.
+        
+        Args:
+            role_id: ID del rol de comercial
+        """
+        try:
+            resp = self.supabase.table('perfiles').select('id,nombre,email,celular,rol_id,updated_at,archivado').eq('rol_id', role_id).eq('archivado', True).order('updated_at', desc=True).execute()
+            return resp.data or []
+        except Exception as e:
+            print(f"Error al obtener comerciales archivados: {e}")
+            return []
+    
     def create_comercial(self, nombre: str, email: Optional[str], celular: Optional[int], role_id: str) -> bool:
         try:
             payload = {
@@ -2514,6 +2663,7 @@ class DBManager:
                 'email': email,
                 'celular': celular,
                 'rol_id': role_id,
+                'archivado': False,  # Por defecto, el comercial no está archivado
             }
             resp = self.supabase.table('perfiles').insert(payload).execute()
             return bool(resp.data)
@@ -2534,13 +2684,37 @@ class DBManager:
         except Exception as e:
             print(f"Error al actualizar comercial: {e}")
             return False
-
-    def delete_comercial(self, perfil_id: str) -> bool:
+            
+    def restaurar_comercial(self, perfil_id: str) -> bool:
+        """
+        Restaura un comercial previamente archivado.
+        Actualiza el campo 'archivado' a False.
+        """
         try:
-            resp = self.supabase.table('perfiles').delete().eq('id', perfil_id).execute()
+            payload = {
+                'archivado': False,
+                'updated_at': datetime.now().isoformat()
+            }
+            resp = self.supabase.table('perfiles').update(payload).eq('id', perfil_id).execute()
             return bool(resp.data)
         except Exception as e:
-            print(f"Error al eliminar comercial: {e}")
+            print(f"Error al restaurar comercial: {e}")
+            return False
+
+    def delete_comercial(self, perfil_id: str) -> bool:
+        """
+        Archiva un comercial en lugar de eliminarlo.
+        Actualiza el campo 'archivado' a True.
+        """
+        try:
+            payload = {
+                'archivado': True,
+                'updated_at': datetime.now().isoformat()
+            }
+            resp = self.supabase.table('perfiles').update(payload).eq('id', perfil_id).execute()
+            return bool(resp.data)
+        except Exception as e:
+            print(f"Error al archivar comercial: {e}")
             return False
                 
             # Formatear los datos para que coincidan con la estructura esperada por generar_informe_tecnico_markdown

@@ -20,13 +20,14 @@ class CalculadoraDesperdicio:
         self.MAX_REPETICIONES = 20  # Máximo de repeticiones a considerar (hasta la columna Z)
         self.es_manga = es_manga  # Nuevo flag para diferenciar mangas de etiquetas
         
-        # Datos de la tabla
+        # Datos de la tabla con repeticiones fijas correctas
         self.data = {
             'Dientes': [80.00, 84.00, 88.00, 96.00, 102.00, 108.00, 112.00, 120.00, 64.00, 128.00, 140.00, 165.00],
             'Pulg_diente': [0.1250] * 12,
             'Pulgadas': [10.0000, 10.5000, 11.0000, 12.0000, 12.7500, 13.5000, 14.0000, 15.0000, 8.0000, 16.0000, 17.5000, 20.6250],
             'cm_pulg': [25.40] * 12,
-            'mm': [254.0000, 266.7000, 279.4000, 304.8000, 323.8500, 342.9000, 355.6000, 381.0000, 203.2000, 406.4000, 444.5000, 523.8750]
+            'mm': [254.0000, 266.7000, 279.4000, 304.8000, 323.8500, 342.9000, 355.6000, 381.0000, 203.2000, 406.4000, 444.5000, 523.8750],
+            'repeticiones_fijas': [2, 2, 2, 2, 2, 3, 3, 3, 1, 3, 4, 4]  # Repeticiones correctas según tabla del usuario
         }
         self.df = pd.DataFrame(self.data)
         self._validar_datos_iniciales()
@@ -36,7 +37,7 @@ class CalculadoraDesperdicio:
         if self.df.empty:
             raise ValueError("No hay datos cargados en la calculadora")
         
-        columnas_requeridas = ['Dientes', 'mm']
+        columnas_requeridas = ['Dientes', 'mm', 'repeticiones_fijas']
         for col in columnas_requeridas:
             if col not in self.df.columns:
                 raise ValueError(f"Falta la columna requerida: {col}")
@@ -46,6 +47,9 @@ class CalculadoraDesperdicio:
         
         if (self.df['Dientes'] <= 0).any():
             raise ValueError("Existen números de dientes inválidos (nulos o negativos)")
+            
+        if (self.df['repeticiones_fijas'] <= 0).any():
+            raise ValueError("Existen repeticiones inválidas (nulas o negativas)")
 
     def _calcular_ancho_total(self, avance_mm: float, repeticiones: int) -> float:
         """
@@ -105,27 +109,47 @@ class CalculadoraDesperdicio:
         while self._calcular_ancho_total(avance_mm, max_rep + 1) <= self.ANCHO_MAQUINA:
             max_rep += 1
         return max_rep
+    
+    def _obtener_repeticiones_fijas(self, dientes: float) -> int:
+        """Obtiene el número de repeticiones fijas para un número específico de dientes"""
+        fila = self.df[self.df['Dientes'] == dientes]
+        if fila.empty:
+            # Si no se encuentra el número exacto de dientes, usar la lógica original
+            return None
+        return int(fila['repeticiones_fijas'].iloc[0])
 
     def calcular_todas_opciones(self, avance_mm: float) -> List[OpcionDesperdicio]:
-        """Calcula todas las opciones válidas ordenadas por desperdicio"""
+        """Calcula todas las opciones válidas ordenadas por desperdicio, usando repeticiones fijas cuando están disponibles"""
         self._validar_avance(avance_mm)
         
         opciones = []
         
         # Para cada medida en la tabla
         for _, row in self.df.iterrows():
-            # Probar para repeticiones de 1 a 20 (como en Excel)
-            for rep in range(1, self.MAX_REPETICIONES + 1):
+            dientes = row['Dientes']
+            mm = row['mm']
+            
+            # Obtener repeticiones fijas para este número de dientes
+            rep_fija = self._obtener_repeticiones_fijas(dientes)
+            
+            if rep_fija is not None:
+                # Usar solo la repetición fija
+                repeticiones_a_probar = [rep_fija]
+            else:
+                # Usar la lógica original (probar de 1 a 20)
+                repeticiones_a_probar = range(1, self.MAX_REPETICIONES + 1)
+            
+            for rep in repeticiones_a_probar:
                 ancho_total = self._calcular_ancho_total(avance_mm, rep)
                 
-                # Aquí eliminamos la validación del ancho total para una sola repetición
-                # Si el avance es mayor que el ancho de la máquina, al menos debemos permitir una repetición
-                if rep == 1 or self._validar_ancho_total(ancho_total):
-                    desperdicio = self._calcular_desperdicio_individual(row['mm'], avance_mm, rep)
+                # Para repeticiones fijas, permitir incluso si excede el ancho de máquina
+                # Para lógica original, mantener la validación
+                if rep_fija is not None or rep == 1 or self._validar_ancho_total(ancho_total):
+                    desperdicio = self._calcular_desperdicio_individual(mm, avance_mm, rep)
                     if desperdicio < 999:
                         opciones.append(OpcionDesperdicio(
-                            dientes=row['Dientes'],
-                            medida_mm=row['mm'],
+                            dientes=dientes,
+                            medida_mm=mm,
                             desperdicio=desperdicio,
                             repeticiones=rep,
                             ancho_total=ancho_total

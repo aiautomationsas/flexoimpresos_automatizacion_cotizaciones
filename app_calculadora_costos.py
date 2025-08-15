@@ -978,11 +978,7 @@ def mostrar_calculadora():
             _mostrar_adhesivo(adhesivos_filtrados, material_obj_actual, datos_cargados)
             st.divider()
             
-        # -- Grafado (Fuera del form, si es manga) --
-        if es_manga:
-            tipos_grafado = st.session_state.initial_data.get('tipos_grafado', [])
-            _mostrar_grafado_altura(es_manga, tipos_grafado, datos_cargados)
-            st.divider()
+
             
         # -- Ajustes Admin (Fuera del form) --> SE MOVERÁ AL FINAL <--
         # _mostrar_ajustes_admin() 

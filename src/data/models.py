@@ -354,6 +354,7 @@ class Cotizacion:
     colores_tinta: Optional[str] = None
     altura_grafado: Optional[float] = None
     politicas_entrega_id: Optional[int] = None
+    politica_cartera_id: Optional[int] = None
     escalas: List[Escala] = field(default_factory=list)
     # Relaciones
     referencia_cliente: Optional[ReferenciaCliente] = None
@@ -361,6 +362,7 @@ class Cotizacion:
     acabado: Optional[Acabado] = None
     tipo_producto: Optional[TipoProducto] = None
     politicas_entrega: Optional[PoliticasEntrega] = None
+    politica_cartera: Optional[PoliticasCartera] = None
     tipo_foil: Optional[TipoFoil] = None  # Nueva relación con TipoFoil
     # --- NUEVO: Campo para perfil --- 
     perfil_comercial_info: Optional[Dict] = None # Guardará {'id': UUID, 'nombre': str, ...}
@@ -398,6 +400,7 @@ class Cotizacion:
         ultima_modificacion_inputs=None,
         colores_tinta=None,
         politicas_entrega_id=None,
+        politica_cartera_id=None,
         altura_grafado=None,
         # Relaciones
         referencia_cliente=None,
@@ -405,6 +408,7 @@ class Cotizacion:
         acabado=None,
         tipo_producto=None,
         politicas_entrega=None,
+        politica_cartera=None,
         tipo_foil=None,  # Nueva relación
         # --- NUEVO: Añadir campo para perfil --- 
         perfil_comercial_info=None,
@@ -440,6 +444,7 @@ class Cotizacion:
         self.ultima_modificacion_inputs = ultima_modificacion_inputs
         self.colores_tinta = colores_tinta
         self.politicas_entrega_id = politicas_entrega_id
+        self.politica_cartera_id = politica_cartera_id
         self.altura_grafado = float(altura_grafado) if altura_grafado is not None else None
         # Relaciones
         self.referencia_cliente = referencia_cliente
@@ -447,6 +452,7 @@ class Cotizacion:
         self.acabado = acabado
         self.tipo_producto = tipo_producto
         self.politicas_entrega = politicas_entrega
+        self.politica_cartera = politica_cartera
         self.tipo_foil = tipo_foil  # Nueva relación
         # --- NUEVO: Guardar perfil --- 
         self.perfil_comercial_info = perfil_comercial_info

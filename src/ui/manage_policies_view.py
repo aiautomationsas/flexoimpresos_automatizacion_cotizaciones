@@ -25,17 +25,9 @@ def show_manage_policies():
     
     db = st.session_state.db
     
-    # Tabs para diferentes acciones
-    tab1, tab2, tab3 = st.tabs(["📋 Ver Políticas", "➕ Crear Nueva", "✏️ Editar"])
-    
-    with tab1:
-        show_policies_list(db)
-    
-    with tab2:
-        show_create_policy_form(db)
-    
-    with tab3:
-        show_edit_policy_form(db)
+    # Solo mostramos una pestaña para editar la política única
+    st.markdown("### 📋 Política de Entrega")
+    show_edit_single_policy(db)
 
 def show_policies_list(db: DBManager):
     """Muestra la lista de políticas de entrega existentes"""
@@ -48,62 +40,7 @@ def show_policies_list(db: DBManager):
             st.info("💡 Solución: Reinicie la aplicación completamente para cargar los nuevos métodos.")
             return
         
-        # Prueba de estructura de tabla (opcional)
-        if st.checkbox("🔍 Mostrar información de debug"):
-            if hasattr(db, 'test_politicas_table_structure'):
-                st.info("🔍 Probando estructura de tabla...")
-                test_result = db.test_politicas_table_structure()
-                st.json(test_result)
-                
-                # Verificar estado de la tabla y triggers
-                if test_result.get('needs_setup', True):
-                    st.warning("⚠️ La tabla o sus triggers necesitan configuración...")
-                    
-                    missing_components = []
-                    if not test_result.get('table_exists', False):
-                        missing_components.append("tabla")
-                    if not test_result.get('trigger_exists', False):
-                        missing_components.append("trigger de actualización")
-                    if not test_result.get('function_exists', False):
-                        missing_components.append("función de trigger")
-                    if not test_result.get('select_policy_exists', False):
-                        missing_components.append("política RLS para SELECT")
-                    if not test_result.get('insert_policy_exists', False):
-                        missing_components.append("política RLS para INSERT")
-                    if not test_result.get('update_policy_exists', False):
-                        missing_components.append("política RLS para UPDATE")
-                    if not test_result.get('delete_policy_exists', False):
-                        missing_components.append("política RLS para DELETE")
-                    
-                    st.info(f"💡 Componentes faltantes: {', '.join(missing_components)}")
-                    
-                    if hasattr(db, 'create_politicas_table_if_not_exists'):
-                        if st.button("🔧 Configurar Tabla y Triggers"):
-                            with st.spinner("Configurando..."):
-                                success = db.create_politicas_table_if_not_exists()
-                                if success:
-                                    st.success("✅ Tabla y triggers configurados exitosamente")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Error en la configuración")
-                                    return
-                    else:
-                        st.error("❌ Método de configuración no disponible")
-                        return
-            
-            # Prueba de triggers
-            if hasattr(db, 'test_politicas_triggers'):
-                st.info("🔍 Probando triggers de created_at y updated_at...")
-                if st.button("🧪 Probar Triggers"):
-                    with st.spinner("Probando triggers..."):
-                        trigger_result = db.test_politicas_triggers()
-                        st.json(trigger_result)
-                        
-                        if trigger_result.get('success'):
-                            st.success("✅ Triggers funcionando correctamente")
-                        else:
-                            st.error("❌ Error en los triggers")
-                            st.info("💡 Los triggers pueden no estar configurados en la base de datos")
+
         
         # Obtener todas las políticas
         politicas = db.get_politicas_entrega()
@@ -371,6 +308,108 @@ def show_policy_selection(db: DBManager, selected_policy_id: Optional[int] = Non
     except Exception as e:
         st.error(f"Error al cargar las políticas de entrega: {str(e)}")
         return None
+
+def show_edit_single_policy(db: DBManager):
+    """Muestra el formulario para editar la única política de entrega"""
+    try:
+        # Verificar que el DBManager tiene los métodos necesarios
+        if not hasattr(db, 'get_politica_entrega'):
+            st.error("❌ Error: El método 'get_politica_entrega' no está disponible en DBManager.")
+            st.info("💡 Solución: Reinicie la aplicación completamente para cargar los nuevos métodos.")
+            return
+        
+        # Obtener la política única (siempre ID=1)
+        politica = db.get_politica_entrega(1)
+        
+        if politica:
+            with st.form("edit_single_policy_form"):
+                st.markdown("**Editar Política de Entrega**")
+                
+                descripcion_editada = st.text_area(
+                    "Descripción:",
+                    value=politica.descripcion,
+                    height=200,
+                    help="Esta política se aplicará a todas las cotizaciones. Use saltos de línea para separar diferentes puntos."
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("Guardar Cambios", type="primary")
+                
+                if submitted:
+                    if not descripcion_editada.strip():
+                        st.error("La descripción no puede estar vacía.")
+                        return
+                    
+                    try:
+                        # Actualizar la política
+                        print(f"Actualizando política {politica.id}...")
+                        print(f"Descripción original: {politica.descripcion}")
+                        print(f"Descripción editada: {descripcion_editada.strip()}")
+                        
+                        politica_actualizada = PoliticasEntrega(
+                            id=politica.id,
+                            descripcion=descripcion_editada.strip(),
+                            created_at=politica.created_at,
+                            updated_at=datetime.now()
+                        )
+                        
+                        print(f"Objeto PoliticasEntrega creado: {vars(politica_actualizada)}")
+                        success = db.update_politica_entrega(politica_actualizada)
+                        
+                        if success:
+                            st.success("✅ Política de entrega actualizada exitosamente.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al actualizar la política de entrega.")
+                            st.info("💡 Intente nuevamente o contacte al administrador del sistema.")
+                            
+                    except Exception as e:
+                        st.error(f"Error al actualizar la política: {str(e)}")
+                        traceback.print_exc()
+        else:
+            # Si no existe la política, mostrar formulario para crearla
+            with st.form("create_single_policy_form"):
+                st.markdown("**Crear Política de Entrega**")
+                st.info("No existe una política de entrega. Por favor, cree una.")
+                
+                descripcion = st.text_area(
+                    "Descripción:",
+                    height=200,
+                    placeholder="Ejemplo:\nRepeticiones: 8 días calendario desde el envío de la OC\nCambios: 13 días calendario desde la aprobación de la sherpa\nNuevas: 15 días calendario desde la aprobación de la sherpa",
+                    help="Esta política se aplicará a todas las cotizaciones. Use saltos de línea para separar diferentes puntos."
+                )
+                
+                submitted = st.form_submit_button("Crear Política", type="primary")
+                
+                if submitted:
+                    if not descripcion.strip():
+                        st.error("La descripción no puede estar vacía.")
+                        return
+                    
+                    try:
+                        # Crear la nueva política
+                        nueva_politica = PoliticasEntrega(
+                            id=1,  # Siempre ID=1
+                            descripcion=descripcion.strip(),
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        
+                        success = db.create_politica_entrega(nueva_politica)
+                        
+                        if success:
+                            st.success("✅ Política de entrega creada exitosamente.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al crear la política de entrega.")
+                            
+                    except Exception as e:
+                        st.error(f"Error al crear la política: {str(e)}")
+                        traceback.print_exc()
+    except Exception as e:
+        st.error(f"Error al cargar la política de entrega: {str(e)}")
+        traceback.print_exc()
 
 def show_policy_details(politica_id: int, db: DBManager):
     """Muestra los detalles de una política de entrega específica"""

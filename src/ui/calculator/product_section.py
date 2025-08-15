@@ -388,14 +388,14 @@ def _mostrar_grafado_altura(es_manga: bool, tipos_grafado: List[Any], datos_carg
     except Exception:
         pass
 
-def _mostrar_acabados_y_empaque(es_manga: bool, tipos_grafado: List[Any], acabados: List[Any], datos_cargados: Optional[Dict] = None):
+def _mostrar_acabados_y_empaque(es_manga: bool, acabados: List[Any], datos_cargados: Optional[Dict] = None):
     """
     Muestra los inputs relacionados con acabados y empaque.
 
     Args:
         es_manga: Boolean indicando si el producto es manga.
-        tipos_grafado: Lista de objetos de tipo grafado.
         acabados: Lista de objetos de acabado.
+        datos_cargados: Datos precargados para edición.
     """
     st.subheader("Acabados y Empaque")
     col1, col2 = st.columns(2)
@@ -481,10 +481,15 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
 
     if not es_manga:
         # El valor bool se guarda en st.session_state.tiene_troquel
-        st.checkbox("¿Existe troquel?", key="tiene_troquel", value=bool(default_tiene_troquel))
+        tiene_troquel = st.selectbox(
+            "¿Existe troquel?",
+            options=["Sí", "No"],
+            key="tiene_troquel",
+            index=0 if bool(default_tiene_troquel) else 1
+        )
 
         # Si el usuario indica que sí existe troquel, permitir elegir la unidad de montaje
-        if st.session_state.get("tiene_troquel", False):
+        if st.session_state.get("tiene_troquel") == "Sí":
             avance_actual = st.session_state.get("avance")
             try:
                 avance_float = float(avance_actual) if avance_actual is not None else 0.0
@@ -584,15 +589,19 @@ def mostrar_secciones_internas_formulario(
 
     # 2. Dimensiones y Tintas
     _mostrar_dimensiones_y_tintas(es_manga, datos_cargados)
+    
+    # 3. Grafado (solo para mangas, inmediatamente después de dimensiones)
+    if es_manga:
+        tipos_grafado = initial_data.get('tipos_grafado', [])
+        _mostrar_grafado_altura(es_manga, tipos_grafado, datos_cargados)
     st.divider()
     
-    # 3. Acabados/Grafado y Empaque (dependiendo de es_manga)
-    tipos_grafado = initial_data.get('tipos_grafado', [])
+    # 4. Acabados y Empaque
     acabados = initial_data.get('acabados', [])
-    _mostrar_acabados_y_empaque(es_manga, tipos_grafado, acabados, datos_cargados)
+    _mostrar_acabados_y_empaque(es_manga, acabados, datos_cargados)
     st.divider()
     
-    # 4. Opciones Adicionales
+    # 5. Opciones Adicionales
     _mostrar_opciones_adicionales(es_manga, datos_cargados)
 
 # --- FIN FUNCIÓN RENOMBRADA --- 

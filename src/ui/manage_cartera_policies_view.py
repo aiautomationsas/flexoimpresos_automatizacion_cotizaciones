@@ -25,17 +25,9 @@ def show_manage_cartera_policies():
     
     db = st.session_state.db
     
-    # Tabs para diferentes acciones
-    tab1, tab2, tab3 = st.tabs(["📋 Ver Políticas", "➕ Crear Nueva", "✏️ Editar"])
-    
-    with tab1:
-        show_cartera_policies_list(db)
-    
-    with tab2:
-        show_create_cartera_policy_form(db)
-    
-    with tab3:
-        show_edit_cartera_policy_form(db)
+    # Solo mostramos una pestaña para editar la política única
+    st.markdown("### 📋 Política de Cartera")
+    show_edit_single_cartera_policy(db)
 
 def show_cartera_policies_list(db: DBManager):
     """Muestra la lista de políticas de cartera existentes"""
@@ -48,48 +40,7 @@ def show_cartera_policies_list(db: DBManager):
             st.info("💡 Solución: Reinicie la aplicación completamente para cargar los nuevos métodos.")
             return
         
-        # Prueba de estructura de tabla (opcional)
-        if st.checkbox("🔍 Mostrar información de debug"):
-            if hasattr(db, 'test_politicas_table_structure'):
-                st.info("🔍 Probando estructura de tabla...")
-                test_result = db.test_politicas_table_structure()
-                st.json(test_result)
-                
-                # Verificar estado de la tabla y triggers
-                if test_result.get('needs_setup', True):
-                    st.warning("⚠️ La tabla o sus triggers necesitan configuración...")
-                    
-                    missing_components = []
-                    if not test_result.get('table_exists', False):
-                        missing_components.append("tabla")
-                    if not test_result.get('trigger_exists', False):
-                        missing_components.append("trigger de actualización")
-                    if not test_result.get('function_exists', False):
-                        missing_components.append("función de trigger")
-                    if not test_result.get('select_policy_exists', False):
-                        missing_components.append("política RLS para SELECT")
-                    if not test_result.get('insert_policy_exists', False):
-                        missing_components.append("política RLS para INSERT")
-                    if not test_result.get('update_policy_exists', False):
-                        missing_components.append("política RLS para UPDATE")
-                    if not test_result.get('delete_policy_exists', False):
-                        missing_components.append("política RLS para DELETE")
-                    
-                    st.info(f"💡 Componentes faltantes: {', '.join(missing_components)}")
-                    
-                    if hasattr(db, 'create_politicas_cartera_table_if_not_exists'):
-                        if st.button("🔧 Configurar Tabla y Triggers"):
-                            with st.spinner("Configurando..."):
-                                success = db.create_politicas_cartera_table_if_not_exists()
-                                if success:
-                                    st.success("✅ Tabla y triggers configurados exitosamente")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Error en la configuración")
-                                    return
-                    else:
-                        st.error("❌ Método de configuración no disponible")
-                        return
+
         
         # Obtener todas las políticas
         politicas = db.get_politicas_cartera()
@@ -260,6 +211,11 @@ def show_edit_cartera_policy_form(db: DBManager):
                             return
                         
                         try:
+                            # Logging para debug
+                            st.write("Debug: Iniciando actualización de política")
+                            st.write(f"Debug: ID de política a actualizar: {politica.id}")
+                            st.write(f"Debug: Nueva descripción: {descripcion_editada.strip()}")
+                            
                             # Actualizar la política
                             politica_actualizada = PoliticasCartera(
                                 id=politica.id,
@@ -268,10 +224,14 @@ def show_edit_cartera_policy_form(db: DBManager):
                                 updated_at=datetime.now()
                             )
                             
+                            st.write("Debug: Objeto PoliticasCartera creado correctamente")
+                            
                             success = db.update_politica_cartera(politica_actualizada)
+                            st.write(f"Debug: Resultado de la actualización: {success}")
                             
                             if success:
                                 st.success("✅ Política de cartera actualizada exitosamente.")
+                                st.write("Debug: Ejecutando rerun...")
                                 st.rerun()
                             else:
                                 st.error("❌ Error al actualizar la política de cartera.")
@@ -341,6 +301,105 @@ def show_cartera_policy_selection(db: DBManager, selected_policy_id: Optional[in
     except Exception as e:
         st.error(f"Error al cargar las políticas de cartera: {str(e)}")
         return None
+
+def show_edit_single_cartera_policy(db: DBManager):
+    """Muestra el formulario para editar la única política de cartera"""
+    try:
+        # Verificar que el DBManager tiene los métodos necesarios
+        if not hasattr(db, 'get_politica_cartera'):
+            st.error("❌ Error: El método 'get_politica_cartera' no está disponible en DBManager.")
+            st.info("💡 Solución: Reinicie la aplicación completamente para cargar los nuevos métodos.")
+            return
+        
+        # Obtener la política única (siempre ID=1)
+        politica = db.get_politica_cartera(1)
+        
+        if politica:
+            with st.form("edit_single_cartera_policy_form"):
+                st.markdown("**Editar Política de Cartera**")
+                
+                descripcion_editada = st.text_area(
+                    "Descripción:",
+                    value=politica.descripcion,
+                    height=200,
+                    help="Esta política se aplicará a todas las cotizaciones. Use saltos de línea para separar diferentes puntos."
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("Guardar Cambios", type="primary")
+                
+                if submitted:
+                    if not descripcion_editada.strip():
+                        st.error("La descripción no puede estar vacía.")
+                        return
+                    
+                    try:
+                        # Actualizar la política
+                        st.write("Debug: Iniciando actualización de política")
+                        st.write(f"Debug: Nueva descripción: {descripcion_editada.strip()}")
+                        
+                        politica_actualizada = PoliticasCartera(
+                            id=politica.id,
+                            descripcion=descripcion_editada.strip(),
+                            created_at=politica.created_at,
+                            updated_at=datetime.now()
+                        )
+                        
+                        success = db.update_politica_cartera(politica_actualizada)
+                        
+                        if success:
+                            st.success("✅ Política de cartera actualizada exitosamente.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al actualizar la política de cartera.")
+                            
+                    except Exception as e:
+                        st.error(f"Error al actualizar la política: {str(e)}")
+                        traceback.print_exc()
+        else:
+            # Si no existe la política, mostrar formulario para crearla
+            with st.form("create_single_cartera_policy_form"):
+                st.markdown("**Crear Política de Cartera**")
+                st.info("No existe una política de cartera. Por favor, cree una.")
+                
+                descripcion = st.text_area(
+                    "Descripción:",
+                    height=200,
+                    placeholder="Ejemplo:\nSe retiene despacho con mora de 16 a 30 días\nSe retiene producción con mora de 31 a 45 días",
+                    help="Esta política se aplicará a todas las cotizaciones. Use saltos de línea para separar diferentes puntos."
+                )
+                
+                submitted = st.form_submit_button("Crear Política", type="primary")
+                
+                if submitted:
+                    if not descripcion.strip():
+                        st.error("La descripción no puede estar vacía.")
+                        return
+                    
+                    try:
+                        # Crear la nueva política
+                        nueva_politica = PoliticasCartera(
+                            id=1,  # Siempre ID=1
+                            descripcion=descripcion.strip(),
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        
+                        success = db.create_politica_cartera(nueva_politica)
+                        
+                        if success:
+                            st.success("✅ Política de cartera creada exitosamente.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al crear la política de cartera.")
+                            
+                    except Exception as e:
+                        st.error(f"Error al crear la política: {str(e)}")
+                        traceback.print_exc()
+    except Exception as e:
+        st.error(f"Error al cargar la política de cartera: {str(e)}")
+        traceback.print_exc()
 
 def show_cartera_policy_details(politica_id: int, db: DBManager):
     """Muestra los detalles de una política de cartera específica"""

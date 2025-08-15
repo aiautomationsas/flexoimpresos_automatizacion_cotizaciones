@@ -227,6 +227,9 @@ class CotizacionPDF(BasePDFGenerator):
                 # Formatear dimensiones sin redondeo para la referencia
                 def _fmt_medida(value):
                     try:
+                        # Usar exactamente la misma función que en report_generator.py
+                        if value is None or value == "":
+                            return "N/A"
                         d = Decimal(str(value))
                         s = format(d.normalize(), 'f')
                         if '.' in s:
@@ -235,28 +238,77 @@ class CotizacionPDF(BasePDFGenerator):
                     except Exception:
                         return str(value)
 
-                ancho_ref = datos_cotizacion.get('ancho')
-                avance_ref = datos_cotizacion.get('avance')
-                dims_fmt = None
-                if ancho_ref is not None and avance_ref is not None:
-                    dims_fmt = f"{_fmt_medida(ancho_ref).upper()}X{_fmt_medida(avance_ref).upper()}MM"
-
-                if identificador:
+                # Solución RADICAL para el formato del identificador
+                identificador_original = datos_cotizacion.get('identificador', '')
+                ancho = datos_cotizacion.get('ancho')
+                avance = datos_cotizacion.get('avance')
+                
+                print(f"DEBUG PDF - VALORES ORIGINALES: identificador={identificador_original}, ancho={ancho}, avance={avance}")
+                
+                # Función ULTRA SIMPLIFICADA para formatear medidas
+                def format_measure(value):
                     try:
-                        import re
-                        if dims_fmt:
-                            # Reemplazar cualquier patrón de dimensiones existente por el formateado sin redondeo
-                            identificador_ref = re.sub(r"\b[0-9]+(?:[\.,][0-9]+)?X[0-9]+(?:[\.,][0-9]+)?MM\b", dims_fmt, identificador.upper())
+                        if value is None or value == "":
+                            return "N/A"
+                        
+                        # Convertir a float primero para asegurarnos que es un número
+                        num = float(value)
+                        
+                        # Verificar si es un número entero
+                        if num == int(num):
+                            return str(int(num))
                         else:
-                            identificador_ref = identificador.upper()
-                    except Exception:
-                        identificador_ref = identificador.upper()
-
-                    # Si no se encontró patrón para reemplazar y tenemos dims, añadirlas al final
-                    if dims_fmt and dims_fmt not in identificador_ref:
-                        elements.append(Paragraph(f"Referencia: {identificador_ref} {dims_fmt}", self.styles['Normal']))
-                    else:
-                        elements.append(Paragraph(f"Referencia: {identificador_ref}", self.styles['Normal']))
+                            # Si tiene decimales, formatear sin ceros a la derecha
+                            return str(num).rstrip('0').rstrip('.') if '.' in str(num) else str(num)
+                    except Exception as e:
+                        print(f"Error en format_measure: {e}")
+                        return str(value)
+                
+                # Formatear las dimensiones
+                ancho_fmt = format_measure(ancho)
+                avance_fmt = format_measure(avance)
+                
+                print(f"DEBUG PDF - DIMENSIONES FORMATEADAS: ancho_fmt={ancho_fmt}, avance_fmt={avance_fmt}")
+                
+                # SOLUCIÓN ULTRA RADICAL: Reconstruir el identificador completo
+                if identificador_original and ancho_fmt != "N/A" and avance_fmt != "N/A":
+                    # Dividir el identificador en partes
+                    partes = identificador_original.upper().split()
+                    print(f"DEBUG PDF - PARTES DEL IDENTIFICADOR: {partes}")
+                    
+                    # Buscar la parte que contiene las dimensiones exactamente
+                    dimension_encontrada = False
+                    for i, parte in enumerate(partes):
+                        # Buscar patrón como "50.01X50.0MM" o "50X50MM" 
+                        if ('X' in parte or 'x' in parte) and ('MM' in parte or 'mm' in parte.lower()):
+                            try:
+                                # Extraer las dimensiones actuales
+                                parte_limpia = parte.upper().replace('MM', '')
+                                dims_actuales = parte_limpia.split('X')
+                                if len(dims_actuales) == 2:
+                                    # Construir nueva dimensión con nuestros valores formateados
+                                    dimensiones_nuevas = f"{ancho_fmt}X{avance_fmt}MM"
+                                    print(f"DEBUG PDF - REEMPLAZANDO DIMENSIÓN: '{parte}' -> '{dimensiones_nuevas}'")
+                                    partes[i] = dimensiones_nuevas
+                                    dimension_encontrada = True
+                                    break
+                            except Exception as e:
+                                print(f"Error al procesar parte '{parte}': {e}")
+                    
+                    if not dimension_encontrada:
+                        print(f"ADVERTENCIA: No se encontró patrón de dimensiones en '{identificador_original}'")
+                    
+                    # Reconstruir el identificador
+                    identificador_final = ' '.join(partes)
+                    print(f"DEBUG PDF - IDENTIFICADOR FINAL: {identificador_final}")
+                else:
+                    identificador_final = identificador_original.upper() if identificador_original else ''
+                    print(f"DEBUG PDF - NO SE PUDO FORMATEAR, USANDO ORIGINAL: {identificador_final}")
+                
+                # Mostrar el identificador en el PDF
+                if identificador_original:
+                    elements.append(Paragraph(f"Referencia: {identificador_final}", self.styles['Normal']))
+                
                 
                 material_nombre = datos_cotizacion.get('material', {}).get('nombre', 'N/A')
                 elements.append(Paragraph(f"Material: {material_nombre}", self.styles['Normal']))
@@ -524,8 +576,39 @@ class CotizacionPDF(BasePDFGenerator):
                 
                 elements.append(Spacer(1, 2))
                 elements.append(Paragraph("Política de Cartera:", self.styles['Heading2']))
-                elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
-                elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
+                
+                # DEBUG: Imprimir todos los datos para ver qué tenemos
+                print("\n=== DEBUG POLÍTICA DE CARTERA EN PDF ===")
+                print(f"Tipo de datos_cotizacion: {type(datos_cotizacion)}")
+                print(f"Claves en datos_cotizacion: {list(datos_cotizacion.keys())}")
+                
+                # Obtener la política de cartera de los datos (similar a política de entrega)
+                politica_cartera = datos_cotizacion.get('politica_cartera')
+                print(f"Política de cartera obtenida: {politica_cartera}")
+                print(f"Tipo de política de cartera: {type(politica_cartera)}")
+                
+                # Usar la política de cartera
+                if politica_cartera and isinstance(politica_cartera, str):
+                    print(f"Usando política de cartera: {politica_cartera}")
+                    try:
+                        # Dividir el texto por líneas y agregar cada una como un punto
+                        lineas_politica = politica_cartera.split('\n')
+                        for linea in lineas_politica:
+                            if linea.strip():
+                                elements.append(Paragraph(f"• {linea.strip()}", self.styles['Normal']))
+                                print(f"Agregada línea: • {linea.strip()}")
+                    except Exception as e:
+                        print(f"Error al procesar política de cartera: {str(e)}")
+                        # En caso de error, usar valores hardcodeados como último recurso
+                        elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
+                        elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
+                else:
+                    print("No se encontró política de cartera válida, usando valores hardcodeados")
+                    # Políticas hardcodeadas como último recurso
+                    elements.append(Paragraph("• Se retiene despacho con mora de 16 a 30 días", self.styles['Normal']))
+                    elements.append(Paragraph("• Se retiene producción con mora de 31 a 45 días", self.styles['Normal']))
+                
+                print("=== FIN DEBUG POLÍTICA DE CARTERA ===\n")
                 elements.append(Spacer(1, 10))
                 elements.append(Paragraph("Vigencia de la cotización: 30 días", self.styles['Normal']))
                 

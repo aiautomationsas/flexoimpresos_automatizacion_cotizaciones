@@ -1,4 +1,5 @@
 .venv
+.venv3_9
 __pycache__
 *.pyc
 *.pyo
@@ -11,4 +12,5 @@ __pycache__
 .env
 .streamlit/secrets.toml
 .cursor
+node_modules
 .cursor/rules/mcp.json
