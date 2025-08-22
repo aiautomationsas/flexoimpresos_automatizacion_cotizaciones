@@ -260,18 +260,10 @@ def generar_informe_tecnico_markdown(
                 except Exception:
                     unidad_dientes_sel = None
                 if unidad_dientes_sel is not None:
-                    opciones = calc_desp.calcular_todas_opciones(avance)
-                    candidatas = []
-                    for op in opciones:
-                        if isinstance(op, dict):
-                            if float(op.get('dientes')) == unidad_dientes_sel:
-                                candidatas.append(op)
-                        else:
-                            if float(getattr(op, 'dientes', 0)) == unidad_dientes_sel:
-                                candidatas.append(op.__dict__)
-                    if candidatas:
-                        candidatas.sort(key=lambda x: abs(x['desperdicio']))
-                        repeticiones_unidad = int(candidatas[0]['repeticiones'] or 0)
+                    # Usar el nuevo método para obtener la mejor opción para esta unidad específica
+                    opcion_unidad = calc_desp.obtener_mejor_opcion_para_unidad(avance, unidad_dientes_sel)
+                    if opcion_unidad:
+                        repeticiones_unidad = int(opcion_unidad.repeticiones)
                 if repeticiones_unidad is None:
                     mejor_opcion = calc_desp.obtener_mejor_opcion(avance)
                     if mejor_opcion:

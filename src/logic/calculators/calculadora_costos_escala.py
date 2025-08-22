@@ -203,19 +203,15 @@ class CalculadoraCostosEscala(CalculadoraBase):
             # 1. Obtener la opción de desperdicio según la unidad de montaje elegida (si existe)
             calculadora = self._get_calculadora_desperdicios(es_manga)
             mejor_opcion = None
+            
+            # Si el usuario ha seleccionado una unidad específica, calcular las repeticiones óptimas para esa unidad
             if getattr(datos, 'unidad_montaje_dientes', None) is not None:
-                opciones = calculadora.calcular_todas_opciones(datos.avance)
-                candidatas = []
-                for op in opciones:
-                    if isinstance(op, dict):
-                        if op.get('dientes') == datos.unidad_montaje_dientes:
-                            candidatas.append(op)
-                    else:
-                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
-                            candidatas.append(op.__dict__)
-                if candidatas:
-                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
-                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+                # Usar el nuevo método para obtener la mejor opción para esta unidad específica
+                opcion_unidad = calculadora.obtener_mejor_opcion_para_unidad(datos.avance, datos.unidad_montaje_dientes)
+                if opcion_unidad:
+                    mejor_opcion = opcion_unidad
+                    
+            # Si no se ha seleccionado unidad o no se encontró una opción válida, usar la mejor opción global
             if mejor_opcion is None:
                 mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:
@@ -452,19 +448,15 @@ Cálculo:
             # 3. Obtener medida de montaje respetando la unidad elegida
             calculadora = self._get_calculadora_desperdicios(es_manga)
             mejor_opcion = None
+            
+            # Si el usuario ha seleccionado una unidad específica, calcular las repeticiones óptimas para esa unidad
             if getattr(datos, 'unidad_montaje_dientes', None) is not None:
-                opciones = calculadora.calcular_todas_opciones(datos.avance)
-                candidatas = []
-                for op in opciones:
-                    if isinstance(op, dict):
-                        if op.get('dientes') == datos.unidad_montaje_dientes:
-                            candidatas.append(op)
-                    else:
-                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
-                            candidatas.append(op.__dict__)
-                if candidatas:
-                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
-                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+                # Usar el nuevo método para obtener la mejor opción para esta unidad específica
+                opcion_unidad = calculadora.obtener_mejor_opcion_para_unidad(datos.avance, datos.unidad_montaje_dientes)
+                if opcion_unidad:
+                    mejor_opcion = opcion_unidad
+                    
+            # Si no se ha seleccionado unidad o no se encontró una opción válida, usar la mejor opción global
             if mejor_opcion is None:
                 mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:
@@ -512,19 +504,15 @@ Cálculo:
             perimetro = (datos.ancho + datos.avance) * 2
             calculadora = self._get_calculadora_desperdicios(es_manga)
             repeticiones = None
+            
+            # Si el usuario ha seleccionado una unidad específica, calcular las repeticiones óptimas para esa unidad
             if getattr(datos, 'unidad_montaje_dientes', None) is not None:
-                opciones = calculadora.calcular_todas_opciones(datos.avance)
-                candidatas = []
-                for op in opciones:
-                    if isinstance(op, dict):
-                        if op.get('dientes') == datos.unidad_montaje_dientes:
-                            candidatas.append(op)
-                    else:
-                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
-                            candidatas.append(op.__dict__)
-                if candidatas:
-                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
-                    repeticiones = candidatas[0]['repeticiones']
+                # Usar el nuevo método para obtener la mejor opción para esta unidad específica
+                mejor_opcion = calculadora.obtener_mejor_opcion_para_unidad(datos.avance, datos.unidad_montaje_dientes)
+                if mejor_opcion:
+                    repeticiones = mejor_opcion.repeticiones
+            
+            # Si no se ha seleccionado unidad o no se encontró una opción válida, usar la mejor opción global
             if repeticiones is None:
                 repeticiones = calculadora.obtener_mejor_opcion(datos.avance).repeticiones
             valor_base = perimetro * datos.pistas * repeticiones * 100  # valor_mm = 100
@@ -769,19 +757,15 @@ Cálculo:
             # 3. Obtener mejor opción de desperdicio respetando unidad elegida (si existe)
             calculadora = self._get_calculadora_desperdicios(es_manga)
             mejor_opcion = None
+            
+            # Si el usuario ha seleccionado una unidad específica, calcular las repeticiones óptimas para esa unidad
             if getattr(datos, 'unidad_montaje_dientes', None) is not None:
-                opciones = calculadora.calcular_todas_opciones(datos.avance)
-                candidatas = []
-                for op in opciones:
-                    if isinstance(op, dict):
-                        if op.get('dientes') == datos.unidad_montaje_dientes:
-                            candidatas.append(op)
-                    else:
-                        if getattr(op, 'dientes', None) == datos.unidad_montaje_dientes:
-                            candidatas.append(op.__dict__)
-                if candidatas:
-                    candidatas.sort(key=lambda x: abs(x['desperdicio']))
-                    mejor_opcion = type('OpcionSel', (), candidatas[0])
+                # Usar el nuevo método para obtener la mejor opción para esta unidad específica
+                opcion_unidad = calculadora.obtener_mejor_opcion_para_unidad(datos.avance, datos.unidad_montaje_dientes)
+                if opcion_unidad:
+                    mejor_opcion = opcion_unidad
+                    
+            # Si no se ha seleccionado unidad o no se encontró una opción válida, usar la mejor opción global
             if mejor_opcion is None:
                 mejor_opcion = calculadora.obtener_mejor_opcion(datos.avance)
             if not mejor_opcion:

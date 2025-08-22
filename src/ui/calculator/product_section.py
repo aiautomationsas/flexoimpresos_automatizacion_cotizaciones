@@ -507,14 +507,13 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
                     for _, row in calc.df.iterrows():
                         dientes = row['Dientes']
                         medida_mm = row['mm']
-                        repeticiones_fijas = row['repeticiones_fijas']
                         
                         # Creamos un registro para cada unidad de montaje
+                        # Ya no usamos repeticiones_fijas aquí, se calcularán dinámicamente
                         registro = {
                             'dientes': dientes,
                             'medida_mm': medida_mm,
                             'desperdicio': 0,  # No relevante para mostrar todas las opciones
-                            'repeticiones': repeticiones_fijas,
                             'ancho_total': 0,  # No relevante para mostrar todas las opciones
                         }
                         mejores_por_diente[dientes] = registro
