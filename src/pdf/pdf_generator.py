@@ -406,7 +406,7 @@ class CotizacionPDF(BasePDFGenerator):
                         # Asegurar que altura_grafado sea un número formateado correctamente
                         if altura_grafado is not None:
                             try:
-                                from decimal import Decimal
+                                # Usar la importación global de Decimal
                                 d = Decimal(str(altura_grafado))
                                 altura_grafado_fmt = format(d.normalize(), 'f')
                                 if '.' in altura_grafado_fmt:

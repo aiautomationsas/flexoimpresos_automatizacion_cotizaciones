@@ -389,22 +389,25 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
         # Calcular valor_troquel por defecto (si no ajustado), respetando selección de unidad
         valor_troquel_defecto = 0.0
         if not st.session_state.get('ajustar_troquel'):
-            # Si el usuario eligió una unidad específica, dejar que la calculadora interna lo compute (None)
-            if form_data.get('unidad_montaje_dientes') is not None:
-                valor_troquel_defecto = None
+            # Siempre calcular el valor del troquel, incluso si el usuario eligió una unidad específica
+            # Esto asegura que tengamos un valor para el informe técnico
+            troquel_result = calc_lito.calcular_valor_troquel(
+                datos_escala, 
+                mejor_opcion.repeticiones,
+                troquel_existe=datos_escala.troquel_existe,
+                tipo_grafado_id=form_data.get('tipo_grafado_id'),
+                es_manga=es_manga
+            )
+            if 'error' in troquel_result:
+                 st.warning(f"Advertencia: No se pudo calcular el valor del troquel por defecto: {troquel_result['error']}")
             else:
-                # Usar mejor_opcion cuando no hay selección explícita
-                troquel_result = calc_lito.calcular_valor_troquel(
-                    datos_escala, 
-                    mejor_opcion.repeticiones,
-                    troquel_existe=datos_escala.troquel_existe,
-                    tipo_grafado_id=form_data.get('tipo_grafado_id'),
-                    es_manga=es_manga
-                )
-                if 'error' in troquel_result:
-                     st.warning(f"Advertencia: No se pudo calcular el valor del troquel por defecto: {troquel_result['error']}")
-                else:
-                     valor_troquel_defecto = troquel_result.get('valor', 0.0)
+                 valor_troquel_defecto = troquel_result.get('valor', 0.0)
+            
+            # Imprimir el valor calculado para depuración
+            print(f"\n=== DEBUG VALOR TROQUEL CALCULADO ===")
+            print(f"Valor troquel calculado: {valor_troquel_defecto}")
+            print(f"Unidad montaje elegida: {form_data.get('unidad_montaje_dientes')}")
+            print(f"Troquel existe: {datos_escala.troquel_existe}")
 
         # Calcular valor_plancha por defecto (si no ajustado)
         valor_plancha_defecto = 0.0

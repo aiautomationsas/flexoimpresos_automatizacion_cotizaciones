@@ -24,7 +24,7 @@ def show_manage_commercials() -> None:
     st.title("👔 Gestionar Comerciales")
     st.caption("Administre los comerciales (perfiles) asociados al rol especificado.")
 
-    tab_list, tab_create, tab_edit, tab_archived = st.tabs(["📋 Lista", "➕ Crear", "✏️ Editar/Eliminar", "🗄️ Archivados"])
+    tab_list, tab_create, tab_edit, tab_archived = st.tabs(["📋 Lista", "➕ Crear", "✏️ Editar/Archivar", "🗄️ Archivados"])
 
     with tab_list:
         _list_commercials(db)

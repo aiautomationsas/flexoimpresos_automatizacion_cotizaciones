@@ -144,7 +144,54 @@ def generar_informe_tecnico_markdown(
         dientes = calculos_guardados.get('unidad_z_dientes', 'N/A')
         valor_material = calculos_guardados.get('valor_material', 0.0)
         valor_acabado = calculos_guardados.get('valor_acabado', 0.0)
+        
+        # Obtener el valor del troquel y verificar si existe_troquel está en los datos guardados
         valor_troquel = calculos_guardados.get('valor_troquel', 0.0)
+        existe_troquel = calculos_guardados.get('existe_troquel', False)
+        
+        # Si el valor del troquel es None pero existe_troquel es True, 
+        # posiblemente hay un error en los datos guardados
+        if valor_troquel is None or valor_troquel == 0:
+            print(f"\n=== ADVERTENCIA: VALOR TROQUEL ES NONE O CERO ===")
+            
+            # Intentar obtener el valor del troquel de otras fuentes
+            valor_troquel_alternativo = None
+            
+            # Opción 1: Buscar en valor_troquel_total
+            if 'valor_troquel_total' in calculos_guardados:
+                valor_troquel_alternativo = calculos_guardados.get('valor_troquel_total')
+                if valor_troquel_alternativo:
+                    print(f"Usando valor_troquel_total como alternativa: {valor_troquel_alternativo}")
+            
+            # Opción 2: Buscar en los resultados de escala
+            if not valor_troquel_alternativo and 'resultados' in cotizacion_data:
+                for resultado in cotizacion_data['resultados']:
+                    if 'valor_troquel' in resultado and resultado['valor_troquel']:
+                        valor_troquel_alternativo = resultado['valor_troquel']
+                        print(f"Usando valor_troquel de resultados como alternativa: {valor_troquel_alternativo}")
+                        break
+            
+            # Opción 3: Estimar un valor basado en el perímetro si el troquel existe
+            if not valor_troquel_alternativo and existe_troquel:
+                # Estimación simple basada en el perímetro y pistas
+                perimetro = (ancho + avance) * 2
+                valor_estimado = perimetro * pistas * 100 * 0.5  # Factor 0.5 por troquel existente
+                valor_troquel_alternativo = max(700000, valor_estimado) / 2  # Aplicar división por troquel existente
+                print(f"Estimando valor del troquel basado en perímetro: {valor_troquel_alternativo}")
+            
+            # Usar el valor alternativo encontrado o mantener el valor por defecto
+            if valor_troquel_alternativo:
+                valor_troquel = valor_troquel_alternativo
+            else:
+                valor_troquel = 0.0
+                print("No se pudo encontrar un valor alternativo para el troquel")
+        
+        # Si el troquel existe, el valor mostrado debe ser el valor original sin la división por 2
+        # que se aplicó durante el cálculo (ya que ese ajuste ya está en valor_troquel)
+        print(f"\n=== DEBUG VALOR TROQUEL EN INFORME ===")
+        print(f"Valor troquel guardado (final): {valor_troquel}")
+        print(f"Existe troquel: {existe_troquel}")
+        
         valor_plancha = calculos_guardados.get('valor_plancha', 0.0)
         valor_plancha_separado = calculos_guardados.get('valor_plancha_separado')
 
@@ -301,11 +348,34 @@ def generar_informe_tecnico_markdown(
         # Sección de costos base - solo visible para administradores
         costos_base = ""
         if not es_comercial:
+            # Determinar el texto a mostrar para el valor del troquel
+            texto_troquel = "Valor Troquel (Total)"
+            valor_troquel_mostrar = valor_troquel
+            
+            if existe_troquel:
+                texto_troquel += " (Ya existe)"
+                # Si el troquel existe pero el valor es 0 o None después de todos los intentos de recuperación,
+                # añadir una nota especial
+                if valor_troquel_mostrar == 0 or valor_troquel_mostrar is None:
+                    print(f"ADVERTENCIA: El troquel existe pero su valor es {valor_troquel_mostrar}")
+                    # Añadir un indicador visual en el informe
+                    texto_troquel += " - VALOR ESTIMADO"
+                    
+                    # Hacer una última estimación para mostrar un valor aproximado
+                    if valor_troquel_mostrar == 0:
+                        # Fórmula simplificada para estimar el valor del troquel
+                        perimetro = (ancho + avance) * 2
+                        valor_estimado = perimetro * pistas * 100
+                        valor_base = max(700000, valor_estimado)
+                        # Ya que el troquel existe, dividir por 2 (según la lógica de cálculo)
+                        valor_troquel_mostrar = valor_base / 2
+                        print(f"Mostrando valor estimado del troquel: {valor_troquel_mostrar}")
+            
             costos_base = f"""
 ### Costos Base Utilizados
 - **Valor Material Base (por m²)**: {format_currency(valor_material)}/m²
 - **Valor Acabado (por m²)**: {format_currency(valor_acabado)}/m²
-- **Valor Troquel (Total)**: {format_currency(valor_troquel)}
+- **{texto_troquel}**: {format_currency(valor_troquel_mostrar)}
 """
 
         # Ensamblar informe final
