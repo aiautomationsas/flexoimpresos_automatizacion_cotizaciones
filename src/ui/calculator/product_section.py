@@ -500,27 +500,27 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
             else:
                 try:
                     calc = CalculadoraDesperdicio(es_manga=es_manga)
-                    opciones = calc.calcular_todas_opciones(avance_float)
-                    # Deduplicar por dientes dejando la opción con menor desperdicio
+                    
+                    # En lugar de filtrar por avance, obtenemos todas las unidades de montaje disponibles
+                    # Creamos registros para todas las unidades de la tabla en calc.df
                     mejores_por_diente = {}
-                    for op in opciones:
-                        key = op['dientes'] if isinstance(op, dict) else op.dientes
-                        # Normalizar estructura
-                        if isinstance(op, dict):
-                            registro = op
-                        else:
-                            registro = {
-                                'dientes': op.dientes,
-                                'medida_mm': op.medida_mm,
-                                'desperdicio': op.desperdicio,
-                                'repeticiones': op.repeticiones,
-                                'ancho_total': op.ancho_total,
-                            }
-                        if key not in mejores_por_diente or abs(registro['desperdicio']) < abs(mejores_por_diente[key]['desperdicio']):
-                            mejores_por_diente[key] = registro
+                    for _, row in calc.df.iterrows():
+                        dientes = row['Dientes']
+                        medida_mm = row['mm']
+                        repeticiones_fijas = row['repeticiones_fijas']
+                        
+                        # Creamos un registro para cada unidad de montaje
+                        registro = {
+                            'dientes': dientes,
+                            'medida_mm': medida_mm,
+                            'desperdicio': 0,  # No relevante para mostrar todas las opciones
+                            'repeticiones': repeticiones_fijas,
+                            'ancho_total': 0,  # No relevante para mostrar todas las opciones
+                        }
+                        mejores_por_diente[dientes] = registro
 
                     if not mejores_por_diente:
-                        st.warning("No hay unidades de montaje disponibles para el avance indicado.")
+                        st.warning("No hay unidades de montaje disponibles.")
                     else:
                         lista_opciones = sorted(mejores_por_diente.values(), key=lambda x: x['dientes'])
                         etiquetas = [f"{int(x['dientes'])} dientes ({x['medida_mm']:.3f} mm)" for x in lista_opciones]
