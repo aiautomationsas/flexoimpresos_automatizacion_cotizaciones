@@ -278,12 +278,26 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
 
         # Procesar troquel_existe explícitamente
         troquel_existe = form_data.get('tiene_troquel')
-        print(f"\nValor de troquel_existe antes de procesar: {troquel_existe} (tipo: {type(troquel_existe)})")
+        print(f"\n=== DEBUG TROQUEL EXISTE ===")
+        print(f"Valor original: {troquel_existe} (tipo: {type(troquel_existe)})")
+        
+        # Conversión más explícita y segura a booleano
         if isinstance(troquel_existe, str):
-            troquel_existe = troquel_existe.lower() == 'true'
+            troquel_existe_lower = troquel_existe.lower()
+            # Para el caso específico de "Sí"/"No" de la UI
+            if troquel_existe == "Sí":
+                troquel_existe = True
+            elif troquel_existe == "No":
+                troquel_existe = False
+            else:
+                # Para otros casos de string
+                troquel_existe = troquel_existe_lower == 'true' or troquel_existe_lower == 'yes' or troquel_existe_lower == '1'
+        elif isinstance(troquel_existe, (int, float)):
+            troquel_existe = troquel_existe > 0
         else:
             troquel_existe = bool(troquel_existe)
-        print(f"Valor de troquel_existe después de procesar: {troquel_existe}")
+            
+        print(f"Valor procesado: {troquel_existe} (tipo: {type(troquel_existe)})")
         
         # Ajustar el ancho si es manga
         ancho_base = form_data['ancho']
@@ -319,6 +333,10 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             ancho_ajustado = ancho_base
         
         # Usar las escalas definidas por el usuario
+        # Imprimir el valor de troquel_existe justo antes de asignarlo
+        print(f"\n=== DEBUG TROQUEL EXISTE JUSTO ANTES DE CREAR DATOS_ESCALA ===")
+        print(f"Valor a asignar a datos_escala.troquel_existe: {troquel_existe} (tipo: {type(troquel_existe)})")
+        
         datos_escala = DatosEscala(
             escalas=form_data['escalas'],
             pistas=form_data['pistas'],
@@ -335,6 +353,10 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
             planchas_por_separado=form_data.get('planchas_separadas', False),
             unidad_montaje_dientes=form_data.get('unidad_montaje_dientes')
         )
+        
+        # Verificar inmediatamente después de crear datos_escala
+        print(f"\n=== DEBUG TROQUEL EXISTE INMEDIATAMENTE DESPUÉS DE CREAR DATOS_ESCALA ===")
+        print(f"Valor asignado a datos_escala.troquel_existe: {datos_escala.troquel_existe} (tipo: {type(datos_escala.troquel_existe)})")
         
         # --- Calcular Mejor Opción de Desperdicio UNA VEZ ---
         calc_lito = CalculadoraLitografia() # Necesitamos instancia para obtener mejor opción
@@ -428,6 +450,18 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                      if plancha_result.get('detalles'):
                         precio_sin_constante = plancha_result['detalles'].get('precio_sin_constante')
 
+        # Verificar que el valor de troquel_existe se haya asignado correctamente a datos_escala
+        print(f"\n=== DEBUG TROQUEL EXISTE EN DATOS_ESCALA ===")
+        print(f"Valor en datos_escala.troquel_existe: {datos_escala.troquel_existe} (tipo: {type(datos_escala.troquel_existe)})")
+        
+        # Verificar el valor de troquel_existe en form_data
+        print(f"\n=== DEBUG TROQUEL EXISTE EN FORM_DATA ===")
+        print(f"Valor en form_data['tiene_troquel']: {form_data.get('tiene_troquel')} (tipo: {type(form_data.get('tiene_troquel'))})")
+        
+        # Verificar el valor procesado antes de asignarlo a datos_escala
+        print(f"\n=== DEBUG TROQUEL EXISTE ANTES DE ASIGNAR A DATOS_ESCALA ===")
+        print(f"Valor de troquel_existe: {troquel_existe} (tipo: {type(troquel_existe)})")
+        
         datos_calculo_persistir = {
             'valor_material': valor_material, # Valor final usado
             'valor_plancha': st.session_state.get('precio_planchas', valor_plancha_defecto) if st.session_state.get('ajustar_planchas') else valor_plancha_defecto,
@@ -462,6 +496,10 @@ def handle_calculation(form_data: Dict[str, Any], cliente_obj: Cliente) -> Optio
                 'rentabilidad_ajustada': st.session_state.get('rentabilidad_ajustada')
             }
         }
+        
+        # Verificar el valor final guardado en datos_calculo_persistir
+        print(f"\n=== DEBUG TROQUEL EXISTE EN DATOS_CALCULO_PERSISTIR ===")
+        print(f"Valor guardado: {datos_calculo_persistir['existe_troquel']} (tipo: {type(datos_calculo_persistir['existe_troquel'])})")
         
         # --- Aplicar Fórmula de Redondeo a valor_plancha_separado --- 
         valor_plancha_separado_base = None
@@ -1114,7 +1152,20 @@ def mostrar_calculadora():
                     # Empaque
                     datos_formulario_enviado['num_paquetes'] = int(st.session_state.get('num_paquetes', 0))
                     # Opciones Adicionales
-                    datos_formulario_enviado['tiene_troquel'] = bool(st.session_state.get('tiene_troquel', False))
+                    # CORRECCIÓN: Convertir correctamente el valor de tiene_troquel
+                    tiene_troquel_value = st.session_state.get('tiene_troquel', 'No')
+                    print(f"\n=== DEBUG CONVERSIÓN TROQUEL ===")
+                    print(f"Valor original en session_state: {tiene_troquel_value} (tipo: {type(tiene_troquel_value)})")
+                    
+                    if isinstance(tiene_troquel_value, str):
+                        datos_formulario_enviado['tiene_troquel'] = tiene_troquel_value == 'Sí'
+                        print(f"Es string, comparando con 'Sí': {datos_formulario_enviado['tiene_troquel']}")
+                    else:
+                        datos_formulario_enviado['tiene_troquel'] = bool(tiene_troquel_value)
+                        print(f"No es string, convirtiendo a bool: {datos_formulario_enviado['tiene_troquel']}")
+                    
+                    print(f"Valor final en datos_formulario_enviado: {datos_formulario_enviado['tiene_troquel']}")
+                    
                     datos_formulario_enviado['planchas_separadas'] = bool(st.session_state.get('planchas_separadas', False))
                     # Unidad de montaje elegida por el usuario (si marcó troquel existente)
                     if datos_formulario_enviado['tiene_troquel']:

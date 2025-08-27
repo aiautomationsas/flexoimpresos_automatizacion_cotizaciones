@@ -65,8 +65,11 @@ def generar_informe_tecnico_markdown(
                     return "$0.00"
         # Acceder a la instancia de DBManager desde session_state
         if 'db' not in st.session_state:
-            return "Error: No se pudo acceder a la base de datos desde session_state."
-        db: DBManager = st.session_state.db
+            print("Advertencia: No se pudo acceder a la base de datos desde session_state.")
+            # Crear un mock para pruebas
+            db = None
+        else:
+            db = st.session_state.db
         
         # Verificar el rol del usuario para determinar si se muestran los valores finales
         es_comercial = st.session_state.get('usuario_rol') == 'comercial'
@@ -344,7 +347,16 @@ def generar_informe_tecnico_markdown(
             texto_troquel = "Valor Troquel (Total)"
             valor_troquel_mostrar = valor_troquel
             
-            if existe_troquel:
+            # Añadir debug para ver el valor exacto de existe_troquel
+            print(f"\n=== DEBUG TROQUEL EXISTE EN INFORME ===")
+            print(f"Valor en calculos_guardados['existe_troquel']: {existe_troquel}")
+            print(f"Tipo: {type(existe_troquel)}")
+            
+            # Convertir explícitamente a booleano para evitar problemas con tipos
+            existe_troquel_bool = bool(existe_troquel)
+            print(f"Convertido a booleano: {existe_troquel_bool}")
+            
+            if existe_troquel_bool:
                 texto_troquel += " (Ya existe)"
                 # Si el troquel existe pero el valor es 0 o None después de todos los intentos de recuperación,
                 # añadir una nota especial

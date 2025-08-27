@@ -40,6 +40,23 @@ class DatosEscala:
     troquel_existe: bool = False  # Si ya existe el troquel
     planchas_por_separado: bool = False  # Si las planchas se cobran por separado
     unidad_montaje_dientes: Optional[float] = None  # Unidad de montaje elegida (opcional)
+    
+    def __post_init__(self):
+        """Asegurar que troquel_existe sea siempre un booleano"""
+        # Convertir explícitamente a booleano para evitar problemas con tipos
+        if not isinstance(self.troquel_existe, bool):
+            print(f"ADVERTENCIA: troquel_existe no es booleano, es {type(self.troquel_existe)}. Valor: {self.troquel_existe}")
+            if isinstance(self.troquel_existe, str):
+                if self.troquel_existe == "Sí":
+                    self.troquel_existe = True
+                elif self.troquel_existe == "No":
+                    self.troquel_existe = False
+                else:
+                    self.troquel_existe = self.troquel_existe.lower() in ('true', 'yes', '1')
+            else:
+                self.troquel_existe = bool(self.troquel_existe)
+        
+        print(f"RESULTADO FINAL __post_init__: troquel_existe = {self.troquel_existe} (tipo: {type(self.troquel_existe)})")
 
     def set_area_etiqueta(self, area: float):
         """Set the area of the label."""

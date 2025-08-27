@@ -476,17 +476,44 @@ def _mostrar_opciones_adicionales(es_manga: bool, datos_cargados: Optional[Dict]
     
     # Valores por defecto
     # Usar nombres de campo consistentes con datos_cargados
-    default_tiene_troquel = datos_cargados.get('existe_troquel', st.session_state.get("tiene_troquel", True)) if datos_cargados else st.session_state.get("tiene_troquel", True)
+    print(f"\n=== DEBUG DATOS_CARGADOS ===")
+    print(f"datos_cargados: {datos_cargados}")
+    if datos_cargados:
+        print(f"existe_troquel en datos_cargados: {datos_cargados.get('existe_troquel')} (tipo: {type(datos_cargados.get('existe_troquel'))})")
+    print(f"tiene_troquel en session_state: {st.session_state.get('tiene_troquel')} (tipo: {type(st.session_state.get('tiene_troquel'))})")
+    
+    # SOLUCIÓN: Si no hay un valor explícito en session_state, usar False como valor por defecto
+    # Esto evita que datos_cargados de cotizaciones anteriores afecten nuevas cotizaciones
+    if "tiene_troquel" not in st.session_state:
+        # Si es una nueva cotización, usar False como valor por defecto
+        default_tiene_troquel = False
+        print("Nueva cotización detectada - usando False como valor por defecto")
+    else:
+        # Si ya hay un valor en session_state, usarlo
+        default_tiene_troquel = st.session_state.get("tiene_troquel", False)
+        print("Usando valor existente en session_state")
+    
+    print(f"default_tiene_troquel calculado: {default_tiene_troquel} (tipo: {type(default_tiene_troquel)})")
+    
     default_planchas_sep = datos_cargados.get('planchas_x_separado', st.session_state.get("planchas_separadas", False)) if datos_cargados else st.session_state.get("planchas_separadas", False)
 
     if not es_manga:
         # El valor bool se guarda en st.session_state.tiene_troquel
+        index_seleccionado = 0 if bool(default_tiene_troquel) else 1
+        print(f"Índice seleccionado para selectbox: {index_seleccionado} (basado en default_tiene_troquel: {default_tiene_troquel})")
+        
         tiene_troquel = st.selectbox(
             "¿Existe troquel?",
             options=["Sí", "No"],
             key="tiene_troquel",
-            index=0 if bool(default_tiene_troquel) else 1
+            index=index_seleccionado
         )
+        
+        # Debug para verificar el valor seleccionado
+        print(f"\n=== DEBUG SELECCIÓN DE TROQUEL ===")
+        print(f"Valor seleccionado en UI: {tiene_troquel}")
+        print(f"Valor en session_state: {st.session_state.get('tiene_troquel')}")
+        print(f"Convertido a booleano: {st.session_state.get('tiene_troquel') == 'Sí'}")
 
         # Si el usuario indica que sí existe troquel, permitir elegir la unidad de montaje
         if st.session_state.get("tiene_troquel") == "Sí":
