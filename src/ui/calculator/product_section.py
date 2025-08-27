@@ -60,10 +60,11 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
     
     with col1:
         # El valor se guarda en st.session_state.ancho via key
-        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, format="%.2f", key="ancho", value=float(default_ancho))
+        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, step=5.0, format="%.2f", key="ancho", value=float(default_ancho),
+                        help="Incrementos de 5mm. Use los botones + y - para ajustar fácilmente.")
         # El valor se guarda en st.session_state.avance via key
-        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, format="%.2f", key="avance", value=float(default_avance),
-                        help="Valor máximo: 523.87mm (correspondiente a la unidad de montaje de 165 dientes)")
+        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, step=5.0, format="%.2f", key="avance", value=float(default_avance),
+                        help="Incrementos de 5mm. Valor máximo: 523.87mm (correspondiente a la unidad de montaje de 165 dientes)")
     with col2:
         # --- Pistas ---
         usuario_rol = st.session_state.get('usuario_rol', '')
@@ -363,9 +364,11 @@ def _mostrar_grafado_altura(es_manga: bool, tipos_grafado: List[Any], datos_carg
         st.number_input(
             "Altura de grafado (mm)",
             min_value=0.0,
+            step=1.0,
             format="%.2f",
             key="altura_grafado",
-            value=valor_mostrar
+            value=valor_mostrar,
+            help="Incrementos de 1mm. Use los botones + y - para ajustar fácilmente."
         )
     else:
         # Si no requiere altura, establecer None
