@@ -60,11 +60,11 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
     
     with col1:
         # El valor se guarda en st.session_state.ancho via key
-        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, step=5.0, format="%.2f", key="ancho", value=float(default_ancho),
-                        help="Incrementos de 5mm. Use los botones + y - para ajustar fácilmente.")
+        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, step=1.0, format="%.2f", key="ancho", value=float(default_ancho),
+                        help="Ingrese el valor en milímetros. Se formateará a dos decimales.")
         # El valor se guarda en st.session_state.avance via key
-        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, step=5.0, format="%.2f", key="avance", value=float(default_avance),
-                        help="Incrementos de 5mm. Valor máximo: 523.87mm (correspondiente a la unidad de montaje de 165 dientes)")
+        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, step=1.0, format="%.2f", key="avance", value=float(default_avance),
+                        help="Ingrese el valor en milímetros. Se formateará a dos decimales.")
     with col2:
         # --- Pistas ---
         usuario_rol = st.session_state.get('usuario_rol', '')
