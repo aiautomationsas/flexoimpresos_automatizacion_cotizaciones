@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit_shadcn_ui as ui
 from typing import Dict, Any, List, Optional
 from src.logic.calculators.calculadora_desperdicios import CalculadoraDesperdicio
 from src.data.models import Cliente  # Corrected import: Directly from src.data.models module
@@ -59,12 +60,53 @@ def _mostrar_dimensiones_y_tintas(es_manga: bool, datos_cargados: Optional[Dict]
 
     
     with col1:
-        # El valor se guarda en st.session_state.ancho via key
-        st.number_input("Ancho (mm)", min_value=1.00, max_value=310.00, step=1.0, format="%.2f", key="ancho", value=float(default_ancho),
-                        help="Ingrese el valor en milímetros. Se formateará a dos decimales.")
-        # El valor se guarda en st.session_state.avance via key
-        st.number_input("Avance (mm)", min_value=1.00, max_value=523.87, step=1.0, format="%.2f", key="avance", value=float(default_avance),
-                        help="Ingrese el valor en milímetros. Se formateará a dos decimales.")
+        # Input de ancho usando streamlit-shadcn-ui para mejor manejo de decimales
+        st.write("**Ancho (mm)**")
+        ancho_value = ui.input(
+            key="ancho_input",
+            placeholder="50.00",
+            type="number"
+        )
+        
+        # Convertir el valor del input a float y validar
+        try:
+            ancho_float = float(ancho_value) if ancho_value else float(default_ancho)
+            if ancho_float < 1.00 or ancho_float > 310.00:
+                st.error("El ancho debe estar entre 1.00 y 310.00 mm")
+                ancho_float = float(default_ancho)
+            
+            # Formatear el valor con 2 decimales si es entero
+            if ancho_float.is_integer():
+                ancho_float = round(ancho_float, 2)
+            
+            st.session_state['ancho'] = ancho_float
+        except ValueError:
+            st.error("Por favor ingrese un valor numérico válido para el ancho")
+            st.session_state['ancho'] = float(default_ancho)
+        
+        # Input de avance usando streamlit-shadcn-ui para mejor manejo de decimales
+        st.write("**Avance (mm)**")
+        avance_value = ui.input(
+            key="avance_input",
+            placeholder="50.00",
+            type="number"
+        )
+        
+        # Convertir el valor del input a float y validar
+        try:
+            avance_float = float(avance_value) if avance_value else float(default_avance)
+            if avance_float < 1.00 or avance_float > 523.87:
+                st.error("El avance debe estar entre 1.00 y 523.87 mm")
+                avance_float = float(default_avance)
+            
+            # Formatear el valor con 2 decimales si es entero
+            if avance_float.is_integer():
+                avance_float = round(avance_float, 2)
+            
+            st.session_state['avance'] = avance_float
+        except ValueError:
+            st.error("Por favor ingrese un valor numérico válido para el avance")
+            st.session_state['avance'] = float(default_avance)
     with col2:
         # --- Pistas ---
         usuario_rol = st.session_state.get('usuario_rol', '')

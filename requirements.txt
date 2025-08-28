@@ -1,5 +1,6 @@
 # Core Framework
 streamlit>=1.31.0
+streamlit-shadcn-ui>=0.1.18
 
 # Data Processing
 pandas>=2.0.0
