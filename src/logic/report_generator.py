@@ -471,6 +471,15 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
         # Procesar el markdown línea por línea para convertirlo a elementos ReportLab
         elements = []
         
+        # Función helper para convertir markdown a HTML
+        def convert_markdown_to_html(text):
+            """Convierte formato markdown básico a HTML para ReportLab"""
+            # Convertir negritas **texto** a <b>texto</b>
+            import re
+            # Patrón para encontrar **texto** y reemplazarlo con <b>texto</b>
+            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+            return text
+        
         # Procesar el Markdown de forma básica
         lines = markdown_text.split('\n')
         in_list = False
@@ -507,6 +516,8 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
                     in_list = False
                     
                 text = line[3:]
+                # Convertir formato markdown para negrita en encabezados
+                text = convert_markdown_to_html(text)
                 elements.append(Paragraph(text, styles['Heading2']))
             elif line.startswith('### '):
                 if in_list:
@@ -521,6 +532,8 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
                     in_list = False
                     
                 text = line[4:]
+                # Convertir formato markdown para negrita en encabezados
+                text = convert_markdown_to_html(text)
                 elements.append(Paragraph(text, styles['Heading3']))
             elif line.startswith('#### '):
                 if in_list:
@@ -535,13 +548,14 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
                     in_list = False
                     
                 text = line[5:]
+                # Convertir formato markdown para negrita en encabezados
+                text = convert_markdown_to_html(text)
                 elements.append(Paragraph(text, styles['Heading4']))
             # Procesar elementos de lista
             elif line.startswith('- '):
                 text = line[2:]
                 # Convertir formato markdown para negrita en rich text reportlab
-                text = text.replace('**', '<b>', 1)
-                text = text.replace('**', '</b>', 1)
+                text = convert_markdown_to_html(text)
                 list_items.append(ListItem(Paragraph(text, styles['ListItemStyle'])))
                 in_list = True
             else:
@@ -555,8 +569,9 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
                     elements.append(list_flowable)
                     list_items = []
                     in_list = False
-                # Párrafo normal
-                elements.append(Paragraph(line, styles['Normal']))
+                # Párrafo normal - convertir formato markdown para negrita
+                text = convert_markdown_to_html(line)
+                elements.append(Paragraph(text, styles['Normal']))
         
         # Verificar si hay una lista pendiente al final
         if in_list and list_items:
@@ -566,6 +581,10 @@ def _generar_pdf_reportlab(markdown_text: str, filename: str) -> Optional[str]:
                 leftIndent=20
             )
             elements.append(list_flowable)
+        
+        # Eliminar espacios en blanco innecesarios al final para evitar páginas vacías
+        while elements and isinstance(elements[-1], Spacer):
+            elements.pop()
         
         # Construir el documento
         doc.build(elements)

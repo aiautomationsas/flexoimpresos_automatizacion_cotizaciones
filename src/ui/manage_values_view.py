@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit_shadcn_ui as ui
 import pandas as pd
 import traceback
 import time
@@ -26,6 +27,8 @@ def show_manage_values():
         st.markdown("""
         Aquí puede visualizar y modificar los valores para cada combinación de material y adhesivo.
         Para modificar un valor, seleccione la combinación y establezca el nuevo precio.
+        
+        **💡 Nota:** Los valores se pueden ingresar como números enteros (ej: 1500) y automáticamente se formatearán con dos decimales (ej: 1500.00).
         """)
         
         # Cargar datos
@@ -70,15 +73,26 @@ def show_manage_values():
                     # Obtener el valor actual
                     valor_actual = float(df_mat_adh[df_mat_adh['ID'] == selected_mat_adh_id]['Valor ($/m²)'].values[0])
                     
-                    # Input para nuevo valor - ASEGURARSE DE QUE TODO SEA FLOAT
-                    nuevo_valor = st.number_input(
-                        "Nuevo valor ($/m²):",
-                        min_value=0.0,
-                        value=float(valor_actual),  # Convertir explícitamente a float
-                        step=100.0,
-                        format="%.2f",
-                        key="new_value_mat_adh"
+                    # Input para nuevo valor usando streamlit-shadcn-ui
+                    st.write("**Nuevo valor ($/m²):**")
+                    nuevo_valor_input = ui.input(
+                        key="new_value_mat_adh_input",
+                        placeholder=str(int(valor_actual)),
+                        type="number"
                     )
+                    
+                    # Convertir y validar el valor ingresado
+                    try:
+                        if nuevo_valor_input:
+                            nuevo_valor = float(nuevo_valor_input)
+                            # Formatear el valor con 2 decimales si es entero
+                            if nuevo_valor.is_integer():
+                                nuevo_valor = round(nuevo_valor, 2)
+                        else:
+                            nuevo_valor = float(valor_actual)
+                    except ValueError:
+                        st.error("Por favor ingrese un valor numérico válido")
+                        nuevo_valor = float(valor_actual)
                     
                     # Botón para actualizar
                     if st.button("Actualizar valor", key="update_mat_adh_btn"):
@@ -105,6 +119,8 @@ def show_manage_values():
         st.markdown("""
         Aquí puede visualizar y modificar los valores para cada tipo de acabado.
         Para modificar un valor, seleccione el acabado y establezca el nuevo precio.
+        
+        **💡 Nota:** Los valores se pueden ingresar como números enteros (ej: 1500) y automáticamente se formatearán con dos decimales (ej: 1500.00).
         """)
         
         # Cargar datos
@@ -146,15 +162,26 @@ def show_manage_values():
                     # Obtener el acabado seleccionado
                     acabado = next((a for a in acabados if a.id == selected_acabado_id), None)
                     if acabado:
-                        # Input para nuevo valor - ASEGURARSE DE QUE TODO SEA FLOAT
-                        nuevo_valor = st.number_input(
-                            "Nuevo valor ($/m²):",
-                            min_value=0.0,
-                            value=float(acabado.valor),  # Convertir explícitamente a float
-                            step=100.0,
-                            format="%.2f",
-                            key="new_value_acabado"
+                        # Input para nuevo valor usando streamlit-shadcn-ui
+                        st.write("**Nuevo valor ($/m²):**")
+                        nuevo_valor_input = ui.input(
+                            key="new_value_acabado_input",
+                            placeholder=str(int(acabado.valor)),
+                            type="number"
                         )
+                        
+                        # Convertir y validar el valor ingresado
+                        try:
+                            if nuevo_valor_input:
+                                nuevo_valor = float(nuevo_valor_input)
+                                # Formatear el valor con 2 decimales si es entero
+                                if nuevo_valor.is_integer():
+                                    nuevo_valor = round(nuevo_valor, 2)
+                            else:
+                                nuevo_valor = float(acabado.valor)
+                        except ValueError:
+                            st.error("Por favor ingrese un valor numérico válido")
+                            nuevo_valor = float(acabado.valor)
                         
                         # Botón para actualizar
                         if st.button("Actualizar valor", key="update_acabado_btn"):
